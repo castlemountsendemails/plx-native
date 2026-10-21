@@ -1841,6 +1841,19 @@ pub struct PinnedLib {
 
 }
 
+/// One favorite's place in the nav rail. The name and type let a favorite whose server has not
+/// answered this run still be drawn; `kind` is the wire's `movie` / `show`.
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct OrderedLib {
+    pub machine_id: String,
+    pub key: i64,
+    pub name: String,
+    pub kind: String,
+    #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
+    pub extensions: OpaqueExtensions,
+}
+
 /// The person's answer to "Connect without encryption?" for one server. See
 /// [`Preferences::plaintext_consent`].
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -2160,6 +2173,10 @@ pub struct HomePins {
     pub on: Vec<PinnedLib>,
     /// … and the ones it turned OFF. See the type doc: absent from both is "never answered for".
     pub off: Vec<PinnedLib>,
+    /// The favorites in rail order (`pins::display_order`). An older build carries the key
+    /// through as an unknown extension.
+    #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<OrderedLib>,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
     pub extensions: OpaqueExtensions,
 

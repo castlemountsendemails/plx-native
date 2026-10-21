@@ -100,9 +100,15 @@ where
                     entry: self.entry,
                     elem: members[j].elem,
                 });
+                // From a side target, Up and Down move as from the member it belongs to.
+                let at = if members[i].side { i.saturating_sub(1) } else { i };
+                let up = (0..at).rev().find(|&j| !members[j].side);
+                let down = (at + 1..members.len()).find(|&j| !members[j].side);
                 match dir {
-                    Dir::Up if i > 0 => mv(i - 1),
-                    Dir::Down if i + 1 < members.len() => mv(i + 1),
+                    Dir::Up => up.map_or(Step::Edge, mv),
+                    Dir::Down => down.map_or(Step::Edge, mv),
+                    Dir::Left if members[i].side && i > 0 => mv(i - 1),
+                    Dir::Right if !members[i].side && members.get(i + 1).is_some_and(|m| m.side) => mv(i + 1),
                     Dir::Right => match self.rail_return
                         .filter(|key| key.entry == self.entry && self.page.group_of(&key.elem, cx).is_some()) {
                         Some(key) => Step::Move(key),
@@ -150,7 +156,7 @@ where
                 }
                 let cy = from.rect.cy();
                 let mut best = (f32::MAX, 0usize);
-                for (i, member) in members.iter().enumerate() {
+                for (i, member) in members.iter().enumerate().filter(|(_, member)| !member.side) {
                     let d = (member.target.cy() - cy).abs();
                     if d < best.0 {
                         best = (d, i);

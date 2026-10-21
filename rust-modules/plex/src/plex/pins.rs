@@ -35,7 +35,7 @@
 //!   test-only `browse::toggle_pin` keeps the same floor). The same floor is applied here,
 //!   because a *recorded* selection can be emptied without any toggle at all: unpin your own
 //!   libraries in favour of a friend's, then lose the friend from the roster.
-use super::session::{HomePins, PinnedLib};
+use super::session::{HomePins, OrderedLib, PinnedLib};
 
 /// One library as the rules see it — the join key plus the one fact the default turns on.
 ///
@@ -238,6 +238,7 @@ pub fn record(
         asked,
         on: Vec::new(),
         off: Vec::new(),
+        order: Vec::new(),
         extensions: Default::default(),
     };
     for (i, l) in libs.iter().enumerate() {
@@ -288,6 +289,47 @@ pub fn carry_forward(
     rec.on.extend(prev.on.iter().filter(absent).cloned());
     rec.off.extend(prev.off.iter().filter(absent).cloned());
     rec
+}
+
+fn names(entry: &OrderedLib, lib: &LibRef<'_>) -> bool {
+    !lib.machine_id.is_empty() && entry.machine_id == lib.machine_id && entry.key == lib.key
+}
+
+/// The favorites in rail order, as indices into `libs`: the stored `order` first, then every
+/// favorite it does not name, in discovery order. Entries that are not favorites are skipped.
+pub fn display_order(libs: &[LibRef<'_>], pinned: &[bool], order: &[OrderedLib]) -> Vec<usize> {
+    let favorite = |i: usize| pinned.get(i).copied().unwrap_or(false);
+    let listed = order.iter().filter_map(|entry| libs.iter().position(|lib| names(entry, lib)));
+    let mut out: Vec<usize> = Vec::new();
+    for i in listed.chain(0..libs.len()) {
+        if favorite(i) && !out.contains(&i) { out.push(i); }
+    }
+    out
+}
+
+/// The order a write records: [`display_order`] over the table, so a new favorite lands at the
+/// end and a lost one is pruned, plus the entries of servers the table cannot see, kept in
+/// place (silence is not an answer, as in [`carry_forward`]). `titles` is indexed like `libs`
+/// as `(name, wire kind)`.
+pub fn next_order(libs: &[LibRef<'_>], titles: &[(&str, &str)], pinned: &[bool], prev: &[OrderedLib])
+    -> Vec<OrderedLib> {
+    let entry = |i: usize| OrderedLib {
+        machine_id: libs[i].machine_id.to_string(),
+        key: libs[i].key,
+        name: titles.get(i).map_or("", |t| t.0).to_string(),
+        kind: titles.get(i).map_or("", |t| t.1).to_string(),
+        extensions: Default::default(),
+    };
+    let visible = |entry: &OrderedLib| libs.iter().any(|lib| lib.machine_id == entry.machine_id);
+    let mut fresh = display_order(libs, pinned, prev).into_iter()
+        .filter(|&i| !libs[i].machine_id.is_empty()).map(entry);
+    // Each present-server slot in `prev` takes the next favorite in display order; unseen
+    // servers' entries stay where they were; what is left over goes at the end.
+    let mut out: Vec<OrderedLib> = prev.iter()
+        .filter_map(|old| if visible(old) { fresh.next() } else { Some(old.clone()) })
+        .collect();
+    out.extend(fresh);
+    out
 }
 
 #[cfg(test)]
@@ -664,5 +706,59 @@ mod tests {
         // and with nothing recorded before, there is nothing to carry
         let fresh = record("u-7", true, &awake, &chosen(&[true, true]));
         assert_eq!(carry_forward(fresh.clone(), None, &awake), fresh);
+    }
+
+    fn ordered(mid: &str, key: i64) -> OrderedLib {
+        OrderedLib { machine_id: mid.into(), key, ..Default::default() }
+    }
+
+    fn titles(n: usize) -> Vec<(&'static str, &'static str)> {
+        vec![("Films", "movie"); n]
+    }
+
+    fn keys(order: &[OrderedLib]) -> Vec<(&str, i64)> {
+        order.iter().map(|e| (e.machine_id.as_str(), e.key)).collect()
+    }
+
+    #[test]
+    fn the_rail_follows_the_stored_order_then_appends_unlisted_favorites() {
+        let libs = roster();
+        let order = [ordered("theirs", 1), ordered("mine", 1)];
+        assert_eq!(display_order(&libs, &[true, true, true], &order), vec![2, 0, 1],
+            "stored order first, then a default favorite at the end");
+        assert_eq!(display_order(&libs, &[true, true, false], &order), vec![0, 1],
+            "an entry that is no longer a favorite is ignored");
+        assert_eq!(display_order(&libs, &[true, false, true], &[]), vec![0, 2],
+            "with no stored order, discovery order");
+    }
+
+    #[test]
+    fn a_new_favorite_goes_to_the_end_and_a_dropped_one_is_pruned() {
+        let libs = roster();
+        let prev = [ordered("theirs", 1), ordered("mine", 1)];
+        let starred = next_order(&libs, &titles(3), &[true, true, true], &prev);
+        assert_eq!(keys(&starred), [("theirs", 1), ("mine", 1), ("mine", 2)]);
+        assert_eq!(starred[2].name, "Films");
+        assert_eq!(starred[2].kind, "movie");
+        let unstarred = next_order(&libs, &titles(3), &[false, true, true], &starred);
+        assert_eq!(keys(&unstarred), [("theirs", 1), ("mine", 2)]);
+    }
+
+    #[test]
+    fn an_unseen_servers_entries_keep_their_place() {
+        let awake = vec![lib("mine", 1, true), lib("mine", 2, true)];
+        let prev = [ordered("mine", 2), ordered("asleep", 7), ordered("mine", 1)];
+        let next = next_order(&awake, &titles(2), &[true, true], &prev);
+        assert_eq!(keys(&next), [("mine", 2), ("asleep", 7), ("mine", 1)]);
+    }
+
+    #[test]
+    fn the_order_round_trips_and_a_record_without_one_still_reads() {
+        let mut pins = record("u-7", true, &roster(), &chosen(&[true, true, true]));
+        pins.order = next_order(&roster(), &titles(3), &[true, true, true], &[]);
+        let back: HomePins = serde_json::from_value(serde_json::to_value(&pins).unwrap()).unwrap();
+        assert_eq!(back, pins);
+        let old: HomePins = serde_json::from_str(r#"{"user":"u-7","asked":true,"on":[],"off":[]}"#).unwrap();
+        assert!(old.order.is_empty());
     }
 }

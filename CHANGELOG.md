@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2] - 2026-10-21
+
+### Added
+- A More item on the rail, below the favorites. OK opens a list of every library, grouped by server, in place; OK again closes it. OK on a library opens it, favorite or not.
+- Each library in More has a star at its right. Right moves to the star, OK stars or unstars the library, Left goes back, and Right again returns to the page.
+- The rail keeps the favorites in a stored order for each profile. A new favorite, from More, Settings or the first-run picks, goes to the end.
+
+### Updated
+- Back on the rail closes More's list first.
+- A library that is not a favorite marks its row in More as the current page, and Back from it lands there.
+- OK on the current page's rail item moves focus back into that page, on Search, Watchlist and library pages too.
+- Unstarring the library you are viewing no longer switches the page to another library.
+
 ## [0.1.1] - 2026-10-21
 
 ### Fixed

@@ -723,7 +723,7 @@ fn search_requests(app: &mut App) {
                 Some(crate::app::chrome::Pill::Home), Some(ret)),
             SearchReq::Tab(tab) => {
                 if !app.bridge.search_tab_available(*tab) { continue; }
-                if matches!(tab, HomeTab::Search) { continue }
+                if matches!(tab, HomeTab::Search) { bridge::focus_content(&mut app.pages); continue }
                 match tab {
                     HomeTab::Home => bridge::nav_home_pill(&mut app.pages, &mut app.bridge, Some(ret)),
                     other => bridge::nav_tab(&mut app.pages, &mut app.bridge, *other, None, Some(ret)),
@@ -1031,7 +1031,8 @@ pub(crate) fn watchlist_navigation(
     match request {
         WatchlistOut::Back => bridge::nav_tab(pages, rig, HomeTab::Home, Some(crate::app::chrome::Pill::Home), Some(ret)),
         WatchlistOut::Tab(tab) => {
-            if !rig.search_tab_available(*tab) || matches!(tab, HomeTab::Watchlist) { return None; }
+            if !rig.search_tab_available(*tab) { return None; }
+            if matches!(tab, HomeTab::Watchlist) { bridge::focus_content(pages); return None; }
             match tab {
                 HomeTab::Home => bridge::nav_home_pill(pages, rig, Some(ret)),
                 other => bridge::nav_tab(pages, rig, *other, None, Some(ret)),

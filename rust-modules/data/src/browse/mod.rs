@@ -895,6 +895,8 @@ pub struct BrowseState {
     /// another's view.
     view_memory: plx_plex::plex::session::LibraryViews,
     recorded: Option<plx_plex::plex::session::HomePins>,
+    /// The favorite sections in rail order (`pins::display_order` over `recorded`).
+    favorite_order: Vec<usize>,
     pending_pins: Option<(String, std::sync::Arc<std::sync::Mutex<PinWrite>>)>,
 }
 
@@ -991,6 +993,7 @@ impl Default for BrowseState {
             remembered: Vec::new(),
             view_memory: Default::default(),
             recorded: None,
+            favorite_order: Vec::new(),
             pending_pins: None,
             session_generation: plx_plex::plex::session::visible_generation(),
         }
@@ -2069,7 +2072,19 @@ impl BrowseState {
         if moved {
             self.repoint_cur();
         }
-        moved
+        // A reorder alone republishes the table but moves no current library.
+        let order = self.display_order();
+        let reordered = order != self.favorite_order;
+        self.favorite_order = order;
+        moved || reordered
+    }
+    fn display_order(&self) -> Vec<usize> {
+        let pinned: Vec<bool> = self.sections.iter().map(|section| section.pinned).collect();
+        let order = self.recorded.as_ref().map_or(&[][..], |record| record.order.as_slice());
+        plx_plex::plex::pins::display_order(&self.lib_refs(), &pinned, order)
+    }
+    fn favorite_order(&self) -> &[usize] {
+        &self.favorite_order
     }
     /// **The whole-table reconcile, plus the publication a moved row owes** — the one path for
     /// "something happened that can invalidate an already-resolved table".
@@ -2150,7 +2165,12 @@ impl BrowseState {
         let previous = self.recorded.as_ref().or_else(|| snapshot.pins_for(&user));
         let answers = plx_plex::plex::pins::answers(&libraries, &on, touched, previous);
         let fresh = plx_plex::plex::pins::record(&user, asked, &libraries, &answers);
-        let record = plx_plex::plex::pins::carry_forward(fresh, previous, &libraries);
+        let mut record = plx_plex::plex::pins::carry_forward(fresh, previous, &libraries);
+        let owned_titles: Vec<(String, &'static str)> = self.sections.iter()
+            .map(|section| (section.title.clone(), section.kind.wire())).collect();
+        let titles: Vec<(&str, &str)> = owned_titles.iter().map(|(name, kind)| (name.as_str(), *kind)).collect();
+        record.order = plx_plex::plex::pins::next_order(&libraries, &titles, &on,
+            previous.map_or(&[][..], |p| p.order.as_slice()));
         let owned: Vec<_> = libraries.iter().map(|lib|
             (lib.machine_id.to_owned(), lib.key, lib.household, lib.household_type)).collect();
         let touched = touched.to_vec();
@@ -2158,10 +2178,13 @@ impl BrowseState {
         let ticket = plx_plex::plex::session::queue_update_ticket(move |session| {
             let libraries: Vec<_> = owned.iter().map(|(machine_id, key, household, household_type)|
                 plx_plex::plex::pins::LibRef { machine_id, key: *key, household: *household, household_type: *household_type }).collect();
+            let titles: Vec<(&str, &str)> = owned_titles.iter().map(|(name, kind)| (name.as_str(), *kind)).collect();
             let previous = session.pins_for(&user);
             let answers = plx_plex::plex::pins::answers(&libraries, &on, &touched, previous);
             let fresh = plx_plex::plex::pins::record(&user, asked, &libraries, &answers);
-            let merged = plx_plex::plex::pins::carry_forward(fresh, previous, &libraries);
+            let mut merged = plx_plex::plex::pins::carry_forward(fresh, previous, &libraries);
+            merged.order = plx_plex::plex::pins::next_order(&libraries, &titles, &on,
+                previous.map_or(&[][..], |p| p.order.as_slice()));
             let mut next = session.clone();
             next.set_pins_for(&user, merged);
             Some(next)
@@ -2213,8 +2236,9 @@ impl BrowseState {
             }
         }
         let produced = self.record_pins(true, &touched);
+        // The current library stays put even when it is no longer a favorite: the nav rail
+        // still reaches it under More, and starring from there must not switch the page.
         if changed {
-            self.repoint_cur();
             self.bump_sections_gen();
             plx_machine::idle::invalidate();
         }
@@ -2347,6 +2371,7 @@ impl BrowseState {
         self.sections = Vec::new();
         self.states = Vec::new();
         self.recorded = None;
+        self.favorite_order = Vec::new();
         self.remembered = Vec::new();
         self.view_memory = Default::default();
         self.tab_shape = u32::MAX;

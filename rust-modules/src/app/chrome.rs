@@ -5,38 +5,47 @@ use std::ffi::CString;
 
 use plx_machine::machine::FocusKey;
 use plx_ui::icons::Icon;
-use plx_ui::nav_rail::{RailItem, RailMark};
+use plx_ui::nav_rail::{RailItem, RailMark, RailRole};
 use plx_ui::widgets::{self, TopFocus};
 use plx_data::stores::browse::DirectoryView;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Pill {
     Home,
-    /// A favorite library, by its index in the directory's section table.
+    /// A library, by its index in the directory's section table.
     Library(usize),
     Watchlist,
     Search,
 }
 
-/// The favorite libraries in discovery order, as `(section index, title, server name)`.
+fn server_name(directory: DirectoryView<'_>, src: usize) -> &str {
+    directory.sources().get(src).map_or("", |(_, group)| group.name.as_str())
+}
+
+/// The favorite libraries in the profile's rail order, as `(section index, title, server name)`.
 fn favorites(directory: DirectoryView<'_>) -> impl Iterator<Item = (usize, &str, &str)> {
-    directory.sections().iter().enumerate().filter(|(_, section)| section.row.pinned).map(move |(i, section)| {
-        let server = directory.sources().get(section.row.src).map_or("", |(_, group)| group.name.as_str());
-        (i, section.row.title.as_str(), server)
+    directory.favorite_order().iter().filter_map(move |&i| {
+        let section = directory.sections().get(i)?;
+        Some((i, section.row.title.as_str(), server_name(directory, section.row.src)))
     })
 }
 
-/// The rail's destination keys in rail order: Home, Search, Watchlist, one key per favorite
-/// library, then the profile. The one place that order is written.
-fn rail_keys(directory: DirectoryView<'_>) -> Vec<u32> {
-    let mut keys = vec![widgets::TAB_KEY_HOME, widgets::TAB_KEY_SEARCH, widgets::TAB_KEY_WATCHLIST];
-    keys.extend(favorites(directory).map(|(i, _, _)| widgets::tab_key_library(i)));
-    keys.push(widgets::TAB_KEY_CHIP);
+/// The focus keys the rail publishes, in rail order: every item but the headers, each More row
+/// followed by its ★. The one place that order is written.
+fn rail_keys(items: &[RailItem]) -> Vec<u32> {
+    let mut keys = Vec::with_capacity(items.len());
+    for item in items {
+        match item.role {
+            RailRole::Header => {}
+            RailRole::Row { star, .. } => keys.extend([item.key, star]),
+            _ => keys.push(item.key),
+        }
+    }
     keys
 }
 
 pub(crate) fn pill_at(directory: DirectoryView<'_>, i: usize) -> Pill {
-    pill_in(i, &rail_keys(directory))
+    pill_in(i, &rail_keys(&rail_items(directory, "", "", false)))
 }
 
 /// The destination a rail index names, by the KEY published at that index.
@@ -44,23 +53,23 @@ fn pill_in(i: usize, keys: &[u32]) -> Pill {
     match keys.get(i).copied() {
         Some(widgets::TAB_KEY_WATCHLIST) => Pill::Watchlist,
         Some(widgets::TAB_KEY_SEARCH) => Pill::Search,
-        Some(key) => widgets::library_of_tab_key(key).map_or(Pill::Home, Pill::Library),
+        Some(key) => widgets::library_of_tab_key(key).or_else(|| widgets::more_row_of_tab_key(key))
+            .map_or(Pill::Home, Pill::Library),
         None => Pill::Home,
     }
 }
 
-pub(crate) fn pill_of(directory: DirectoryView<'_>, pill: Pill) -> Option<usize> {
-    pill_index(pill, &rail_keys(directory))
-}
-
+/// A library's place on the rail: its favorite item, else its row in More's list, else More.
 fn pill_index(pill: Pill, keys: &[u32]) -> Option<usize> {
-    let key = match pill {
-        Pill::Home => widgets::TAB_KEY_HOME,
-        Pill::Library(i) => widgets::tab_key_library(i),
-        Pill::Watchlist => widgets::TAB_KEY_WATCHLIST,
-        Pill::Search => widgets::TAB_KEY_SEARCH,
-    };
-    keys.iter().position(|&k| k == key)
+    let at = |key: u32| keys.iter().position(|&k| k == key);
+    match pill {
+        Pill::Home => at(widgets::TAB_KEY_HOME),
+        Pill::Library(i) => at(widgets::tab_key_library(i))
+            .or_else(|| at(widgets::tab_key_more_row(i)))
+            .or_else(|| at(widgets::TAB_KEY_MORE)),
+        Pill::Watchlist => at(widgets::TAB_KEY_WATCHLIST),
+        Pill::Search => at(widgets::TAB_KEY_SEARCH),
+    }
 }
 
 fn caps(word: &str) -> CString {
@@ -71,26 +80,45 @@ fn first_letter(word: &str) -> CString {
     CString::new(word.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()).unwrap_or_default()
 }
 
-/// The rail's items for `directory`, with the profile item named `name` and drawn with `initial`.
-fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str) -> Vec<RailItem> {
-    let fixed = |key, icon, word: &str| RailItem { key, mark: RailMark::Icon(icon), label: caps(word), caps: true };
+/// The rail's items for `directory`, with the profile item named `name` and drawn with `initial`,
+/// and More's list of every library, grouped by server, when `more_open`.
+fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open: bool) -> Vec<RailItem> {
+    let fixed = |key, icon, word: &str, role| RailItem { key, mark: RailMark::Icon(icon), label: caps(word), caps: true, role };
     let mut items = vec![
-        fixed(widgets::TAB_KEY_HOME, Icon::Home, plx_platform::i18n::msg::browse_chrome_home()),
-        fixed(widgets::TAB_KEY_SEARCH, Icon::Search, plx_platform::i18n::msg::browse_chrome_search()),
-        fixed(widgets::TAB_KEY_WATCHLIST, Icon::Bookmark, plx_platform::i18n::msg::watchlist_page_title()),
+        fixed(widgets::TAB_KEY_HOME, Icon::Home, plx_platform::i18n::msg::browse_chrome_home(), RailRole::Top),
+        fixed(widgets::TAB_KEY_SEARCH, Icon::Search, plx_platform::i18n::msg::browse_chrome_search(), RailRole::Top),
+        fixed(widgets::TAB_KEY_WATCHLIST, Icon::Bookmark, plx_platform::i18n::msg::watchlist_page_title(), RailRole::Top),
     ];
     let libraries: Vec<_> = favorites(directory).collect();
     items.extend(libraries.iter().map(|&(i, title, server)| {
         // Two favorites with one name are told apart by their server.
         let shared = libraries.iter().filter(|(_, other, _)| *other == title).count() > 1;
         let label = if shared && !server.is_empty() { format!("{title} · {server}") } else { title.to_owned() };
-        RailItem { key: widgets::tab_key_library(i), mark: RailMark::Badge(first_letter(title)), label: caps(&label), caps: true }
+        RailItem { key: widgets::tab_key_library(i), mark: RailMark::Badge(first_letter(title)), label: caps(&label),
+            caps: true, role: RailRole::Band }
     }));
+    items.push(fixed(widgets::TAB_KEY_MORE, Icon::More, plx_platform::i18n::msg::browse_action_more(), RailRole::Band));
+    if more_open {
+        for src in 0..directory.sources().len() {
+            let mut rows = directory.sections().iter().enumerate().filter(|(_, section)| section.row.src == src).peekable();
+            if rows.peek().is_none() { continue; }
+            items.push(RailItem { key: widgets::tab_key_server(src), mark: RailMark::None,
+                label: caps(server_name(directory, src)), caps: true, role: RailRole::Header });
+            items.extend(rows.map(|(i, section)| RailItem {
+                key: widgets::tab_key_more_row(i),
+                mark: RailMark::Badge(first_letter(&section.row.title)),
+                label: CString::new(section.row.title.as_str()).unwrap_or_default(),
+                caps: false,
+                role: RailRole::Row { star: widgets::tab_key_star(i), starred: section.row.pinned },
+            }));
+        }
+    }
     items.push(RailItem {
         key: widgets::TAB_KEY_CHIP,
         mark: RailMark::Avatar(CString::new(initial).unwrap_or_default()),
         label: CString::new(name).unwrap_or_default(),
         caps: false,
+        role: RailRole::Foot,
     });
     items
 }
@@ -106,9 +134,38 @@ pub(crate) struct ChromeSnapshot {
     items: Vec<RailItem>,
     /// A pulse asked for and not yet handed to the rail's renderer: the destination key.
     pulse: Option<u32>,
+    /// More's list is open in place.
+    more_open: bool,
+    /// The non-favorite library More was last opened for, so it opens once per arrival.
+    opened_for: Option<usize>,
 }
 
 impl ChromeSnapshot {
+    pub(crate) fn more_open(&self) -> bool {
+        self.more_open
+    }
+
+    pub(crate) fn set_more_open(&mut self, open: bool) {
+        if self.more_open != open {
+            self.more_open = open;
+            // Rebuild the items on the next refresh.
+            self.directory_stamp = None;
+            plx_machine::idle::invalidate();
+        }
+    }
+
+    /// The page on view shows `section`, a library that is not a favorite (or `None`): More opens
+    /// on arrival, so the library's rail spot, its row, is there to land on.
+    pub(crate) fn follow_library(&mut self, section: Option<usize>) {
+        if section.is_some() && section != self.opened_for { self.set_more_open(true); }
+        self.opened_for = section;
+    }
+
+    /// The rail index of `pill`'s item, as published now.
+    pub(crate) fn pill_of(&self, pill: Pill) -> Option<usize> {
+        pill_index(pill, &self.keys)
+    }
+
     /// **Pulse the rail destination `key`** (~1.35x scale and a glow, decorative): the Watchlist
     /// mark after a title was put on the list. The APPLICATION asks, never a screen; the bridge
     /// hands it to the rail's renderer on its next chrome update. A frame is requested so an
@@ -153,8 +210,8 @@ impl ChromeSnapshot {
             changed = true;
         }
         if changed {
-            self.keys = rail_keys(directory);
-            self.items = rail_items(directory, &self.name, &self.initial);
+            self.items = rail_items(directory, &self.name, &self.initial, self.more_open);
+            self.keys = rail_keys(&self.items);
         }
     }
 
@@ -187,8 +244,8 @@ impl ChromeSnapshot {
         self.name = name.to_owned();
         self.initial = initial.to_owned();
         self.profile_generation = Some(1);
-        self.keys = rail_keys(directory.view());
-        self.items = rail_items(directory.view(), name, initial);
+        self.items = rail_items(directory.view(), name, initial, false);
+        self.keys = rail_keys(&self.items);
     }
 }
 
@@ -198,12 +255,15 @@ mod tests {
     use plx_data::stores::browse::{DirectorySnapshot, SecKind, SectionView, SrcRow};
 
     fn directory(pinned: &[(SecKind, &str, bool)]) -> DirectorySnapshot {
-        DirectorySnapshot::fixture(7, 0, pinned.iter().enumerate().map(|(i, &(kind, title, pinned))| SectionView {
-            sid: Some(plx_plex::plex::ServerId::from_raw(0)),
-            key: i as i64 + 1,
-            kind,
-            row: SrcRow { section: i, title: title.to_owned(), pinned, ..Default::default() },
-        }).collect())
+        let sid = plx_plex::plex::ServerId::from_raw(0);
+        let server = plx_data::browse::SrcGroup { name: "Den".into(), ..Default::default() };
+        DirectorySnapshot::fixture_with_sources(7, 0, vec![(sid, server)],
+            pinned.iter().enumerate().map(|(i, &(kind, title, pinned))| SectionView {
+                sid: Some(sid),
+                key: i as i64 + 1,
+                kind,
+                row: SrcRow { section: i, title: title.to_owned(), pinned, ..Default::default() },
+            }).collect())
     }
 
     #[test]
@@ -226,32 +286,68 @@ mod tests {
         assert_eq!(snapshot.items().last().map(|item| item.label.to_str().unwrap()), Some("Synthetic owner"));
     }
 
+    fn keys(directory: &DirectorySnapshot, more_open: bool) -> Vec<u32> {
+        rail_keys(&rail_items(directory.view(), "", "", more_open))
+    }
+
     #[test]
-    fn rail_order_is_home_search_watchlist_favorites_then_profile() {
+    fn rail_order_is_home_search_watchlist_favorites_more_then_profile() {
         let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Anime", false),
             (SecKind::Show, "Series", true)]);
-        assert_eq!(rail_keys(directory.view()), vec![widgets::TAB_KEY_HOME, widgets::TAB_KEY_SEARCH,
-            widgets::TAB_KEY_WATCHLIST, widgets::tab_key_library(0), widgets::tab_key_library(2), widgets::TAB_KEY_CHIP]);
+        assert_eq!(keys(&directory, false), vec![widgets::TAB_KEY_HOME, widgets::TAB_KEY_SEARCH,
+            widgets::TAB_KEY_WATCHLIST, widgets::tab_key_library(0), widgets::tab_key_library(2),
+            widgets::TAB_KEY_MORE, widgets::TAB_KEY_CHIP]);
+    }
+
+    #[test]
+    fn favorites_follow_the_published_order() {
+        let sid = plx_plex::plex::ServerId::from_raw(0);
+        let section = |i: usize, title: &str| SectionView { sid: Some(sid), key: i as i64 + 1, kind: SecKind::Movie,
+            row: SrcRow { section: i, title: title.to_owned(), pinned: true, ..Default::default() } };
+        let mut directory = DirectorySnapshot::fixture(7, 0, vec![section(0, "A"), section(1, "B")]);
+        directory.set_favorite_order_for_test(vec![1, 0]);
+        assert_eq!(keys(&directory, false)[3..5], [widgets::tab_key_library(1), widgets::tab_key_library(0)]);
+    }
+
+    #[test]
+    fn more_lists_every_library_with_a_star_after_its_row() {
+        let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Anime", false)]);
+        let keys = keys(&directory, true);
+        let more = keys.iter().position(|&k| k == widgets::TAB_KEY_MORE).unwrap();
+        assert_eq!(keys[more + 1..keys.len() - 1], [widgets::tab_key_more_row(0), widgets::tab_key_star(0),
+            widgets::tab_key_more_row(1), widgets::tab_key_star(1)], "rows of favorites and the rest alike");
+        let items = rail_items(directory.view(), "", "", true);
+        assert!(items.iter().any(|item| item.role == RailRole::Header), "a server header leads its rows");
+        assert!(items.iter().any(|item| item.role == RailRole::Row { star: widgets::tab_key_star(1), starred: false }));
+    }
+
+    #[test]
+    fn a_library_sits_on_its_favorite_item_else_its_more_row_else_more() {
+        let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Anime", false)]);
+        let closed = keys(&directory, false);
+        let open = keys(&directory, true);
+        assert_eq!(closed[pill_index(Pill::Library(0), &closed).unwrap()], widgets::tab_key_library(0));
+        assert_eq!(closed[pill_index(Pill::Library(1), &closed).unwrap()], widgets::TAB_KEY_MORE);
+        assert_eq!(open[pill_index(Pill::Library(1), &open).unwrap()], widgets::tab_key_more_row(1));
     }
 
     #[test]
     fn every_rail_destination_round_trips_by_key() {
         let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Series", true)]);
-        let keys = rail_keys(directory.view());
+        let keys = keys(&directory, false);
         for pill in [Pill::Home, Pill::Search, Pill::Watchlist, Pill::Library(0), Pill::Library(1)] {
             let i = pill_index(pill, &keys).expect("on the rail");
             assert_eq!(pill_in(i, &keys), pill);
         }
-        assert_eq!(pill_index(Pill::Library(5), &keys), None, "an unpinned library borrows no position");
     }
 
     #[test]
     fn same_named_favorites_carry_their_server() {
         let directory = directory(&[(SecKind::Movie, "Movies", true), (SecKind::Movie, "Movies", true)]);
-        let items = rail_items(directory.view(), "Sam", "S");
-        assert_eq!(items.len(), 6);
+        let items = rail_items(directory.view(), "Sam", "S", false);
+        assert_eq!(items.len(), 7);
         assert!(items[3].label.to_str().unwrap().starts_with("MOVIES"));
-        assert!(matches!(items[5].mark, RailMark::Avatar(_)), "the profile is the last item");
+        assert!(matches!(items[6].mark, RailMark::Avatar(_)), "the profile is the last item");
     }
 
     #[test]

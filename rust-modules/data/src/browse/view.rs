@@ -347,11 +347,12 @@ pub struct SectionView {
     pub row: super::SrcRow,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct DirectoryData {
     sources: Vec<(ServerId, super::SrcGroup)>,
     sections: Vec<SectionView>,
     favorites: Vec<(ServerId, i64, bool)>,
+    favorite_order: Vec<usize>,
 }
 
 /// Retained by the Bridge-owned `BrowseStore` and captured from its `BrowseState`, never a new
@@ -408,6 +409,7 @@ impl DirectorySnapshot {
                         key: section.key, kind: section.kind, row,
                     }).collect(),
                 favorites: state.favorite_sections(),
+                favorite_order: state.favorite_order().to_vec(),
             });
             self.stamp = Some(stamp);
         }
@@ -438,6 +440,7 @@ impl DirectorySnapshot {
                 sources: vec![(sid, source)],
                 sections: Vec::new(),
                 favorites: Vec::new(),
+                favorite_order: Vec::new(),
             }),
             items: super::SecItems::default(),
             source: Some(0),
@@ -484,6 +487,7 @@ impl DirectorySnapshot {
             section.sid.map(|sid| (sid, section.key, section.row.pinned))
         }).collect();
         let source_count = sources.len();
+        let favorite_order = (0..sections.len()).filter(|&i| sections[i].row.pinned).collect();
         Self {
             preferred,
             kind_fetch: [SecFetch::Ready; 2],
@@ -492,6 +496,7 @@ impl DirectorySnapshot {
                 sources,
                 sections,
                 favorites,
+                favorite_order,
             }),
             items: super::SecItems::default(),
             source: None,
@@ -505,6 +510,11 @@ impl DirectorySnapshot {
     #[cfg(any(test, feature = "test-support"))]
     pub fn fixture(epoch: u32, current: usize, sections: Vec<SectionView>) -> Self {
         Self::fixture_with_sources(epoch, current, Vec::new(), sections)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_favorite_order_for_test(&mut self, order: Vec<usize>) {
+        Arc::make_mut(&mut self.data).favorite_order = order;
     }
 
     pub fn view(&self) -> DirectoryView<'_> {
@@ -540,6 +550,10 @@ impl<'a> DirectoryView<'a> {
     #[allow(dead_code)]
     pub fn pinned_count(self) -> usize {
         self.sections().iter().filter(|section| section.row.pinned).count()
+    }
+    /// The favorite libraries' section indices in the profile's rail order.
+    pub fn favorite_order(self) -> &'a [usize] {
+        &self.0.data.favorite_order
     }
     #[allow(dead_code)]
     pub fn favorite_sections(self) -> &'a [(ServerId, i64, bool)] {

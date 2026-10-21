@@ -42,11 +42,14 @@ pub struct StripMember<K> {
     pub drawn: Rect,
     pub target: Rect,
     pub clip: Rect,
+    /// A side target of the member before it (a More row's ★): reached by Right from that
+    /// member and left by Left back to it; Up and Down pass over it.
+    pub side: bool,
 }
 
 impl<K> StripMember<K> {
     pub fn new(elem: K, rect: Rect) -> Self {
-        Self { elem, drawn: rect, target: rect, clip: Rect::FULL }
+        Self { elem, drawn: rect, target: rect, clip: Rect::FULL, side: false }
     }
 }
 

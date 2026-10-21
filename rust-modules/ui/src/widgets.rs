@@ -6221,6 +6221,28 @@ pub fn tab_key_library(section: usize) -> u32 {
 pub fn library_of_tab_key(key: u32) -> Option<usize> {
     key.checked_sub(TAB_KEY_LIBRARY).filter(|i| *i < TAB_KEY_LIBRARY_SPAN).map(|i| i as usize)
 }
+/// The rail's More item, which opens the list of every library in place.
+pub const TAB_KEY_MORE: u32 = crate::dispatch::STRIP_BASE + 6;
+/// A library's row in More's list, its ★ target, and a server's group header, each by the
+/// library's section index (the header by the source's index).
+const TAB_KEY_MORE_ROW: u32 = crate::dispatch::STRIP_BASE + 0x2000;
+const TAB_KEY_STAR: u32 = crate::dispatch::STRIP_BASE + 0x4000;
+const TAB_KEY_SERVER: u32 = crate::dispatch::STRIP_BASE + 0x6000;
+pub fn tab_key_more_row(section: usize) -> u32 {
+    TAB_KEY_MORE_ROW + (section as u32).min(TAB_KEY_LIBRARY_SPAN - 1)
+}
+pub fn more_row_of_tab_key(key: u32) -> Option<usize> {
+    key.checked_sub(TAB_KEY_MORE_ROW).filter(|i| *i < TAB_KEY_LIBRARY_SPAN).map(|i| i as usize)
+}
+pub fn tab_key_star(section: usize) -> u32 {
+    TAB_KEY_STAR + (section as u32).min(TAB_KEY_LIBRARY_SPAN - 1)
+}
+pub fn star_of_tab_key(key: u32) -> Option<usize> {
+    key.checked_sub(TAB_KEY_STAR).filter(|i| *i < TAB_KEY_LIBRARY_SPAN).map(|i| i as usize)
+}
+pub fn tab_key_server(source: usize) -> u32 {
+    TAB_KEY_SERVER + (source as u32).min(TAB_KEY_LIBRARY_SPAN - 1)
+}
 /// The top chrome band's y — the chip and the pills sit on it (Home and Library alike).
 ///
 /// **Derived from the overscan safe area, not chosen.** It was a bare `44.0` until 2026-08-23, which
@@ -7238,6 +7260,7 @@ fn tab_members_at(widths: &[f32], keys: &[u32], scroll: f32, target: f32,
             drawn: drawn.pill(i),
             target: resting.pill(i),
             clip: drawn.clip,
+            side: false,
         });
     }
 }

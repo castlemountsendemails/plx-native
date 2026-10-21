@@ -1,12 +1,13 @@
 //! The nav rail: the column of destinations down the left edge of every main screen (Home,
-//! Search, Watchlist, the favorite libraries, then Profile at the foot). Collapsed, it shows marks
-//! only, inside the left margin; while focus is in it, it widens to show labels and the page slides
-//! right by the difference (`Rig::content_dx`) rather than being covered. The application owns one
-//! [`RailRender`], publishes the items and draws it in the chrome pass.
+//! Search, Watchlist, the favorite libraries, More and its list of every library, then Profile at
+//! the foot). Collapsed, it shows marks only, inside the left margin; while focus is in it, it
+//! widens to show labels and the page slides right by the difference (`Rig::content_dx`) rather
+//! than being covered. The application owns one [`RailRender`], publishes the items and draws it
+//! in the chrome pass.
 //!
-//! The leading icon items stay fixed at the top and the profile at the foot; everything between
-//! (the libraries) is a band that scrolls to keep the focused item, or else the active one, in view,
-//! fading out where its items are cut off.
+//! The top items stay fixed and the profile sits at the foot; everything between (the favorites,
+//! More and More's list) is a band that scrolls to keep the focused item, or else the active one,
+//! in view, fading out where its items are cut off.
 
 use std::ffi::CString;
 
@@ -21,7 +22,10 @@ pub const EXPANDED_W: f32 = 480.0;
 pub const PUSH: f32 = EXPANDED_W - COLLAPSED_W;
 const ITEM_H: f32 = 64.0;
 const PITCH: f32 = 72.0;
+const HEADER_PITCH: f32 = 48.0;
 const MARK_D: f32 = 32.0;
+const STAR_BOX: f32 = 48.0;
+const STAR_D: f32 = 28.0;
 const INSET: f32 = 8.0;
 const LABEL_X: f32 = COLLAPSED_W + theme::space::XS;
 const LABEL_TRACKING: f32 = 1.5;
@@ -35,8 +39,24 @@ pub enum RailMark {
     Icon(Icon),
     /// A library: the first letter of its name in a square.
     Badge(CString),
-    /// The profile: its initial in an accent-coloured circle. This item sits at the rail's foot.
+    /// The profile: its initial in an accent-coloured circle.
     Avatar(CString),
+    /// A server header: a label only.
+    None,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RailRole {
+    /// Fixed at the top: Home, Search, Watchlist.
+    Top,
+    /// In the scrolling band: a favorite, or More.
+    Band,
+    /// A server's name above its libraries in More's list: drawn, never focused.
+    Header,
+    /// A library in More's list, with its ★ target `star`, lit when it is a favorite.
+    Row { star: u32, starred: bool },
+    /// The profile, fixed at the foot.
+    Foot,
 }
 
 pub struct RailItem {
@@ -45,6 +65,7 @@ pub struct RailItem {
     pub label: CString,
     /// Tracked as a capital label (the destinations); the profile's name is drawn as written.
     pub caps: bool,
+    pub role: RailRole,
 }
 
 /// The rail's width at expansion `e` (0 collapsed, 1 expanded).
@@ -52,24 +73,20 @@ pub fn width(e: f32) -> f32 {
     COLLAPSED_W + PUSH * e.clamp(0.0, 1.0)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Zone {
-    Top,
-    Band,
-    Foot,
+fn in_band(item: &RailItem) -> bool {
+    !matches!(item.role, RailRole::Top | RailRole::Foot)
 }
 
-/// The leading run of icon items is fixed at the top, an avatar sits at the foot, and the rest scroll.
-fn zone(items: &[RailItem], i: usize) -> Zone {
-    match items[i].mark {
-        RailMark::Avatar(_) => Zone::Foot,
-        RailMark::Icon(_) if items[..i].iter().all(|item| matches!(item.mark, RailMark::Icon(_))) => Zone::Top,
-        _ => Zone::Band,
-    }
+fn pitch(item: &RailItem) -> f32 {
+    if item.role == RailRole::Header { HEADER_PITCH } else { PITCH }
+}
+
+fn height(item: &RailItem) -> f32 {
+    if item.role == RailRole::Header { HEADER_PITCH } else { ITEM_H }
 }
 
 fn top_count(items: &[RailItem]) -> usize {
-    (0..items.len()).take_while(|&i| zone(items, i) == Zone::Top).count()
+    items.iter().take_while(|item| item.role == RailRole::Top).count()
 }
 
 /// The scrolling band's visible extent, in screen y.
@@ -79,23 +96,38 @@ fn band(items: &[RailItem]) -> Rect {
     Rect::new(0.0, y, EXPANDED_W, (bottom - y).max(0.0))
 }
 
+/// Item `i`'s y inside the band's content, unscrolled.
+fn band_offset(items: &[RailItem], i: usize) -> f32 {
+    items[..i].iter().filter(|item| in_band(item)).map(pitch).sum()
+}
+
 /// How far the band can scroll: its content less what fits.
 fn max_scroll(items: &[RailItem]) -> f32 {
-    let n = (0..items.len()).filter(|&i| zone(items, i) == Zone::Band).count() as f32;
-    (n * PITCH - (PITCH - ITEM_H) - band(items).h).max(0.0)
+    let content: f32 = items.iter().filter(|item| in_band(item)).map(pitch).sum();
+    (content - (PITCH - ITEM_H) - band(items).h).max(0.0)
 }
 
 fn item_y(items: &[RailItem], i: usize, scroll: f32) -> f32 {
-    match zone(items, i) {
-        Zone::Top => MARGIN_Y + i as f32 * PITCH,
-        Zone::Foot => SCR_H - MARGIN_Y - ITEM_H,
-        Zone::Band => band(items).y + (i - top_count(items)) as f32 * PITCH - scroll,
+    match items[i].role {
+        RailRole::Top => MARGIN_Y + i as f32 * PITCH,
+        RailRole::Foot => SCR_H - MARGIN_Y - ITEM_H,
+        _ => band(items).y + band_offset(items, i) - scroll,
     }
 }
 
 /// Where item `i` may be seen: the whole screen for the fixed items, the band for the rest.
 fn item_clip(items: &[RailItem], i: usize) -> Rect {
-    if zone(items, i) == Zone::Band { band(items) } else { Rect::FULL }
+    if in_band(&items[i]) { band(items) } else { Rect::FULL }
+}
+
+/// The item a focus key belongs to: the item itself, or the row whose ★ it is.
+fn index_of(items: &[RailItem], key: u32) -> Option<usize> {
+    items.iter().position(|item| item.key == key || matches!(item.role, RailRole::Row { star, .. } if star == key))
+}
+
+/// A row's ★ target, at its right end.
+fn star_rect(r: Rect) -> Rect {
+    Rect::new(r.x + r.w - STAR_BOX - INSET, r.cy() - STAR_BOX * 0.5, STAR_BOX, STAR_BOX)
 }
 
 pub struct RailRender {
@@ -143,13 +175,14 @@ impl RailRender {
         let target = if focused.is_some() { 1.0 } else { 0.0 };
         self.expand.step(target, K_EXPAND, dt);
         self.expand.land(target, dt);
-        let follow = focused.or(active).and_then(|key| items.iter().position(|item| item.key == key))
-            .filter(|&i| zone(items, i) == Zone::Band);
+        let follow = focused.and_then(|key| index_of(items, key))
+            .or_else(|| active.and_then(|key| index_of(items, key)))
+            .filter(|&i| in_band(&items[i]));
         if let Some(i) = follow {
-            let y = (i - top_count(items)) as f32 * PITCH;
+            let y = band_offset(items, i);
             let h = band(items).h;
             if y - PITCH < self.scroll_target { self.scroll_target = y - PITCH; }
-            if y + ITEM_H + PITCH > self.scroll_target + h { self.scroll_target = y + ITEM_H + PITCH - h; }
+            if y + height(&items[i]) + PITCH > self.scroll_target + h { self.scroll_target = y + height(&items[i]) + PITCH - h; }
         }
         self.scroll_target = self.scroll_target.clamp(0.0, max_scroll(items));
         self.scroll.step(self.scroll_target, K_SCROLL, dt);
@@ -166,16 +199,23 @@ impl RailRender {
     }
 
     fn item_rect(&self, items: &[RailItem], i: usize) -> Rect {
-        Rect::new(INSET, item_y(items, i, self.scroll.pos), width(self.expand_pos()) - 2.0 * INSET, ITEM_H)
+        Rect::new(INSET, item_y(items, i, self.scroll.pos), width(self.expand_pos()) - 2.0 * INSET, height(&items[i]))
     }
 
-    /// The items as focus members, at the rects drawn this frame and clipped to where they show.
+    /// The items as focus members, at the rects drawn this frame and clipped to where they show:
+    /// every item but the headers, each More row followed by its ★ as a side member.
     pub fn members(&self, items: &[RailItem], out: &mut Vec<StripMember<u32>>) {
         out.clear();
-        out.extend((0..items.len()).map(|i| {
+        for i in 0..items.len() {
+            if items[i].role == RailRole::Header { continue; }
             let r = self.item_rect(items, i);
-            StripMember { elem: items[i].key, drawn: r, target: r, clip: item_clip(items, i) }
-        }));
+            let clip = item_clip(items, i);
+            out.push(StripMember { elem: items[i].key, drawn: r, target: r, clip, side: false });
+            if let RailRole::Row { star, .. } = items[i].role {
+                let s = star_rect(r);
+                out.push(StripMember { elem: star, drawn: s, target: s, clip, side: true });
+            }
+        }
     }
 
     /// The item `key`'s rect, for a surface that hangs from it (the account menu from Profile).
@@ -184,7 +224,7 @@ impl RailRender {
         Some(self.item_rect(items, i))
     }
 
-    /// `active` is the item of the screen on view; `focused` the item holding focus, if any.
+    /// `active` is the item of the screen on view; `focused` the key holding focus, if any.
     pub fn draw(&self, p: Painter, items: &[RailItem], active: Option<u32>, focused: Option<u32>) {
         let w = width(self.expand_pos());
         p.rect(Rect::new(0.0, 0.0, w, SCR_H), 0.0, theme::PANEL_TOP, theme::PANEL_BOT, 0.0);
@@ -211,6 +251,15 @@ impl RailRender {
         let clip = item_clip(items, i).intersect(Rect::new(0.0, 0.0, width(e) - INSET, SCR_H));
         if r.y + r.h <= clip.y || r.y >= clip.y + clip.h { return; }
         p.clip(clip);
+        if item.role == RailRole::Header {
+            if e > 0.0 {
+                let ty = plx_gfx::text::text_vcenter_y(theme::size::CAPTION, 1, r.y + r.h * 0.6);
+                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::CAPTION,
+                    theme::TEXT_TERTIARY, 0, 1, LABEL_TRACKING);
+            }
+            p.clip_clear();
+            return;
+        }
         let is_focused = focused == Some(key);
         let is_active = active == Some(key);
         if is_focused {
@@ -226,9 +275,30 @@ impl RailRender {
         if e > 0.0 {
             let ty = plx_gfx::text::text_vcenter_y(theme::size::LABEL, 1, r.cy());
             let spacing = if item.caps { LABEL_TRACKING } else { 0.0 };
-            p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+            if let RailRole::Row { star, starred } = item.role {
+                let s = star_rect(r);
+                p.clip(clip.intersect(Rect::new(0.0, 0.0, s.x, SCR_H)));
+                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+                p.clip(clip);
+                self.draw_star(p.alpha(e * e), s, starred, focused == Some(star));
+            } else {
+                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+            }
         }
         p.clip_clear();
+    }
+
+    fn draw_star(&self, p: Painter, s: Rect, starred: bool, focused: bool) {
+        if focused {
+            p.rrect(s, s.h * 0.5, s.h * 0.5, theme::ACCENT);
+        }
+        let (icon, ink) = match (starred, focused) {
+            (true, false) => (Icon::StarFill, theme::ACCENT),
+            (true, true) => (Icon::StarFill, theme::INK_ON_ACCENT),
+            (false, true) => (Icon::Star, theme::INK_ON_ACCENT),
+            (false, false) => (Icon::Star, theme::TEXT_TERTIARY),
+        };
+        crate::icons::draw(p, icon, Rect::new(s.cx() - STAR_D * 0.5, s.cy() - STAR_D * 0.5, STAR_D, STAR_D), ink);
     }
 
     fn draw_mark(&self, p: Painter, item: &RailItem, r: Rect, ink: [f32; 4], focused: bool) {
@@ -251,6 +321,7 @@ impl RailRender {
                 let ty = plx_gfx::text::text_vcenter_y(theme::size::CAPTION, 1, m.cy());
                 p.text(initial.as_ptr(), m.cx(), ty, theme::size::CAPTION, letter_ink, 1, 1);
             }
+            RailMark::None => {}
         }
     }
 }
@@ -259,17 +330,39 @@ impl RailRender {
 mod tests {
     use super::*;
 
-    fn rail(libraries: usize) -> Vec<RailItem> {
-        let item = |key, mark| RailItem { key, mark, label: CString::default(), caps: true };
-        let mut items = vec![item(0, RailMark::Icon(Icon::Home)), item(1, RailMark::Icon(Icon::Search)),
-            item(2, RailMark::Icon(Icon::Bookmark))];
-        items.extend((0..libraries).map(|i| item(10 + i as u32, RailMark::Badge(CString::default()))));
-        items.push(item(99, RailMark::Avatar(CString::default())));
+    fn item(key: u32, mark: RailMark, role: RailRole) -> RailItem {
+        RailItem { key, mark, label: CString::default(), caps: true, role }
+    }
+
+    /// Home, Search, Watchlist, `libraries` favorites, More, then `rows` More rows under one
+    /// server header, then Profile.
+    fn rail_with_more(libraries: usize, rows: usize) -> Vec<RailItem> {
+        let mut items = vec![item(0, RailMark::Icon(Icon::Home), RailRole::Top),
+            item(1, RailMark::Icon(Icon::Search), RailRole::Top),
+            item(2, RailMark::Icon(Icon::Bookmark), RailRole::Top)];
+        items.extend((0..libraries).map(|i| item(10 + i as u32, RailMark::Badge(CString::default()), RailRole::Band)));
+        items.push(item(5, RailMark::Icon(Icon::More), RailRole::Band));
+        if rows > 0 {
+            items.push(item(6, RailMark::None, RailRole::Header));
+            items.extend((0..rows).map(|i| item(200 + i as u32, RailMark::Badge(CString::default()),
+                RailRole::Row { star: 400 + i as u32, starred: i % 2 == 0 })));
+        }
+        items.push(item(99, RailMark::Avatar(CString::default()), RailRole::Foot));
         items
+    }
+
+    fn rail(libraries: usize) -> Vec<RailItem> {
+        rail_with_more(libraries, 0)
     }
 
     fn settle(render: &mut RailRender, items: &[RailItem], focused: Option<u32>) {
         for _ in 0..240 { render.update(items, focused, None, 1.0 / 60.0); }
+    }
+
+    fn inside_band(render: &RailRender, items: &[RailItem], key: u32) -> bool {
+        let b = band(items);
+        let r = render.item_rect(items, index_of(items, key).unwrap());
+        r.y >= b.y - 0.5 && r.y + r.h <= b.y + b.h + 0.5
     }
 
     #[test]
@@ -286,12 +379,9 @@ mod tests {
     fn the_band_scrolls_to_keep_the_focused_library_inside_it() {
         let items = rail(50);
         let mut render = RailRender::new();
-        let b = band(&items);
         for key in [10, 40, 59, 25, 10] {
             settle(&mut render, &items, Some(key));
-            let i = items.iter().position(|item| item.key == key).unwrap();
-            let r = render.item_rect(&items, i);
-            assert!(r.y >= b.y - 0.5 && r.y + r.h <= b.y + b.h + 0.5, "library {key} drawn outside the band: {r:?} vs {b:?}");
+            assert!(inside_band(&render, &items, key), "library {key} drawn outside the band");
         }
     }
 
@@ -311,5 +401,33 @@ mod tests {
         let mut render = RailRender::new();
         settle(&mut render, &items, Some(12));
         assert_eq!(render.scroll.pos, 0.0);
+    }
+
+    #[test]
+    fn more_scrolls_with_the_band_even_without_favorites() {
+        let items = rail_with_more(0, 60);
+        let mut render = RailRender::new();
+        settle(&mut render, &items, Some(259));
+        assert!(inside_band(&render, &items, 259));
+        assert!(render.item_rect(&items, 3).y < band(&items).y, "More scrolled off the band's top");
+    }
+
+    #[test]
+    fn headers_are_not_focusable_and_each_row_carries_its_star_beside_it() {
+        let items = rail_with_more(2, 3);
+        let mut members = Vec::new();
+        RailRender::new().members(&items, &mut members);
+        assert!(!members.iter().any(|m| m.elem == 6), "the server header is not a focus member");
+        let row = members.iter().position(|m| m.elem == 200).unwrap();
+        assert_eq!((members[row + 1].elem, members[row + 1].side), (400, true));
+        assert_eq!(members.iter().filter(|m| m.side).count(), 3);
+    }
+
+    #[test]
+    fn a_focused_star_keeps_its_row_in_view() {
+        let items = rail_with_more(50, 40);
+        let mut render = RailRender::new();
+        settle(&mut render, &items, Some(439));
+        assert!(inside_band(&render, &items, 239), "the starred row is on screen");
     }
 }

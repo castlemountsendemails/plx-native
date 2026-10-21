@@ -844,6 +844,15 @@ impl Bridge {
             work: plx_data::stores::browse::LibraryWork::Commit { select: true, choice: true, query: None } });
     }
 
+    /// Star or unstar library `section` from More's list. Unstarring the last favorite is refused,
+    /// as the Favorite libraries editor refuses it: `pins::resolve` would put the first server's
+    /// libraries back.
+    pub(crate) fn toggle_star(&mut self, section: usize) {
+        let Some(row) = self.directory.view().sections().get(section).map(|s| s.row.clone()) else { return };
+        if row.last_pinned { return; }
+        self.browse_run(plx_data::stores::browse::BrowseCmd::ApplyPins(vec![(section, !row.pinned)]));
+    }
+
     fn deliver_library_commands(&mut self, d: &mut Dispatcher<AppHost>) {
         if d.nav.top_page().is_none_or(|page| page.arg != AppArg::Library || page.inst.is_none()) { return; }
         while let Some(command) = self.library_commands.pop_front() { Self::library_command(d, command); }
@@ -954,13 +963,17 @@ impl Bridge {
                 AppArg::Watchlist => plx_ui::widgets::TAB_KEY_WATCHLIST,
                 _ => plx_screens::home::STRIP_HOME_ELEM,
             });
+            let directory = self.directory.view();
+            let unstarred = route.is_library_family().then(|| directory.current()).flatten()
+                .filter(|&i| directory.sections().get(i).is_some_and(|section| !section.row.pinned));
+            self.chrome.follow_library(unstarred);
             if let Some(io) = &self.home_io {
                 refresh_chrome(&mut self.chrome, self.directory.view(), Some((&io.profile, &io.preferences)));
             } else {
                 refresh_chrome(&mut self.chrome, self.directory.view(), None);
             }
-            // The page's own pill: Home's is the first, and a library page's is its library's type.
-            self.chrome_selection = pill_of_arg(route, self.directory.view()).unwrap_or(0) as u32;
+            // The page's own item: Home's is the first, and a library page's is its library's.
+            self.chrome_selection = pill_of_arg(route, &self.chrome, self.directory.view()).unwrap_or(0) as u32;
             let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
             self.publish_strip(d, selected);
         } else {
@@ -2100,6 +2113,7 @@ pub(crate) fn frame_with_tap(
     if matches!(d.top_arg(), Some(AppArg::Login | AppArg::Profiles)) && rig.session.needs_ready_commit() {
         execute_session_command(d, plx_session::auth::SessionCmd::TakeReady);
     }
+    let inputs = rail_back(d, rig, inputs);
     frame_ingest(d, rig, tick, inputs, Bridge::take_live_results, tap)
 }
 
@@ -2315,7 +2329,7 @@ fn frame_ingest(
     // settled test, the navblur prototype). One writer, immediately after the container's own
     // frame, from the container's own transition — see `ui::nav`'s module doc.
     let tab = d.nav.tabs.stack.pending_dest()
-        .and_then(|arg| pill_of_arg(arg, rig.directory.view()));
+        .and_then(|arg| pill_of_arg(arg, &rig.chrome, rig.directory.view()));
     plx_ui::nav::publish(d.nav.tabs.stack.page_alpha(), d.nav.tabs.stack.chrome_alpha(), tab);
     // **The heartbeat's `route=` word IS the top page's own name** (§15.2). It used to be
     // `route_word(app.route)` with this line asserting the two agreed every frame; there is one
@@ -3170,15 +3184,16 @@ pub(crate) fn wears_tab_bar(arg: &AppArg) -> bool {
 /// The Library's pill is its TYPE, and the argument carries none (which library the grid shows is
 /// the `browse` store's business): the answer is the section the store is pointing at, which
 /// `nav_tab`'s `LibraryCmd::Enter` has already aimed.
-fn pill_of_arg(arg: &AppArg, directory: plx_data::stores::browse::DirectoryView<'_>) -> Option<usize> {
-    use crate::app::chrome::{pill_of, Pill};
+fn pill_of_arg(arg: &AppArg, chrome: &crate::app::chrome::ChromeSnapshot,
+    directory: plx_data::stores::browse::DirectoryView<'_>) -> Option<usize> {
+    use crate::app::chrome::Pill;
     match arg {
-        AppArg::Home => pill_of(directory, Pill::Home),
-        AppArg::Search => pill_of(directory, Pill::Search),
-        AppArg::Watchlist => pill_of(directory, Pill::Watchlist),
+        AppArg::Home => chrome.pill_of(Pill::Home),
+        AppArg::Search => chrome.pill_of(Pill::Search),
+        AppArg::Watchlist => chrome.pill_of(Pill::Watchlist),
         // The grid and the two pages its header pushes (Collections, Recommended) are all the
-        // library's: they select its own item, when it is a favorite.
-        arg if arg.is_library_family() => pill_of(directory, Pill::Library(directory.current()?)),
+        // library's: they select its own item, or its row under More.
+        arg if arg.is_library_family() => chrome.pill_of(Pill::Library(directory.current()?)),
         _ => None,
     }
 }
@@ -3208,7 +3223,7 @@ pub(crate) fn nav_tab(
             // Keep the pill the user was standing on under focus. An IDENTITY, not an index: a
             // pill can appear or disappear while the dip runs, and `HomeCmd::FocusStrip` is
             // delivered when Home MOUNTS, not now.
-            if let Some(pill) = focus_pill.filter(|pill| crate::app::chrome::pill_of(rig.directory.view(), *pill).is_some()) {
+            if let Some(pill) = focus_pill.filter(|pill| rig.chrome.pill_of(*pill).is_some()) {
                 let want = match pill {
                     Pill::Home => HomeTab::Home,
                     Pill::Search => HomeTab::Search,
@@ -3227,8 +3242,11 @@ pub(crate) fn nav_tab(
         }
         HomeTab::Library(section) => {
             let Some(kind) = rig.directory.view().sections().get(section).map(|s| s.kind) else { return };
-            let on_top = d.top_arg() == Some(&AppArg::Library);
-            if on_top && rig.directory.view().current() == Some(section) { return; }
+            // The library on view: OK on its own item only moves focus back into the page.
+            if d.top_arg().is_some_and(|arg| arg.is_library_family()) && rig.directory.view().current() == Some(section) {
+                focus_content(d);
+                return;
+            }
             // The store is pointed at the library and it becomes its kind's remembered choice, so
             // the page (arriving, or switching in place) settles on this library, not another of its kind.
             rig.aim_section(section);
@@ -3237,8 +3255,49 @@ pub(crate) fn nav_tab(
         }
         HomeTab::Search => AppArg::Search,
         HomeTab::Watchlist => AppArg::Watchlist,
+        HomeTab::More => {
+            rig.chrome.set_more_open(!rig.chrome.more_open());
+            return;
+        }
+        HomeTab::Star(section) => {
+            rig.toggle_star(section);
+            return;
+        }
     };
     nav_peer(d, arg, ret);
+}
+
+/// Seat focus on `elem` of the page on top.
+fn reseat_top(d: &mut Dispatcher<AppHost>, elem: u32) {
+    let Some((entry, Some(instance))) = d.nav.top_page().map(|page| (page.id, page.inst.as_ref().map(|i| i.id))) else { return };
+    d.emit(MachineId::Nav, Fx::Deliver(MachineId::Instance(instance), Delivery::Screen(ScreenEvent::Enter(
+        plx_ui::screen::Enter::Fresh { focus: plx_ui::screen::FocusTarget::Elem(FocusKey { entry, elem }) }))));
+}
+
+/// OK on the rail item of the page on view: focus returns to the page element it last left for
+/// the rail, as Right does. With none on this page, focus stays on the rail.
+pub(crate) fn focus_content(d: &mut Dispatcher<AppHost>) {
+    let Some(entry) = d.nav.top_page().map(|page| page.id) else { return };
+    if let Some(key) = d.nav.tabs.rail_return.filter(|key| key.entry == entry) {
+        reseat_top(d, key.elem);
+    }
+}
+
+/// BACK on the rail with More's list open closes the list, focus on More, before any other step.
+/// Consumes those BACK presses so the page never sees them.
+fn rail_back(d: &mut Dispatcher<AppHost>, rig: &mut Bridge, mut inputs: Vec<InputEvent<u32>>) -> Vec<InputEvent<u32>> {
+    if !rig.chrome.more_open() || rig.chrome.focused_key(Bridge::home_focus(d)).is_none()
+        || !d.top_arg().is_some_and(wears_tab_bar) {
+        return inputs;
+    }
+    let back = |event: &InputEvent<u32>| matches!(event.kind,
+        InputKind::Key { key: Key::Back, edge: Edge::Down, at_edge: false, .. });
+    if inputs.iter().any(back) {
+        inputs.retain(|event| !back(event));
+        rig.chrome.set_more_open(false);
+        reseat_top(d, plx_ui::widgets::TAB_KEY_MORE);
+    }
+    inputs
 }
 
 /// **A press on the Home PILL** — from the Library or Search, or on Home itself.

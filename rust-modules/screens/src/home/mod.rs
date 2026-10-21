@@ -1901,6 +1901,8 @@ impl HomeScreen {
                     HomeTab::Search => STRIP_SEARCH_ELEM,
                     HomeTab::Watchlist => STRIP_WATCHLIST_ELEM,
                     HomeTab::Library(section) => plx_ui::widgets::tab_key_library(section),
+                    HomeTab::More => plx_ui::widgets::TAB_KEY_MORE,
+                    HomeTab::Star(section) => plx_ui::widgets::tab_key_star(section),
                 };
                 self.strip_chosen = true;
                 self.reseat(

@@ -439,7 +439,7 @@ fn strip_pointer_stops_use_drawn_geometry_and_stable_keys() {
     let drawn = Rect::new(100.0, 10.0, 160.0, 48.0);
     let target = Rect::new(140.0, 10.0, 160.0, 48.0);
     let clip = Rect::new(110.0, 0.0, 150.0, 100.0);
-    d.nav.tabs.strip = vec![StripMember { elem: STRIP_BASE + 3, drawn, target, clip }];
+    d.nav.tabs.strip = vec![StripMember { elem: STRIP_BASE + 3, drawn, target, clip, side: false }];
     d.draw(&mut rig, true);
     let stop = d.input.hit.front().iter().find(|s| s.key.elem == STRIP_BASE + 3)
         .expect("the container must register its own drawn strip in the hit map");

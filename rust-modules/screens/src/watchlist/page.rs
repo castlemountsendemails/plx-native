@@ -1236,13 +1236,12 @@ impl WatchlistScreen {
         Handled::Yes
     }
 
-    /// A press on the shared strip (the container composes it above the page): the other tabs and
-    /// the chip are requests; the Watchlist mark is the page the user is already on.
+    /// A press on the nav rail (the container composes it beside the page): every item is a
+    /// request, the Watchlist's own included (the app moves focus back into this page).
     fn strip_press(elem: u32) -> Option<Option<WatchlistOut>> {
-        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_WATCHLIST};
+        use plx_ui::widgets::TAB_KEY_CHIP;
         match elem {
             TAB_KEY_CHIP => Some(Some(WatchlistOut::Account)),
-            TAB_KEY_WATCHLIST => Some(None),
             key => HomeTab::of_rail_key(key).map(|tab| Some(WatchlistOut::Tab(tab))),
         }
     }

@@ -243,6 +243,10 @@ pub enum Icon {
     CircleSlash,
     /// A house outline at the inline 2.2 weight — the nav rail's Home item.
     Home,
+    /// A five-point star outline, and its filled twin: a library's ★ target in the nav rail's
+    /// More list, off and on.
+    Star,
+    StarFill,
 }
 
 /// **Where a mark's INK sits inside its 24-unit viewBox**, as `(left, right)` fractions — and
@@ -342,6 +346,8 @@ fn src(id: Icon) -> &'static str {
         Icon::ServerSlash => include_str!("../../../assets/icons/server-slash.svg"),
         Icon::CircleSlash => include_str!("../../../assets/icons/circle-slash.svg"),
         Icon::Home => include_str!("../../../assets/icons/home.svg"),
+        Icon::Star => include_str!("../../../assets/icons/star.svg"),
+        Icon::StarFill => include_str!("../../../assets/icons/star-fill.svg"),
     }
 }
 

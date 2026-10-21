@@ -262,11 +262,10 @@ impl SearchScreen {
     }
 
     fn activate<H: SearchLike>(&mut self, elem: u32, held: bool, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
-        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_SEARCH};
+        use plx_ui::widgets::TAB_KEY_CHIP;
         if elem >= plx_ui::dispatch::STRIP_BASE {
             let request = match elem {
-                // The Search mark is the page the user is already on: nothing to request.
-                TAB_KEY_SEARCH => return Handled::Yes,
+                // The Search item asks too: the app moves focus back into this page.
                 TAB_KEY_CHIP => SearchReq::Account,
                 key => match HomeTab::of_rail_key(key) {
                     Some(tab) => SearchReq::Tab(tab),
