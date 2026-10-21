@@ -168,17 +168,20 @@ fn the_pill_opens_the_options() {
     assert_eq!(requests(fx), vec![WatchlistOut::OpenOptions]);
 }
 
-/// **The strip's other tabs and the chip are requests; the Watchlist mark asks for nothing.**
+/// **Every rail press is a request**, the Watchlist's own included: the app answers that one by
+/// moving focus back into the page.
 #[test]
 fn a_strip_press_is_a_tab_request() {
     use crate::registry::HomeTab;
-    use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_HOME, TAB_KEY_SEARCH, TAB_KEY_WATCHLIST};
+    use plx_ui::widgets::{tab_key_star, TAB_KEY_CHIP, TAB_KEY_HOME, TAB_KEY_MORE, TAB_KEY_SEARCH, TAB_KEY_WATCHLIST};
     let mut h = Harness::new(tiles(3));
     for (key, want) in [
         (TAB_KEY_HOME, vec![WatchlistOut::Tab(HomeTab::Home)]),
         (TAB_KEY_SEARCH, vec![WatchlistOut::Tab(HomeTab::Search)]),
         (TAB_KEY_CHIP, vec![WatchlistOut::Account]),
-        (TAB_KEY_WATCHLIST, vec![]),
+        (TAB_KEY_WATCHLIST, vec![WatchlistOut::Tab(HomeTab::Watchlist)]),
+        (TAB_KEY_MORE, vec![WatchlistOut::Tab(HomeTab::More)]),
+        (tab_key_star(2), vec![WatchlistOut::Tab(HomeTab::Star(2))]),
     ] {
         let (fx, _) = h.step_fx(plx_ui::screen::ScreenEvent::Activate(key));
         assert_eq!(requests(fx), want, "{key:#x}");
@@ -202,7 +205,7 @@ fn a_committed_press_on_the_strip_is_a_tab_request() {
         (TAB_KEY_SHOWS, vec![WatchlistOut::Tab(HomeTab::Shows)]),
         (TAB_KEY_SEARCH, vec![WatchlistOut::Tab(HomeTab::Search)]),
         (TAB_KEY_CHIP, vec![WatchlistOut::Account]),
-        (TAB_KEY_WATCHLIST, vec![]),
+        (TAB_KEY_WATCHLIST, vec![WatchlistOut::Tab(HomeTab::Watchlist)]),
     ] {
         h.focus_elem(key, By::Dir);
         let (fx, _) = h.step_fx(plx_ui::screen::ScreenEvent::PressCommit(PressId(1)));

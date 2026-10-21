@@ -122,6 +122,7 @@ fn the_shared_fixture_resolves_the_defaults_over_a_recorded_answer() {
                     asked: true,
                     on: vec![lib("mac-mini", 2)],
                     off: vec![lib("mac-mini", 1), lib("nas-home", 1), lib("nas-home", 2)],
+                    order: Vec::new(),
                     extensions: Default::default(),
                 },
             );
@@ -258,6 +259,7 @@ fn a_commit_leaves_the_table_showing_what_it_saved() {
                     asked: true,
                     on: vec![lib("laptop", 1)],
                     off: vec![lib("mac-mini", 1), lib("study-nas", 1)],
+                    order: Vec::new(),
                     extensions: Default::default(),
                 },
             );
