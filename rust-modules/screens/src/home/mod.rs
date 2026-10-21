@@ -1637,7 +1637,9 @@ impl HomeScreen {
         }) {
             self.anchor_carousel(view, index);
         }
-        let cta_available = self.hero_len(view) > 0;
+        // Arrival: the first Continue Watching card once there is one, unless the reader chose
+        // the rail; with nothing in progress, the rail's Home item.
+        let cta_available = !self.rows.is_empty();
         if cta_available
             && !self.cta_available
             && !self.strip_chosen
@@ -1646,12 +1648,18 @@ impl HomeScreen {
                 .current
                 .is_none_or(|key| key.elem >= plx_ui::dispatch::STRIP_BASE)
         {
-            self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx);
+            self.reseat(FocusTarget::FirstInGroup(self.rows[0].group), cx, fx);
+        } else if !cta_available && cx.focus.current.is_none() && view.state != plx_data::pms::HubState::Loading {
+            self.reseat(FocusTarget::Elem(FocusKey { entry: self.entry, elem: STRIP_HOME_ELEM }), cx, fx);
         }
         self.cta_available = cta_available;
         if self.rows.is_empty() {
             self.snap_target = 0.0;
             self.snap.jump(0.0);
+        } else if self.snap_target < 1.0 {
+            // No billboard above the shelf: the page rests at the shelves.
+            self.snap_target = 1.0;
+            self.snap.jump(1.0);
         }
         let current = plx_plex::plex::client_for(plx_plex::plex::current_server()).map(|c| c.machine_id());
         // `|` not `||`: both watches must re-read.
@@ -1827,22 +1835,15 @@ impl HomeScreen {
     }
 
     fn request_for_strip(elem: u32) -> Option<HomeReq> {
-        Some(match elem {
-            STRIP_HOME_ELEM => HomeReq::Tab(HomeTab::Home),
-            STRIP_MOVIES_ELEM => HomeReq::Tab(HomeTab::Movies),
-            STRIP_SHOWS_ELEM => HomeReq::Tab(HomeTab::Shows),
-            STRIP_SEARCH_ELEM => HomeReq::Tab(HomeTab::Search),
-            STRIP_WATCHLIST_ELEM => HomeReq::Tab(HomeTab::Watchlist),
-            STRIP_ACCOUNT_ELEM => HomeReq::Account,
-            _ => return None,
-        })
+        if elem == STRIP_ACCOUNT_ELEM { return Some(HomeReq::Account); }
+        HomeTab::of_rail_key(elem).map(HomeReq::Tab)
     }
 
-    fn reseat<H: HomeLike>(&mut self, focus: FocusTarget<u32>, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
-        // Enter is queued behind this frame's Tick. Consume the CTA availability observed by
-        // this seating request now, so that Tick cannot queue an implicit initial Hero seat
-        // over the accepted target while the engine still holds its previous focus.
-        self.cta_available = self.hero_len(H::hubs(cx)) > 0;
+    fn reseat<H: HomeLike>(&mut self, focus: FocusTarget<u32>, _cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
+        // Enter is queued behind this frame's Tick. Consume the shelf availability observed by
+        // this seating request now, so that Tick cannot queue an implicit arrival seat over the
+        // accepted target while the engine still holds its previous focus.
+        self.cta_available = !self.rows.is_empty();
         fx.push(Fx::Deliver(
             MachineId::Instance(self.instance),
             Delivery::Screen(ScreenEvent::Enter(Enter::Fresh { focus })),
@@ -1883,9 +1884,14 @@ impl HomeScreen {
                 };
                 self.reseat(FocusTarget::Elem(key), cx, fx);
             }
+            // The Home item's press: into the shelf, or onto the rail's Home item with nothing in progress.
             HomeCmd::Hero => {
                 self.strip_chosen = false;
-                self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx);
+                let target = match self.rows.first() {
+                    Some(row) => FocusTarget::FirstInGroup(row.group),
+                    None => FocusTarget::Elem(FocusKey { entry: self.entry, elem: STRIP_HOME_ELEM }),
+                };
+                self.reseat(target, cx, fx);
             }
             HomeCmd::FocusStrip(tab) => {
                 let elem = match tab {
@@ -1894,6 +1900,7 @@ impl HomeScreen {
                     HomeTab::Shows => STRIP_SHOWS_ELEM,
                     HomeTab::Search => STRIP_SEARCH_ELEM,
                     HomeTab::Watchlist => STRIP_WATCHLIST_ELEM,
+                    HomeTab::Library(section) => plx_ui::widgets::tab_key_library(section),
                 };
                 self.strip_chosen = true;
                 self.reseat(
@@ -2583,10 +2590,9 @@ impl<H: HomeLike> Focusable<H> for HomeScreen {
             id: HERO_GROUP,
             kind: GroupKind::Row { wrap: false },
             seat: Seat::First,
-            // The hero is reached only through declared strip/first-shelf links. Its fixed
-            // billboard extent remains on the page while folded and must never win a geometric
-            // search from a lower shelf.
-            reachable: AxisMask(0),
+            // Home has no billboard: this group holds only the read-out's action (Retry, Refresh),
+            // reached by Right from the rail while the read-out stands in for the shelf.
+            reachable: if status_read(view).is_some() { AxisMask::HORIZONTAL } else { AxisMask(0) },
             edge: [
                 EdgeRule::Geometric,
                 EdgeRule::Geometric,
@@ -2934,7 +2940,7 @@ impl HomeScreen {
     fn hero_slots(&self, view: HubsView<'_>) -> ([usize; HERO_NBTN], usize) {
         match status_read(view) {
             Some((_, _, action)) => ([0, 0, 0], usize::from(action.is_some())),
-            None => self.selected_hero(view).map_or(([0, 1, 0], 2), |h| item_slots(h.item)),
+            None => self.selected_hero(view).map_or(([0, 0, 0], 0), |h| item_slots(h.item)),
         }
     }
 
@@ -3018,7 +3024,7 @@ impl<H: HomeLike> Machine<H> for HomeScreen {
                 self.adopt_shows(memory, H::hubs(cx));
                 self.restore(memory);
                 self.sync_catalog(cx);
-                self.cta_available = self.hero_len(H::hubs(cx)) > 0;
+                self.cta_available = !self.rows.is_empty();
                 Handled::Yes
             }
             ScreenEvent::Enter(_) => {
@@ -3160,17 +3166,11 @@ impl<H: HomeLike> Machine<H> for HomeScreen {
                     },
                 ..
             }) => {
-                if self.snap_target >= 0.5
-                    || self.snap.pos >= 0.5
-                    || self.focused_loc(cx.focus.current).is_some_and(Located::on_grid)
-                {
-                    self.snap_target = 0.0;
-                    self.visible_activation = cx
-                        .focus
-                        .current
-                        .filter(|key| key.entry == self.entry)
-                        .map(|_| HERO_PLAY_ELEM);
-                    fx.push(Fx::App(AppFx::Home(HomeReq::FoldToHero)));
+                // BACK climbs from the shelf to the rail's Home item; from the rail it hands the
+                // screen back to the TV.
+                if cx.focus.current.is_some_and(|key| key.entry == self.entry && key.elem < plx_ui::dispatch::STRIP_BASE) {
+                    self.strip_chosen = true;
+                    self.reseat(FocusTarget::Elem(FocusKey { entry: self.entry, elem: STRIP_HOME_ELEM }), cx, fx);
                     fx.invalidate(Provenance::Input);
                 } else {
                     fx.push(Fx::App(AppFx::Loop(LoopReq::BackAtRoot)));
@@ -3213,24 +3213,10 @@ impl<H: HomeLike> Screen<H> for HomeScreen {
     fn render(&self) -> RenderStrategy {
         RenderStrategy::Page
     }
-    fn strip_reachable(&self) -> bool {
-        self.snap.pos < 0.5
-    }
     fn links(&self, out: &mut Vec<Link>) {
-        out.push(Link {
-            from: plx_ui::containers::tabs::STRIP,
-            dir: Dir::Down,
-            to: HERO_GROUP,
-        });
-        out.push(Link {
-            from: HERO_GROUP,
-            dir: Dir::Up,
-            to: plx_ui::containers::tabs::STRIP,
-        });
         // A collection shelf's linked heading sits between the shelf above and its own cards:
         // UP from any card reaches it, DOWN returns to the remembered card, and it is the next
-        // stop DOWN from the shelf above. The engine takes the FIRST matching link, so these
-        // precede the first shelf's UP door to the hero.
+        // stop DOWN from the shelf above.
         for (row, projection) in self.rows.iter().enumerate() {
             if projection.link.is_none() {
                 continue;
@@ -3240,18 +3226,6 @@ impl<H: HomeLike> Screen<H> for HomeScreen {
             let above = row.checked_sub(1).map_or(HERO_GROUP, |r| self.rows[r].group);
             out.push(Link { from: heading, dir: Dir::Up, to: above });
             out.push(Link { from: above, dir: Dir::Down, to: heading });
-        }
-        if let Some(first) = self.rows.first() {
-            out.push(Link {
-                from: HERO_GROUP,
-                dir: Dir::Down,
-                to: first.group,
-            });
-            out.push(Link {
-                from: first.group,
-                dir: Dir::Up,
-                to: HERO_GROUP,
-            });
         }
     }
     fn memory(&self) -> H::Memory {

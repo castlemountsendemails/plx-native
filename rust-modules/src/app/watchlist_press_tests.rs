@@ -417,17 +417,14 @@ fn an_add_pulses_the_watchlist_tab_and_a_removal_does_not() {
     super::frame(&mut d, &mut rig, tick(1), vec![]);
     settle(&mut d, &mut rig, 2);
     let key = plx_ui::widgets::TAB_KEY_WATCHLIST;
-    let at = rig.chrome.keys.iter().position(|k| *k == key).expect("the mark is on the strip");
+    assert!(rig.chrome.keys.contains(&key), "the mark is on the rail");
     rig.watchlist_press([1; 12], Intent::Remove);
     assert_eq!(rig.chrome.take_pulse(), None, "a removal does not pulse");
     rig.catalog_effect(plx_screens::catalog::CatalogOut::Remove { hex: [1; 12] });
     assert_eq!(rig.chrome.take_pulse(), None, "nor does the catalog pill's removal");
     rig.watchlist_add([7; 12]);
-    assert_eq!(rig.chrome.take_pulse(), Some(at), "an add pulses the Watchlist mark");
+    assert_eq!(rig.chrome.take_pulse(), Some(key), "an add pulses the Watchlist mark");
     assert_eq!(rig.chrome.take_pulse(), None, "and the request is spent once handed on");
-    // Handed to the strip's renderer it runs, and ends at rest.
-    rig.strip.pulse(at);
-    assert_eq!(rig.strip.pulse_read().map(|(i, _)| i), Some(at));
     // A pulse asked for while no bar is on screen is dropped, not played late.
     rig.watchlist_add([7; 12]);
     rig.chrome.drop_pulse();
@@ -570,7 +567,7 @@ fn the_item_menu_watchlist_arms_queue_the_write_pulse_and_route() {
     super::frame(&mut d, &mut rig, tick(1), vec![]);
     settle(&mut d, &mut rig, 2);
     let key = plx_ui::widgets::TAB_KEY_WATCHLIST;
-    let at = rig.chrome.keys.iter().position(|k| *k == key).expect("the mark is on the strip");
+    assert!(rig.chrome.keys.contains(&key), "the mark is on the rail");
     let mut ps = plx_media::route::PlaybackSession::default();
     let mt = unsafe { plx_base::task::MainThread::assume() };
     let mut pa = plx_media::player::adapter::PlayerAdapter::new(mt);
@@ -585,7 +582,7 @@ fn the_item_menu_watchlist_arms_queue_the_write_pulse_and_route() {
     };
     apply(&mut d, &mut rig, Action::WatchlistAdd { hex: [7; 12] });
     assert!(member(&mut rig, 7), "the Add row queued the write (the face flipped at the press)");
-    assert_eq!(rig.chrome.take_pulse(), Some(at), "and the Watchlist mark pulsed");
+    assert_eq!(rig.chrome.take_pulse(), Some(key), "and the Watchlist mark pulsed");
     settle(&mut d, &mut rig, 10);
     assert!(script.writes.lock().unwrap().contains(&([7u8; 12], Intent::Add)));
     apply(&mut d, &mut rig, Action::WatchlistRemove(guid(7)));

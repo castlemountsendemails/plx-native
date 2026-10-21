@@ -366,6 +366,7 @@ impl Page {
             content: if self.cells.is_empty() { &[] } else { &[GRID_GROUP] },
             rail: None,
             back_walks_header: false,
+            back_rail: true,
             arrival: Arrival::Content,
             pending: (self.list == ListState::Loading).then_some(GRID_GROUP),
         }
@@ -1238,15 +1239,11 @@ impl WatchlistScreen {
     /// A press on the shared strip (the container composes it above the page): the other tabs and
     /// the chip are requests; the Watchlist mark is the page the user is already on.
     fn strip_press(elem: u32) -> Option<Option<WatchlistOut>> {
-        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_HOME, TAB_KEY_MOVIES, TAB_KEY_SEARCH, TAB_KEY_SHOWS, TAB_KEY_WATCHLIST};
+        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_WATCHLIST};
         match elem {
-            TAB_KEY_HOME => Some(Some(WatchlistOut::Tab(HomeTab::Home))),
-            TAB_KEY_MOVIES => Some(Some(WatchlistOut::Tab(HomeTab::Movies))),
-            TAB_KEY_SHOWS => Some(Some(WatchlistOut::Tab(HomeTab::Shows))),
-            TAB_KEY_SEARCH => Some(Some(WatchlistOut::Tab(HomeTab::Search))),
             TAB_KEY_CHIP => Some(Some(WatchlistOut::Account)),
             TAB_KEY_WATCHLIST => Some(None),
-            _ => None,
+            key => HomeTab::of_rail_key(key).map(|tab| Some(WatchlistOut::Tab(tab))),
         }
     }
 

@@ -6211,6 +6211,16 @@ pub const TAB_KEY_CHIP: u32 = crate::dispatch::STRIP_BASE + 4;
 /// BEFORE Search in the strip's visual order (`app::chrome::strip_keys`) — a key is a destination's
 /// identity, never its position.
 pub const TAB_KEY_WATCHLIST: u32 = crate::dispatch::STRIP_BASE + 5;
+/// A favorite library's rail item: this base plus the library's index in the directory's section
+/// table, clear of the fixed keys above.
+const TAB_KEY_LIBRARY: u32 = crate::dispatch::STRIP_BASE + 0x100;
+const TAB_KEY_LIBRARY_SPAN: u32 = 0x1000;
+pub fn tab_key_library(section: usize) -> u32 {
+    TAB_KEY_LIBRARY + (section as u32).min(TAB_KEY_LIBRARY_SPAN - 1)
+}
+pub fn library_of_tab_key(key: u32) -> Option<usize> {
+    key.checked_sub(TAB_KEY_LIBRARY).filter(|i| *i < TAB_KEY_LIBRARY_SPAN).map(|i| i as usize)
+}
 /// The top chrome band's y — the chip and the pills sit on it (Home and Library alike).
 ///
 /// **Derived from the overscan safe area, not chosen.** It was a bare `44.0` until 2026-08-23, which

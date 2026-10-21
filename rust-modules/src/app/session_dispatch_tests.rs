@@ -21,24 +21,19 @@ fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
     let mut pages = Dispatcher::<AppHost>::new();
     rig.capture_views(&mut pages);
     rig.capture_chrome(&mut pages);
-    let before = rig.chrome.labels();
-    assert!(before.faces.iter().any(|face| matches!(face, plx_ui::widgets::TabFace::Label(l) if l == "TV Shows")));
-    let before_gen = before.generation;
+    let unpinned = plx_ui::widgets::tab_key_library(1);
+    assert!(rig.chrome.keys.contains(&unpinned), "every favorite has a rail item");
 
     rig.stores.browse.borrow_mut().run(
         plx_data::stores::browse::BrowseCmd::ApplyPins(vec![(1, false)]));
     rig.capture_views(&mut pages);
     rig.capture_chrome(&mut pages);
-    let changed = rig.chrome.labels();
-    assert!(changed.generation > before_gen);
-    assert!(!changed.faces.iter().any(|face| matches!(face, plx_ui::widgets::TabFace::Label(l) if l == "TV Shows")));
-    let changed_gen = changed.generation;
+    let changed = rig.chrome.keys.clone();
+    assert!(!changed.contains(&unpinned), "an unpinned library leaves the rail");
 
     rig.capture_views(&mut pages);
     rig.capture_chrome(&mut pages);
-    assert_eq!(rig.chrome.labels().generation, changed_gen,
-        "capturing again must not republish the owner's old tab generation");
-    assert!(!rig.chrome.labels().faces.iter().any(|face| matches!(face, plx_ui::widgets::TabFace::Label(l) if l == "TV Shows")));
+    assert_eq!(rig.chrome.keys, changed, "capturing again must not republish the owner's old rail");
     plx_plex::plex::reset_servers_for_test();
 }
 

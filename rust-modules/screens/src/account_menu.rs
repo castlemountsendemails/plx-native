@@ -219,16 +219,12 @@ fn action_row(a: Action) -> Row {
         .destructive(matches!(a, Action::SignOut))
 }
 
-/// Top-left popover, tucked under the profile chip.
-///
-/// `px` is the app's own side margin: it was a literal 80, which sat 16px outside the 5% overscan
-/// frame — and the chip it hangs off is at `MARGIN_X`, so aligning the two is what the design meant
-/// anyway. `py` clears `widgets::TOP_BAR_BOTTOM` (130) by a `space::MD`.
+/// Bottom-left popover, beside the expanded nav rail and level with its Profile item at the foot.
 fn panel_rect(table: &TableView, measure: &dyn plx_machine::machine::Measure) -> Rect {
     let pw = table.menu_panel_width(measure);
-    let px = plx_ui::consts::MARGIN_X;
-    let py = 154.0f32;
+    let px = plx_ui::nav_rail::EXPANDED_W + plx_ui::theme::space::MD;
     let ph = table.measured_height().clamp(120.0, 440.0);
+    let py = plx_ui::consts::SCR_H - plx_ui::consts::MARGIN_Y - ph;
     Rect::new(px, py, pw, ph)
 }
 

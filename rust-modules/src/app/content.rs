@@ -719,7 +719,8 @@ fn search_requests(app: &mut App) {
         let Some(entry) = app.pages.nav.entry_of_instance(instance) else { continue };
         if app.route() != AppArg::Search || app.pages.nav.input_owner() != Some(InputOwner::Entry(entry)) { continue; }
         match &request {
-            SearchReq::Back => bridge::nav_tab(&mut app.pages, &mut app.bridge, HomeTab::Home, None, Some(ret)),
+            SearchReq::Back => bridge::nav_tab(&mut app.pages, &mut app.bridge, HomeTab::Home,
+                Some(crate::app::chrome::Pill::Home), Some(ret)),
             SearchReq::Tab(tab) => {
                 if !app.bridge.search_tab_available(*tab) { continue; }
                 if matches!(tab, HomeTab::Search) { continue }
@@ -992,8 +993,8 @@ pub(crate) fn library_navigation(
             bridge::nav_push_with_return(pages, arg, ret);
         }
         LibraryReq::Account => chip_activate(pages),
-        LibraryReq::BackToHome { kind } => {
-            bridge::nav_tab(pages, rig, HomeTab::Home, Some(crate::app::chrome::Pill::Section(*kind)), Some(ret));
+        LibraryReq::BackToHome { .. } => {
+            bridge::nav_tab(pages, rig, HomeTab::Home, Some(crate::app::chrome::Pill::Home), Some(ret));
         }
         LibraryReq::Tab(HomeTab::Home) => bridge::nav_home_pill(pages, rig, Some(ret)),
         LibraryReq::Tab(tab) => bridge::nav_tab(pages, rig, *tab, None, Some(ret)),
@@ -1028,7 +1029,7 @@ pub(crate) fn watchlist_navigation(
 ) -> Option<ReturnState<u32, PageMemory>> {
     use plx_screens::watchlist::page::WatchlistOut;
     match request {
-        WatchlistOut::Back => bridge::nav_tab(pages, rig, HomeTab::Home, None, Some(ret)),
+        WatchlistOut::Back => bridge::nav_tab(pages, rig, HomeTab::Home, Some(crate::app::chrome::Pill::Home), Some(ret)),
         WatchlistOut::Tab(tab) => {
             if !rig.search_tab_available(*tab) || matches!(tab, HomeTab::Watchlist) { return None; }
             match tab {

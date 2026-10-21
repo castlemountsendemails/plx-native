@@ -122,6 +122,9 @@ pub struct PageRegions<'a> {
     /// Does BACK from the top of the content walk up through the header and the bar before it
     /// leaves? The Library's header-then-bar-then-Home walk is the only one the design asks for.
     pub back_walks_header: bool,
+    /// On a page that does not walk the header, does BACK from the top of the content or from the
+    /// header step onto the nav rail before it leaves?
+    pub back_rail: bool,
     /// The region the first arrival seats.
     pub arrival: Arrival,
     /// **The content group whose cells are still on their way**: `Some` from the page's mount until
@@ -236,18 +239,18 @@ impl PageRegions<'_> {
     /// |---|---|
     /// | the rail | [`BackStep::Content`] |
     /// | the content, scrolled | [`BackStep::Top`] |
-    /// | the content at its top | [`BackStep::Header`] when the page walks the header, else [`BackStep::Leave`] |
-    /// | the header | [`BackStep::Nav`] when the page walks the header, else [`BackStep::Leave`] |
+    /// | the content at its top | [`BackStep::Header`] when the page walks the header, else [`BackStep::Nav`] on a `back_rail` page, else [`BackStep::Leave`] |
+    /// | the header | [`BackStep::Nav`] when the page walks the header or is a `back_rail` page, else [`BackStep::Leave`] |
     /// | the bar, or nowhere | [`BackStep::Leave`] |
     pub fn back(&self, at: Option<Region>, scrolled: bool) -> BackStep {
         match at {
             None | Some(Region::Nav) => BackStep::Leave,
             Some(Region::Rail) => BackStep::Content,
             Some(Region::Content) if scrolled => BackStep::Top,
-            Some(Region::Content) if !self.back_walks_header => BackStep::Leave,
+            Some(Region::Content) if !self.back_walks_header => if self.back_rail { BackStep::Nav } else { BackStep::Leave },
             // No header stop to land on: the next region up is the bar.
             Some(Region::Content) => if self.header.is_some() { BackStep::Header } else { BackStep::Nav },
-            Some(Region::Header) => if self.back_walks_header { BackStep::Nav } else { BackStep::Leave },
+            Some(Region::Header) => if self.back_walks_header || self.back_rail { BackStep::Nav } else { BackStep::Leave },
         }
     }
 }
@@ -279,7 +282,7 @@ mod tests {
     const E: EntryId = EntryId(9);
 
     fn regions<'a>(content: &'a [GroupId], walks: bool, arrival: Arrival) -> PageRegions<'a> {
-        PageRegions { header: Some(HEADER), content, rail: Some(RAIL), back_walks_header: walks, arrival, pending: None }
+        PageRegions { header: Some(HEADER), content, rail: Some(RAIL), back_walks_header: walks, back_rail: false, arrival, pending: None }
     }
 
     fn link(from: GroupId, dir: Dir, to: GroupId) -> Link { Link { from, dir, to } }
@@ -415,6 +418,17 @@ mod tests {
     fn a_walking_page_with_no_header_stop_goes_straight_to_the_bar() {
         let r = PageRegions { header: None, ..regions(&[GRID], true, Arrival::Content) };
         assert_eq!(r.back(Some(Region::Content), false), BackStep::Nav);
+    }
+
+    #[test]
+    fn a_back_rail_page_steps_onto_the_rail_before_it_leaves() {
+        let r = PageRegions { back_rail: true, ..regions(&[GRID], false, Arrival::Content) };
+        assert_eq!(r.back(Some(Region::Content), true), BackStep::Top, "deep in the content: its top first");
+        assert_eq!(r.back(Some(Region::Content), false), BackStep::Nav);
+        assert_eq!(r.back(Some(Region::Header), false), BackStep::Nav);
+        assert_eq!(r.back(Some(Region::Nav), false), BackStep::Leave);
+        let leaves = regions(&[GRID], false, Arrival::Content);
+        assert_eq!(leaves.back(Some(Region::Content), false), BackStep::Leave, "a page without it leaves at once");
     }
 
     #[test]

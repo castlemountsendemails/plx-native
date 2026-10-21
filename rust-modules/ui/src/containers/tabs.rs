@@ -27,7 +27,7 @@
 //! See `machine.rs`'s doc on `FocusTarget::FirstInGroupAnimated` and the regression test
 //! `containers::tests::a_fresh_tab_mint_reports_a_deliberate_move_not_a_restore`.
 
-use plx_machine::machine::{EntryId, GroupId, Host};
+use plx_machine::machine::{EntryId, FocusKey, GroupId, Host};
 use super::super::screen::{AxisMask, EdgeRule, ElemKind, GroupKind, GroupSpec, Seat};
 use super::super::Rect;
 use super::stack::NavStack;
@@ -70,6 +70,9 @@ pub struct TabContainer<H: Host> {
     pub strip_selected: Option<H::Elem>,
     /// The selected pill: the destination's while a transition is in flight (`ui::nav::view_tab`).
     pub selected: usize,
+    /// The page element focus last left to enter the rail: where Right from the rail returns.
+    /// Ignored once the page it belongs to is no longer the one composed with the rail.
+    pub rail_return: Option<FocusKey<H::Elem>>,
 }
 
 impl<H: Host> TabContainer<H> {
@@ -81,10 +84,11 @@ impl<H: Host> TabContainer<H> {
             strip_fallback: None,
             strip_selected: None,
             selected: 0,
+            rail_return: None,
         }
     }
 
-    /// The strip as a focus group — contributed above the page's when the page allows it.
+    /// The nav rail as a focus group — contributed beside the page's when the page allows it.
     pub fn strip_group(&self) -> GroupSpec {
         let extent = self
             .strip
@@ -93,12 +97,11 @@ impl<H: Host> TabContainer<H> {
             .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
         GroupSpec {
             id: STRIP,
-            kind: GroupKind::Row { wrap: false },
+            kind: GroupKind::Column,
             seat: Seat::Nearest,
-            reachable: AxisMask::VERTICAL,
-            // The strip's horizontal endpoints are terminal, independent of where a page's
-            // other groups happen to be placed. Only UP/DOWN may cross to page content.
-            edge: [EdgeRule::Geometric, EdgeRule::Geometric, EdgeRule::Stop, EdgeRule::Stop],
+            reachable: AxisMask::HORIZONTAL,
+            // The rail's ends are terminal; only RIGHT crosses to page content.
+            edge: [EdgeRule::Stop, EdgeRule::Stop, EdgeRule::Stop, EdgeRule::Geometric],
             extent,
             len: self.strip.len(),
             elem: ElemKind::Control,

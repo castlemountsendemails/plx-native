@@ -85,13 +85,12 @@ fn is_first_run_consent(a: &AppArg) -> bool {
 /// always reads this Bridge's captured Browse publication.
 fn refresh_chrome(
     chrome: &mut super::chrome::ChromeSnapshot,
-    measure: &dyn Measure,
     directory: plx_data::stores::browse::DirectoryView<'_>,
     captured: Option<(&plx_plex::plex::session::CurrentProfile, &plx_plex::plex::session::Session)>,
 ) {
     match captured {
-        Some(captured) => chrome.refresh_with_profile(measure, directory, Some(captured)),
-        None => chrome.refresh(measure, directory),
+        Some(captured) => chrome.refresh_with_profile(directory, Some(captured)),
+        None => chrome.refresh(directory),
     }
 }
 
@@ -410,11 +409,9 @@ pub(crate) struct Bridge {
     search: plx_data::stores::search::SearchSnapshot,
     chrome: super::chrome::ChromeSnapshot,
     chrome_selection: u32,
-    /// The shared top bar's render state — the strip's scroll/capsules/chip unfurl and the tab
-    /// track's glass band (restructure phase 12, PX-WIDGETS, review finding 10). `Bridge` is this
-    /// bar's one reachable owner: the only `Rig::draw_chrome` implementation, and the only place
-    /// `update_home_chrome` is called from.
-    strip: plx_ui::widgets::StripRender,
+    /// The nav rail's render state (its expansion and the Watchlist pulse). `Bridge` is the rail's
+    /// one owner: the only `Rig::draw_chrome` implementation, and where `update_home_chrome` steps it.
+    rail: plx_ui::nav_rail::RailRender,
     home_commands: std::collections::VecDeque<HomeCmd>,
     library_commands: std::collections::VecDeque<plx_screens::registry::LibraryCmd>,
     consent: ConsentMachine,
@@ -633,7 +630,7 @@ impl Bridge {
             search: reads.search,
             chrome: super::chrome::ChromeSnapshot::default(),
             chrome_selection: 0,
-            strip: plx_ui::widgets::StripRender::new(),
+            rail: plx_ui::nav_rail::RailRender::new(),
             home_commands: std::collections::VecDeque::new(),
             library_commands: std::collections::VecDeque::new(),
             consent: ConsentMachine::from_initial(consent),
@@ -835,6 +832,18 @@ impl Bridge {
         }
     }
 
+    /// Point the store at library `section` and record it as its kind's chosen library.
+    pub(crate) fn aim_section(&mut self, section: usize) {
+        let target = {
+            let directory = self.directory.view();
+            let Some(row) = directory.sections().get(section) else { return };
+            let (Some(epoch), Some(sid)) = (directory.epoch(), row.sid) else { return };
+            plx_data::stores::browse::SectionAddress { epoch, sid, section: row.key }
+        };
+        self.browse_run(plx_data::stores::browse::BrowseCmd::Addressed { target,
+            work: plx_data::stores::browse::LibraryWork::Commit { select: true, choice: true, query: None } });
+    }
+
     fn deliver_library_commands(&mut self, d: &mut Dispatcher<AppHost>) {
         if d.nav.top_page().is_none_or(|page| page.arg != AppArg::Library || page.inst.is_none()) { return; }
         while let Some(command) = self.library_commands.pop_front() { Self::library_command(d, command); }
@@ -946,10 +955,9 @@ impl Bridge {
                 _ => plx_screens::home::STRIP_HOME_ELEM,
             });
             if let Some(io) = &self.home_io {
-                refresh_chrome(&mut self.chrome, &self.measure, self.directory.view(),
-                    Some((&io.profile, &io.preferences)));
+                refresh_chrome(&mut self.chrome, self.directory.view(), Some((&io.profile, &io.preferences)));
             } else {
-                refresh_chrome(&mut self.chrome, &self.measure, self.directory.view(), None);
+                refresh_chrome(&mut self.chrome, self.directory.view(), None);
             }
             // The page's own pill: Home's is the first, and a library page's is its library's type.
             self.chrome_selection = pill_of_arg(route, self.directory.view()).unwrap_or(0) as u32;
@@ -960,13 +968,15 @@ impl Bridge {
             d.nav.tabs.strip_fallback = None;
             d.nav.tabs.strip_selected = None;
             self.chrome.drop_pulse();
+            // A page without the rail is never pushed aside by it.
+            self.rail.collapse();
         }
     }
 
-    /// **Publish the strip's members and the pill that is the page's own** — one write, so the
-    /// landing rule (`TabContainer::strip_selected`) cannot name a pill the members do not hold.
+    /// **Publish the rail's members and the item that is the page's own** — one write, so the
+    /// landing rule (`TabContainer::strip_selected`) cannot name an item the members do not hold.
     fn publish_strip(&mut self, d: &mut Dispatcher<AppHost>, selected: i32) {
-        self.chrome.members(selected, Self::home_focus(d), self.strip.scroll_pos(), &mut d.nav.tabs.strip);
+        self.rail.members(self.chrome.items(), &mut d.nav.tabs.strip);
         d.nav.tabs.strip_selected = self.chrome.key_at(selected);
     }
 
@@ -998,23 +1008,21 @@ impl Bridge {
         (browse_changed, hubs_changed, search_changed)
     }
 
-    pub(crate) fn update_home_chrome(&mut self, d: &mut Dispatcher<AppHost>,
-        glass: &mut plx_ui::frame::glass::GlassPlan, dt: f32) {
-        let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
-        let focus = Self::home_focus(d);
-        if let Some(idx) = self.chrome.take_pulse() {
-            self.strip.pulse(idx);
-        }
-        let labels = self.chrome.labels();
-        let chrome_focus = self.chrome.focus(focus);
-        self.strip.update(labels, selected, chrome_focus, dt);
-        glass.step_tab_band(dt);
-        self.publish_strip(d, selected);
+    #[cfg(test)]
+    fn seed_chrome_for_test(&mut self, name: &str, initial: &str) {
+        self.chrome.seed_for_test(name, initial);
     }
 
-    #[cfg(test)]
-    fn seed_chrome_for_test(&mut self, name: &str, initial: &str, labels: &[&str]) {
-        self.chrome.seed_for_test(name, initial, labels, &self.measure);
+    /// Step the rail: it is expanded while the page's focus is on it.
+    pub(crate) fn update_home_chrome(&mut self, d: &mut Dispatcher<AppHost>,
+        _glass: &mut plx_ui::frame::glass::GlassPlan, dt: f32) {
+        let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
+        let focus = Self::home_focus(d);
+        if let Some(key) = self.chrome.take_pulse() {
+            self.rail.pulse(key);
+        }
+        self.rail.update(self.chrome.focused_key(focus).is_some(), dt);
+        self.publish_strip(d, selected);
     }
 
     pub(crate) fn home_command(&mut self, command: HomeCmd) -> bool {
@@ -1789,38 +1797,29 @@ impl Bridge {
 }
 
 impl Rig<AppHost> for Bridge {
-    fn draw_chrome(&mut self, arg: &AppArg, _parts: &CxParts<u32>,
+    fn draw_chrome(&mut self, arg: &AppArg, parts: &CxParts<u32>,
         nav: plx_ui::screen::NavPresentation,
         glass: Option<&mut plx_ui::frame::glass::GlassPlan>) {
         if !Self::draws_chrome_for(arg) { return; }
-        let Some(glass) = glass else { return };
-        let p = plx_ui::Painter::root().alpha(nav.chrome_alpha).translate(0.0, -nav.chrome_lift);
-        let chrome = self.chrome.read(self.strip.chip_expand_pos());
-        self.strip.draw(chrome.labels, p, glass.tab_band_mut());
-        plx_ui::widgets::profile_chip_with(
-            p,
-            chrome.profile,
-            chrome.chip_expand,
-            glass.tab_face(),
-        );
+        let _ = glass;
+        let p = plx_ui::Painter::root().alpha(nav.chrome_alpha);
+        let selected = nav.view_tab.unwrap_or(self.chrome_selection) as i32;
+        self.rail.draw(p, self.chrome.items(), self.chrome.key_at(selected),
+            self.chrome.focused_key(parts.focus.current));
     }
-    /// The chip's DRAWN rect: `chip_cap` at the strip's live unfurl and the captured name's width,
-    /// through the host page's tuck (`presented`), exactly what [`Bridge::draw_chrome`] draws.
-    fn bar_member_rect(&self, elem: u32, presented: plx_ui::screen::NavPresentation) -> Option<plx_ui::Rect> {
-        (elem == plx_ui::widgets::TAB_KEY_CHIP).then(|| {
-            let chrome = self.chrome.read(self.strip.chip_expand_pos());
-            presented.chrome_rect(plx_ui::widgets::chip_cap(chrome.chip_expand.clamp(0.0, 1.0), chrome.profile.name_w))
-        })
+    /// A rail item's DRAWN rect: where the account menu grows from and shrinks back into.
+    fn bar_member_rect(&self, elem: u32, _presented: plx_ui::screen::NavPresentation) -> Option<plx_ui::Rect> {
+        self.rail.item_rect(self.chrome.items(), elem)
     }
-    /// The account menu's chip lift (the dispatcher's `Z::OPENER` pass): the SAME captured profile and
-    /// unfurl [`Bridge::draw_chrome`] used, on the same painter (the host page's tuck, alpha and
-    /// lift), over the stack's frozen ground. The material is this frame's tab face from `GlassPlan`.
+    /// The account menu's opener lift (the dispatcher's `Z::OPENER` pass): the Profile item drawn
+    /// again, lit, above the dim, on the chrome pass's own alpha.
     fn lift_bar_member(&mut self, elem: u32, presented: plx_ui::screen::NavPresentation,
-        material: Option<plx_gfx::gfx::GlassFace>, ground: &plx_ui::underlay::UnderlayField) {
-        if elem != plx_ui::widgets::TAB_KEY_CHIP { return; }
-        let chrome = self.chrome.read(self.strip.chip_expand_pos());
-        let p = plx_ui::Painter::root().alpha(presented.chrome_alpha).translate(0.0, -presented.chrome_lift);
-        plx_ui::widgets::lift_profile_chip(p, chrome.profile, chrome.chip_expand, material, ground);
+        _material: Option<plx_gfx::gfx::GlassFace>, _ground: &plx_ui::underlay::UnderlayField) {
+        let p = plx_ui::Painter::root().alpha(presented.chrome_alpha);
+        self.rail.draw_item(p, self.chrome.items(), elem, None, Some(elem));
+    }
+    fn content_dx(&self) -> f32 {
+        self.rail.content_dx()
     }
     fn page_alpha(&self) -> f32 { plx_ui::nav::page_alpha() }
     fn navigation_presentation(&self) -> plx_ui::screen::NavPresentation {
@@ -3177,11 +3176,8 @@ fn pill_of_arg(arg: &AppArg, directory: plx_data::stores::browse::DirectoryView<
         AppArg::Search => pill_of(directory, Pill::Search),
         AppArg::Watchlist => pill_of(directory, Pill::Watchlist),
         // The grid and the two pages its header pushes (Collections, Recommended) are all the
-        // library's: they select its type's pill, the pill they were opened from.
-        arg if arg.is_library_family() => {
-            let kind = directory.current().map(|i| directory.sections()[i].kind)?;
-            pill_of(directory, Pill::Section(kind))
-        }
+        // library's: they select its own item, when it is a favorite.
+        arg if arg.is_library_family() => pill_of(directory, Pill::Library(directory.current()?)),
         _ => None,
     }
 }
@@ -3216,8 +3212,7 @@ pub(crate) fn nav_tab(
                     Pill::Home => HomeTab::Home,
                     Pill::Search => HomeTab::Search,
                     Pill::Watchlist => HomeTab::Watchlist,
-                    Pill::Section(plx_data::browse::SecKind::Movie) => HomeTab::Movies,
-                    Pill::Section(plx_data::browse::SecKind::Show) => HomeTab::Shows,
+                    Pill::Library(section) => HomeTab::Library(section),
                 };
                 rig.home_command(HomeCmd::FocusStrip(want));
             }
@@ -3227,6 +3222,16 @@ pub(crate) fn nav_tab(
             let kind = if tab == HomeTab::Movies { plx_data::browse::SecKind::Movie } else { plx_data::browse::SecKind::Show };
             rig.enter_library(kind);
             if d.top_arg() != Some(&AppArg::Library) { rig.aim_library(kind); }
+            AppArg::Library
+        }
+        HomeTab::Library(section) => {
+            let Some(kind) = rig.directory.view().sections().get(section).map(|s| s.kind) else { return };
+            let on_top = d.top_arg() == Some(&AppArg::Library);
+            if on_top && rig.directory.view().current() == Some(section) { return; }
+            // The store is pointed at the library and it becomes its kind's remembered choice, so
+            // the page (arriving, or switching in place) settles on this library, not another of its kind.
+            rig.aim_section(section);
+            rig.enter_library(kind);
             AppArg::Library
         }
         HomeTab::Search => AppArg::Search,

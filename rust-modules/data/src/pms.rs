@@ -2833,9 +2833,11 @@ fn sync_roster_with_scope(state: &mut PmsState, scope: &BrowseScope) {
 /// MAIN THREAD, and callers release the [`SRCS`] guard first: the re-selection re-enters this
 /// module ([`index_of_rk`]) to walk the catalog just replaced.
 fn commit(state: &mut PmsState, build: HubBuild) -> c_int {
-    let (new_cat, new_hubs, new_pool) = build;
+    let (new_cat, mut new_hubs, _) = build;
+    // Home shows Continue Watching only: no billboard pool and no discovery shelves are published.
+    new_hubs.retain(|hub| hub.hub_id == "home.continue");
     let n = new_cat.len();
-    state.published = Some(Arc::new(HomeCatalog { items: new_cat, hubs: new_hubs, heroes: new_pool }));
+    state.published = Some(Arc::new(HomeCatalog { items: new_cat, hubs: new_hubs, heroes: Vec::new() }));
     state.catalog_gen = state.catalog_gen.wrapping_add(1);
     plx_machine::idle::invalidate();
     n as c_int

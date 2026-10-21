@@ -665,6 +665,7 @@ impl LibraryScreen {
             content: &content,
             rail: Some(self.pair.groups_config().master),
             back_walks_header: self.listing != Listing::Collections,
+            back_rail: false,
             arrival: Arrival::Content,
             // The grid's cells are on their way: until they land (or the listing fails or comes back
             // empty) the page seats nothing, instead of a header control whose OK leaves the page.
@@ -959,16 +960,8 @@ impl LibraryScreen {
             fx.push(Fx::App(AppFx::Library(req)));
             return Handled::Yes;
         }
-        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_HOME, TAB_KEY_MOVIES, TAB_KEY_SEARCH, TAB_KEY_SHOWS, TAB_KEY_WATCHLIST};
-        let req = match elem {
-            TAB_KEY_HOME => Some(LibraryReq::Tab(HomeTab::Home)),
-            TAB_KEY_MOVIES => Some(LibraryReq::Tab(HomeTab::Movies)),
-            TAB_KEY_SHOWS => Some(LibraryReq::Tab(HomeTab::Shows)),
-            TAB_KEY_SEARCH => Some(LibraryReq::Tab(HomeTab::Search)),
-            TAB_KEY_WATCHLIST => Some(LibraryReq::Tab(HomeTab::Watchlist)),
-            TAB_KEY_CHIP => Some(LibraryReq::Account),
-            _ => None,
-        };
+        let req = if elem == plx_ui::widgets::TAB_KEY_CHIP { Some(LibraryReq::Account) }
+            else { HomeTab::of_rail_key(elem).map(LibraryReq::Tab) };
         if let Some(req) = req { fx.push(Fx::App(AppFx::Library(req))); return Handled::Yes; }
         if elem == RETRY && self.readout == Readout::Failed
             && super::plaintext_question::asks(self.plaintext.verdict())

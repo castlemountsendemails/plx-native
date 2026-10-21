@@ -44,15 +44,35 @@ use super::{Painter, Rect};
 pub const STRIP_BASE: u32 = 0xFFFF_0000;
 const _: () = assert!(STRIP_BASE >= super::geom::NAMESPACE_FLOOR);
 
-/// The input owner's page COMPOSED with the container's strip (§6.2): the strip is a `Row`
-/// group above the page's own, contributed only while the page allows it.
+/// The input owner's page COMPOSED with the container's nav rail (§6.2): the rail is a `Column`
+/// group left of the page's own, contributed only while the page allows it.
 struct PageWithStrip<'a, H: Host> {
     page: &'a dyn Screen<H>,
     strip: Option<(GroupSpec, &'a [super::containers::tabs::StripMember<H::Elem>])>,
     strip_fallback: Option<H::Elem>,
-    /// The page's own pill (`TabContainer::strip_selected`): where a move up from the page lands.
+    /// The page's own item (`TabContainer::strip_selected`): where a move into the rail lands.
     strip_selected: Option<H::Elem>,
+    rail_return: Option<FocusKey<H::Elem>>,
     entry: EntryId,
+}
+
+impl<H: Host> PageWithStrip<'_, H>
+where
+    H::Elem: IndexElem,
+{
+    /// The page's links, adapted to a rail on the left: links between the page and the rail by
+    /// Up/Down are dropped (Up from the top row stops), and every page group whose Left edge is a
+    /// `Stop` gets a Left link into the rail.
+    fn links(&self, cx: &Cx<'_, H>, out: &mut Vec<super::screen::Link>) {
+        use super::containers::tabs::STRIP;
+        self.page.links(out);
+        out.retain(|link| link.from != STRIP && link.to != STRIP);
+        if self.strip.is_none() { return; }
+        let mut groups = Vec::new();
+        self.page.groups(cx, &mut groups);
+        out.extend(groups.iter().filter(|g| g.edge[2] == EdgeRule::Stop)
+            .map(|g| super::screen::Link { from: g.id, dir: Dir::Left, to: STRIP }));
+    }
 }
 
 impl<H: Host> Focusable<H> for PageWithStrip<'_, H>
@@ -81,8 +101,13 @@ where
                     elem: members[j].elem,
                 });
                 match dir {
-                    Dir::Left if i > 0 => mv(i - 1),
-                    Dir::Right if i + 1 < members.len() => mv(i + 1),
+                    Dir::Up if i > 0 => mv(i - 1),
+                    Dir::Down if i + 1 < members.len() => mv(i + 1),
+                    Dir::Right => match self.rail_return
+                        .filter(|key| key.entry == self.entry && self.page.group_of(&key.elem, cx).is_some()) {
+                        Some(key) => Step::Move(key),
+                        None => Step::Edge,
+                    },
                     _ => Step::Edge,
                 }
             }
@@ -117,18 +142,16 @@ where
     fn seat(&self, g: GroupId, from: Placed, cx: &Cx<'_, H>) -> FocusKey<H::Elem> {
         match &self.strip {
             Some((spec, members)) if spec.id == g => {
-                // **One landing rule for every page that wears the bar:** the page's own pill, not
-                // the pill under the key that left the page. A move up from the Library's leftmost
-                // control used to land on the profile chip, and from the Watchlist's pill on Search,
-                // whichever pill happened to sit above the key. The nearest pill is only the answer
-                // when the application published no selection.
+                // One landing rule for every page that wears the rail: the page's own item, not the
+                // item beside the key that left the page. The nearest item is only the answer when
+                // the application published no selection.
                 if let Some(own) = self.strip_selected.and_then(|key| members.iter().find(|m| m.elem == key)) {
                     return FocusKey { entry: self.entry, elem: own.elem };
                 }
-                let cx_ = from.rect.cx();
+                let cy = from.rect.cy();
                 let mut best = (f32::MAX, 0usize);
                 for (i, member) in members.iter().enumerate() {
-                    let d = (member.target.cx() - cx_).abs();
+                    let d = (member.target.cy() - cy).abs();
                     if d < best.0 {
                         best = (d, i);
                     }
@@ -246,6 +269,9 @@ pub trait Rig<H: Host> {
     fn navigation_presentation(&self) -> super::screen::NavPresentation {
         super::screen::NavPresentation { page_alpha: self.page_alpha(), ..Default::default() }
     }
+    /// How far right the page pass draws the pages this frame: the room an expanded nav rail
+    /// pushes the content aside by. The content's own layout is unchanged; it slides as one piece.
+    fn content_dx(&self) -> f32 { 0.0 }
     /// Shared chrome draws after its page and before surfaces, using a captured vocabulary.
     fn draw_chrome(&mut self, _arg: &H::Arg, _parts: &CxParts<H::Elem>,
         _nav: super::screen::NavPresentation, _glass: Option<&mut super::frame::glass::GlassPlan>) {}
@@ -281,17 +307,13 @@ pub trait Rig<H: Host> {
     fn back_at_root(&mut self) {}
 }
 
-/// **The shared top bar as the page on top presents it this frame, or `None` when it is not drawn.**
-/// The nav's presentation tucked by what the page answers ([`Screen::chrome_tuck`]), kept only while
-/// [`NavPresentation::chrome_drawn`] says the bar is on screen. The chrome pass and the strip's pointer
-/// stops both ask THIS, so what is clickable is what is drawn, by one rule: the pass is skipped on
-/// `None` and the stops are withdrawn on `None`, and on `Some` the pass draws the bar `chrome_lift`
-/// higher and the stops are lifted by the same amount ([`NavPresentation::chrome_rect`]).
-fn chrome_presented<H: Host>(navigation: super::screen::NavPresentation, screen: &dyn Screen<H>)
+/// **The nav rail as the page on top presents it this frame, or `None` when it is not drawn.**
+/// The rail ignores a page's [`Screen::chrome_tuck`]: it stays on screen while the page scrolls.
+/// The chrome pass and the rail's pointer stops both ask THIS, so what is clickable is what is drawn.
+fn chrome_presented<H: Host>(navigation: super::screen::NavPresentation, _screen: &dyn Screen<H>)
     -> Option<super::screen::NavPresentation>
 {
-    let presented = navigation.tucked(screen.chrome_tuck());
-    presented.chrome_drawn().then_some(presented)
+    navigation.chrome_drawn().then_some(navigation)
 }
 
 pub struct Split<'a, H: Host> {
@@ -850,7 +872,8 @@ where
         let is_top_page = nav.top_page().map(|t| t.id) == Some(entry);
         let strip = (is_top_page && page.strip_reachable() && !nav.tabs.strip.is_empty())
             .then(|| (nav.tabs.strip_group(), nav.tabs.strip.as_slice()));
-        Some(PageWithStrip { page, strip, strip_fallback: nav.tabs.strip_fallback, strip_selected: nav.tabs.strip_selected, entry })
+        Some(PageWithStrip { page, strip, strip_fallback: nav.tabs.strip_fallback, strip_selected: nav.tabs.strip_selected,
+            rail_return: nav.tabs.rail_return, entry })
     }
 
     /// **Is this frame's picture a hardware VIDEO PLANE?** (spec §9, §16 risk 10.)
@@ -1491,6 +1514,7 @@ where
         use super::frame::backdrop::{self, Z};
         let strip_owner = self.owner_entry();
         let navigation = rig.navigation_presentation();
+        let content_dx = rig.content_dx();
         // The element the opener lift draws live above the host snapshot is NOT part of the page
         // pass (`DrawFrame::lifted`). When it changes (the menu mounts, or the lift stands down
         // because focus moved off the opener while the menu fades) the snapshot no longer matches
@@ -1668,7 +1692,7 @@ where
                         let full_alpha = capture || source_capture;
                         let mut page_navigation = navigation;
                         if full_alpha { page_navigation.page_alpha = 1.0; }
-                        let mut f = DrawFrame::with_navigation(&page_cx, Painter::root(), page_navigation);
+                        let mut f = DrawFrame::with_navigation(&page_cx, Painter::root().translate(content_dx, 0.0), page_navigation);
                         f.lifted = lifted;
                         if !full_alpha { f.page_alpha *= nav.tabs.stack.transition.page_alpha(); }
                         let drawn_from = super::placeholder::mark();
@@ -2280,6 +2304,7 @@ where
                 let outcome = self.focus_resolution(rig, parts, entry, 0, tap,
                     |engine, view, cx| engine.enter(owner, view, target, restored, cx));
                 if let Outcome::Moved { from, to, by } = outcome {
+                    self.note_rail_entry(from, to);
                     out.push(Stamped {
                         from: MachineId::Input,
                         fx: Fx::Deliver(MachineId::Instance(id), Delivery::Screen(ScreenEvent::FocusMoved { from, to, by })),
@@ -2296,7 +2321,7 @@ where
                     }
                     let mut links = Vec::new();
                     let outcome = self.focus_resolution(rig, parts, entry, 1, tap, |engine, view, cx| {
-                        view.page.links(&mut links);
+                        view.links(cx, &mut links);
                         engine.move_dir(owner, view, &links, dir, cx)
                     });
                     if self.input.engine.take_fell_back() {
@@ -2307,6 +2332,7 @@ where
                             // Navigation abandons the press (§7.4): the pressed card springs back
                             // where it is while focus moves on, and the tap never commits.
                             self.input.abandon_if_off(entry, to);
+                            self.note_rail_entry(from, to);
                             out.push(Stamped {
                                 from: MachineId::Input,
                                 fx: Fx::Deliver(MachineId::Instance(id), Delivery::Screen(ScreenEvent::FocusMoved { from, to, by })),
@@ -2414,6 +2440,14 @@ where
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Remember the page element a move into the rail left, for Right out of the rail.
+    fn note_rail_entry(&mut self, from: Option<FocusKey<H::Elem>>, to: FocusKey<H::Elem>) {
+        let on_rail = |key: FocusKey<H::Elem>| key.elem.index().is_some_and(|i| i >= STRIP_BASE);
+        if let Some(from) = from.filter(|from| on_rail(to) && !on_rail(*from)) {
+            self.nav.tabs.rail_return = Some(from);
         }
     }
 

@@ -569,6 +569,7 @@ impl RecommendedScreen {
             content: &content,
             rail: None,
             back_walks_header: false,
+            back_rail: false,
             arrival: Arrival::Content,
             // No publication yet: the page seats nothing until its first row lands (or it learns
             // there are none), not the crumb whose OK pops the page.
@@ -867,17 +868,9 @@ impl RecommendedScreen {
             fx.push(Fx::App(AppFx::Library(req)));
             return Handled::Yes;
         }
-        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_HOME, TAB_KEY_MOVIES, TAB_KEY_SEARCH, TAB_KEY_SHOWS, TAB_KEY_WATCHLIST};
         use crate::registry::HomeTab;
-        let req = match elem {
-            TAB_KEY_HOME => Some(LibraryReq::Tab(HomeTab::Home)),
-            TAB_KEY_MOVIES => Some(LibraryReq::Tab(HomeTab::Movies)),
-            TAB_KEY_SHOWS => Some(LibraryReq::Tab(HomeTab::Shows)),
-            TAB_KEY_SEARCH => Some(LibraryReq::Tab(HomeTab::Search)),
-            TAB_KEY_WATCHLIST => Some(LibraryReq::Tab(HomeTab::Watchlist)),
-            TAB_KEY_CHIP => Some(LibraryReq::Account),
-            _ => None,
-        };
+        let req = if elem == plx_ui::widgets::TAB_KEY_CHIP { Some(LibraryReq::Account) }
+            else { HomeTab::of_rail_key(elem).map(LibraryReq::Tab) };
         if let Some(req) = req { fx.push(Fx::App(AppFx::Library(req))); return Handled::Yes; }
         Handled::No
     }

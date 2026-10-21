@@ -2316,13 +2316,11 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // `bridge::host_frozen` — the host fold, off the surfaces' own `Style`.
 
         // **One arm for every page that wears the shared bar** (`bridge::wears_tab_bar`, the same
-        // predicate `capture_chrome` publishes the strip on). The springs it steps — the capsule,
-        // the scroll, the chip — live in `Bridge`'s own `strip: StripRender`, not in any screen:
-        // `SearchScreen::tick` and the rest only step their OWN rows. Without this the springs
-        // freeze at whatever the previously-drawn page left them at, and `ChromeSnapshot::members`'s
-        // published rects (read by pointer hit-testing and focus) go stale. Four arms spelled the
-        // routes by name (Home, Library, Search|Watchlist) and left Collections and Recommended
-        // out, which is how those two pages wore a bar nobody stepped.
+        // predicate `capture_chrome` publishes the rail on). The motion it steps — the rail's
+        // expansion and pulse — lives in `Bridge`'s own `rail: RailRender`, not in any screen:
+        // `SearchScreen::tick` and the rest only step their OWN rows. Without this the rail freezes
+        // at whatever the previously-drawn page left it at, and its published rects (read by
+        // pointer hit-testing and focus) go stale.
         if !super::bridge::host_frozen(&app.pages) && super::bridge::wears_tab_bar(&app.route()) {
             match app.route() {
                 AppArg::Home => {

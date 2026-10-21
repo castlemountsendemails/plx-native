@@ -1,41 +1,13 @@
-//! The library page header (redesign spec, "Header"): the library names, the "+N" overflow and the
-//! page's three controls (on the Collections page, the crumb and its Sort) on the ui
-//! [`PageHeader`], one focus row at y 148.
+//! The library page header: the page's three controls (on the Collections page, the crumb and its
+//! Sort) on the ui [`PageHeader`], one focus row. It names no library: libraries are chosen from
+//! the nav rail.
 //!
-//! This file DECLARES the row: which names, which controls, which element each focusable item is.
-//! The row is built here, once per sync, as a ui [`HeaderRow`]; its layout, paint, motion and focus
-//! group are the ui's (`plx_ui::page_header`), the same ones the Collections, Recommended and
-//! Watchlist pages wear. The names are packed against the room the right cluster leaves
-//! (`PageHeader::layout`'s `left_budget`, sized from the cluster's widest case), so the names never
-//! shift when a value changes, the Collections answer (unknown, none, a count of up to three digits)
-//! included; a library whose count needs a fourth digit widens its own budget once; the
-//! controls inside the cluster stand by what they draw, one gap apart. The row's MOTION (`header_capsules`, `header_pop`) lives on the screen, not in the
-//! row: a library switch replaces the whole row, and the pill must travel across it.
+//! This file DECLARES the row: which controls, which element each focusable item is. The row is
+//! built here, once per sync, as a ui [`HeaderRow`]; its layout, paint, motion and focus group are
+//! the ui's (`plx_ui::page_header`), the same ones the Collections, Recommended and Watchlist pages
+//! wear. The row's MOTION (`header_capsules`, `header_pop`) lives on the screen, not in the row.
 use super::*;
 use plx_ui::page_header::{self, HeaderFocus, HeaderItem, HeaderRow, PageHeader, PageHeaderSpec, Slot};
-
-/// Which of `n` names show when the row cannot hold them all (`budget` is text edge to text edge
-/// for names plus "+N"). The picked library takes the LAST visible slot: names keep their order
-/// from the front, and a selected one past the cut replaces the final name. Always at least the
-/// selected name; every name when they all fit under `cap`.
-pub(super) fn pack_names(widths: &[f32], selected: usize, budget: f32, more_w: f32, cap: usize) -> Vec<usize> {
-    let n = widths.len();
-    if n == 0 || cap == 0 { return Vec::new(); }
-    let selected = selected.min(n - 1);
-    let span = |picks: &[usize]| picks.iter().map(|&i| widths[i]).sum::<f32>()
-        + page_header::GAP * picks.len().saturating_sub(1) as f32;
-    let all: Vec<usize> = (0..n).collect();
-    if n <= cap && span(&all) <= budget { return all; }
-    // "+N" takes the end of the row, one gap after the last name.
-    let with_more = |picks: &[usize]| span(picks) + picks.last()
-        .map_or(0.0, |_| page_header::GAP) + more_w;
-    for k in (1..n.min(cap)).rev() {
-        let mut picks: Vec<usize> = (0..k).collect();
-        if selected >= k { picks[k - 1] = selected; }
-        if with_more(&picks) <= budget { return picks; }
-    }
-    vec![selected]
-}
 
 fn item(label: impl Into<String>) -> HeaderItem {
     HeaderItem { label: label.into(), focusable: true, ..Default::default() }
@@ -225,58 +197,20 @@ impl LibraryScreen {
         self.header.install(key, row);
     }
 
-    /// The row of the Library page itself: the library names that fit, then the controls.
+    /// The row of the Library page itself: the controls only. Libraries are chosen from the nav
+    /// rail, so the row names none and has no "+N".
     fn names_header<H: LibraryLike>(&mut self, cx: &Cx<'_, H>) -> HeaderRow {
         let (right, widest) = self.header_right(cx);
         let measure = cx.measure;
-        let budget = PageHeader::new(PageHeaderSpec { right: right.clone(), ..Default::default() }, &widest, measure)
-            .layout(SCR_W, measure).left_budget;
-
         self.libraries.clear();
         self.folded.clear();
-        let mut overflow = 0;
-        let current = self.view_section(cx);
-        let mut left = Vec::new();
-        if let Some(current) = current {
-            let directory = H::directory(cx);
-            let mut all: Vec<(u32, usize)> = Vec::new();
-            for (index, section) in directory.favorite_sections_for(current) {
-                let Some(sid) = section.sid else { continue };
-                let elem = self.keys.register(
-                    LibraryIdentity::Library(LibrarySectionIdentity { sid, key: section.key }),
-                    LIBRARY_GROUP, all.len());
-                all.push((elem, index));
-            }
-            // A SINGLE candidate never draws a name, whatever owns the section it names: a lone
-            // library carries nothing to disambiguate for ANY profile (issue #100/#165), so only
-            // the candidate COUNT decides, and only 2+ ever reaches the packing below.
-            if all.len() > 1 {
-                let labels: Vec<String> = all.iter()
-                    .map(|(_, section)| self.library_label(*section, cx)).collect();
-                let widths: Vec<f32> = labels.iter().map(|label| page_header::cluster_width(&[item(label.as_str())], measure)).collect();
-                let selected = all.iter().position(|(_, index)| *index == current).unwrap_or(0);
-                let more_w = page_header::cluster_width(&[item(format!("+{}", all.len() - 1))], measure);
-                let picks = pack_names(&widths, selected, budget, more_w, layout::MAX_LIBRARY_PILLS);
-                overflow = all.len() - picks.len();
-                self.folded = all.iter().enumerate().filter(|(i, _)| !picks.contains(i))
-                    .filter_map(|(_, (_, section))| u32::try_from(*section).ok()).collect();
-                for &pick in &picks {
-                    left.push(HeaderItem { selected_plate: all[pick].1 == current, ..item(labels[pick].as_str()) });
-                    self.libraries.push(all[pick]);
-                }
-                if overflow > 0 { self.libraries.push((MORE, usize::MAX)); }
-            }
-        }
-
-        let page = PageHeader::new(PageHeaderSpec { left, overflow, right, ..Default::default() }, &widest, measure);
+        let page = PageHeader::new(PageHeaderSpec { right, ..Default::default() }, &widest, measure);
         let mut layout = page.layout(SCR_W, measure);
-        if self.libraries.is_empty() {
-            // One library: no names, and the three controls sit centred between the nav and the
-            // grid (the board's row top is y 158, ten under the multi-library row's 148).
-            for it in &mut layout.items {
-                it.text.y += layout::SINGLE_LIBRARY_DY;
-                it.plate.y += layout::SINGLE_LIBRARY_DY;
-            }
+        // With no names the controls sit centred between the nav and the grid (the board's row top
+        // is y 158, ten under a named row's 148).
+        for it in &mut layout.items {
+            it.text.y += layout::SINGLE_LIBRARY_DY;
+            it.plate.y += layout::SINGLE_LIBRARY_DY;
         }
         self.header_row(page, layout)
     }

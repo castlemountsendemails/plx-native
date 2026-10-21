@@ -1,7 +1,6 @@
 // The library page header (redesign PR4): geometry, controls per kind, the focus table and the
 // "focus never switches the library" rule. Included from `navigation_tests` for its `Fixture`.
 use super::*;
-use super::header::pack_names;
 use plx_machine::machine::{InputEvent, InputKind, Source};
 
 fn key_press(key: Key) -> ScreenEvent<TestHost> {
@@ -112,25 +111,10 @@ fn every_gap_of_the_right_cluster_is_one_gap_whatever_the_collections_count_is()
 }
 
 #[test]
-fn one_library_draws_no_names_and_two_draw_both() {
+fn the_header_names_no_library_however_many_there_are() {
     let _guard = plx_base::testlock::serial();
     assert!(grid_page(1).1.libraries.is_empty(), "one library: only the three controls");
-    assert_eq!(grid_page(2).1.libraries.len(), 2);
-}
-
-#[test]
-fn the_picked_library_takes_the_last_visible_slot() {
-    let widths = [200.0, 180.0, 220.0, 160.0, 240.0];
-    assert_eq!(pack_names(&widths, 0, 4000.0, 90.0, 8), [0, 1, 2, 3, 4], "everything fits: all names, in order");
-    let gap = plx_ui::page_header::GAP;
-    let tight = 200.0 + 180.0 + 220.0 + gap + gap + 90.0 + gap + 1.0;
-    let cut = pack_names(&widths, 1, tight, 90.0, 8);
-    assert_eq!(cut, [0, 1, 2], "a pick inside the cut keeps its place");
-    let cut = pack_names(&widths, 4, tight, 90.0, 8);
-    assert_eq!(cut.last(), Some(&4), "a pick past the cut replaces the last visible name");
-    assert_eq!(cut.len(), 2, "[0, 4] is what the room holds");
-    assert_eq!(pack_names(&widths, 3, 10.0, 90.0, 8), [3], "never fewer than the picked library");
-    assert!(pack_names(&[], 0, 100.0, 10.0, 8).is_empty());
+    assert!(grid_page(3).1.libraries.is_empty(), "libraries are chosen from the nav rail, not the header");
 }
 
 #[test]

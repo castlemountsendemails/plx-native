@@ -265,6 +265,24 @@ pub enum HomeTab {
     /// The Watchlist mark, before Search (docs/watchlist-plan.md §2.4 W45).
     Watchlist,
     Search,
+    /// A favorite library's rail item, by the library's index in the directory's section table.
+    Library(usize),
+}
+
+impl HomeTab {
+    /// The destination a rail key names, for every page's rail press. The profile item is not a
+    /// destination (it opens the account menu) and answers `None`, as does a key off the rail.
+    pub fn of_rail_key(key: u32) -> Option<Self> {
+        use plx_ui::widgets::{TAB_KEY_HOME, TAB_KEY_MOVIES, TAB_KEY_SEARCH, TAB_KEY_SHOWS, TAB_KEY_WATCHLIST};
+        Some(match key {
+            TAB_KEY_HOME => Self::Home,
+            TAB_KEY_MOVIES => Self::Movies,
+            TAB_KEY_SHOWS => Self::Shows,
+            TAB_KEY_SEARCH => Self::Search,
+            TAB_KEY_WATCHLIST => Self::Watchlist,
+            key => Self::Library(plx_ui::widgets::library_of_tab_key(key)?),
+        })
+    }
 }
 
 /// Addressed bootstrap/diagnostic intentions. They use the same owned step and focus engine as

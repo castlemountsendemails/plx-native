@@ -262,17 +262,16 @@ impl SearchScreen {
     }
 
     fn activate<H: SearchLike>(&mut self, elem: u32, held: bool, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
-        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_HOME, TAB_KEY_MOVIES, TAB_KEY_SEARCH, TAB_KEY_SHOWS, TAB_KEY_WATCHLIST};
+        use plx_ui::widgets::{TAB_KEY_CHIP, TAB_KEY_SEARCH};
         if elem >= plx_ui::dispatch::STRIP_BASE {
             let request = match elem {
-                TAB_KEY_HOME => SearchReq::Tab(HomeTab::Home),
-                TAB_KEY_MOVIES => SearchReq::Tab(HomeTab::Movies),
-                TAB_KEY_SHOWS => SearchReq::Tab(HomeTab::Shows),
-                TAB_KEY_WATCHLIST => SearchReq::Tab(HomeTab::Watchlist),
                 // The Search mark is the page the user is already on: nothing to request.
                 TAB_KEY_SEARCH => return Handled::Yes,
                 TAB_KEY_CHIP => SearchReq::Account,
-                _ => return Handled::No,
+                key => match HomeTab::of_rail_key(key) {
+                    Some(tab) => SearchReq::Tab(tab),
+                    None => return Handled::No,
+                },
             };
             self.keyboard(false, true, fx);
             fx.push(Fx::App(AppFx::Search(request)));
@@ -404,13 +403,14 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                             return Handled::Yes;
                         }
                     }
-                    if *key == Key::Up && cx.focus.current == Some(self.key(FIELD)) {
-                        self.keyboard(false, true, fx);
-                        self.reseat(FocusTarget::Elem(self.key(plx_ui::widgets::TAB_KEY_SEARCH)), fx);
-                        return Handled::Yes;
-                    }
                     if *key == Key::Back {
-                        fx.push(Fx::App(AppFx::Search(SearchReq::Back)));
+                        // BACK climbs from the page to the rail's Search item; from the rail it opens Home.
+                        if cx.focus.current.is_some_and(|key| key.elem < plx_ui::dispatch::STRIP_BASE) {
+                            self.keyboard(false, true, fx);
+                            self.reseat(FocusTarget::Elem(self.key(plx_ui::widgets::TAB_KEY_SEARCH)), fx);
+                        } else {
+                            fx.push(Fx::App(AppFx::Search(SearchReq::Back)));
+                        }
                         return Handled::Yes;
                     }
                     return Handled::No;

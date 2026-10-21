@@ -655,9 +655,9 @@ fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 }
 
 /// The account-menu lift (`Rig::lift_bar_member`) is a second PAINT of this bridge's captured chrome, not a second
-/// publication. Changing the process globals after A captured must not make A draw B's chip.
+/// publication. Changing the process globals after A captured must not make A draw B's Profile item.
 #[test]
-fn two_bridges_keep_their_own_captured_profile_and_labels_for_a_scrim_lift() {
+fn two_bridges_keep_their_own_captured_profile_for_a_scrim_lift() {
     let _guard = plx_base::testlock::serial();
     struct Restore(std::sync::Arc<plx_plex::plex::session::CurrentProfile>);
     impl Drop for Restore {
@@ -668,19 +668,22 @@ fn two_bridges_keep_their_own_captured_profile_and_labels_for_a_scrim_lift() {
     let _restore = Restore(plx_plex::plex::session::current_snapshot());
     let mut a = Bridge::for_test(|| 0);
     let mut b = Bridge::for_test(|| 0);
-    a.seed_chrome_for_test("Owner A", "A", &["Home", "Movies", ""]);
-    b.seed_chrome_for_test("Owner B", "B", &["Home", "TV Shows", ""]);
+    a.seed_chrome_for_test("Owner A", "A");
+    b.seed_chrome_for_test("Owner B", "B");
     plx_plex::plex::session::publish_profile_for_test(Some(plx_plex::plex::session::UserRef {
         title: "Global B".into(),
         ..Default::default()
     }), 41);
 
-    // the lift (`Rig::lift_bar_member`) reads exactly this: the bridge's own captured chrome
-    let ar = a.chrome.read(0.0);
-    let br = b.chrome.read(0.0);
-    assert_eq!(ar.profile.name.to_bytes(), b"Owner A");
-    assert_eq!(ar.profile.initial.to_bytes(), b"A");
-    assert_eq!(ar.labels.faces, [plx_ui::widgets::TabFace::Label("Home".into()), plx_ui::widgets::TabFace::Label("Movies".into()), plx_ui::widgets::TabFace::Icon(plx_ui::icons::Icon::Search)]);
-    assert_eq!(br.profile.name.to_bytes(), b"Owner B");
-    assert_eq!(br.labels.faces, [plx_ui::widgets::TabFace::Label("Home".into()), plx_ui::widgets::TabFace::Label("TV Shows".into()), plx_ui::widgets::TabFace::Icon(plx_ui::icons::Icon::Search)]);
+    // the lift (`Rig::lift_bar_member`) reads exactly this: the bridge's own captured rail items
+    let profile = |rig: &Bridge| {
+        let item = rig.chrome.items().last().expect("the profile item");
+        let initial = match &item.mark {
+            plx_ui::nav_rail::RailMark::Avatar(initial) => initial.to_bytes().to_vec(),
+            _ => Vec::new(),
+        };
+        (item.label.to_bytes().to_vec(), initial)
+    };
+    assert_eq!(profile(&a), (b"Owner A".to_vec(), b"A".to_vec()));
+    assert_eq!(profile(&b), (b"Owner B".to_vec(), b"B".to_vec()));
 }

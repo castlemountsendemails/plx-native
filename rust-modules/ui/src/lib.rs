@@ -75,6 +75,7 @@ pub mod master_detail; // RESTRUCTURE (spec §10): reusable two-region focus/ret
 pub mod page_stack; // the drill-in page stack Tracks and More share
 pub mod panel_motion; // the resize/page-slide spring of the in-player table popovers (Tracks, More)
 pub mod nav; // the page transition's PRESENTATION, published once a frame from the container
+pub mod nav_rail; // the left-edge column of destinations every main screen wears
 pub mod breadcrumb; // 'Films > Collections' crumb (PR5)
 pub mod page_header; // the page header row: one layout, paint, focus group and motion for the Library, Collections, Recommended and Watchlist pages
 pub mod page_regions; // the column NAV/HEADER/CONTENT/RAIL: one table for the pages' links, BACK and first seat

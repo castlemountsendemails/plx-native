@@ -241,6 +241,8 @@ pub enum Icon {
     /// A ring with a bar through it — the Watchlist's on-no-server mark, the universal "unavailable"
     /// sign at the inline weight.
     CircleSlash,
+    /// A house outline at the inline 2.2 weight — the nav rail's Home item.
+    Home,
 }
 
 /// **Where a mark's INK sits inside its 24-unit viewBox**, as `(left, right)` fractions — and
@@ -339,6 +341,7 @@ fn src(id: Icon) -> &'static str {
         Icon::Clock => include_str!("../../../assets/icons/clock.svg"),
         Icon::ServerSlash => include_str!("../../../assets/icons/server-slash.svg"),
         Icon::CircleSlash => include_str!("../../../assets/icons/circle-slash.svg"),
+        Icon::Home => include_str!("../../../assets/icons/home.svg"),
     }
 }
 
