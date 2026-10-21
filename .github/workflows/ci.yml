@@ -507,7 +507,11 @@ jobs:
           key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ci/build-ffmpeg.sh', 'ci/deps.py', 'ci/dependencies.json', 'ci/arm-cc.py', 'ci/check-link-evidence.py', 'ci/stage-link-evidence.py', '.github/actions/webos-ndk/action.yml') }}
 
       - name: Build
-        run: make WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}' -j"$(nproc)"
+        # Drops `devtools` (the on-screen frame counter) from this fork's sideload while keeping
+        # `devtriggers` (the /tmp diagnostic surface) and `threadcheck`; own target dir per the
+        # Makefile's RUST_FEATFLAGS/RUST_TDIR pairing rule, so Package below reuses this build
+        # rather than relinking under a stale stamp.
+        run: make RUST_FEATFLAGS="--no-default-features --features devtriggers,threadcheck" RUST_TDIR=target-nocounter WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}' -j"$(nproc)"
 
       - name: Package
         # DELIBERATELY the developer id. This artifact is a DEV build — the whole point of a PR
@@ -517,7 +521,7 @@ jobs:
         # than over it. The release job is the only place `FLAVOR=stable` belongs (release.yml).
         # Named explicitly rather than inherited, so this is a decision on the page instead of a
         # default that moves if the Makefile's does.
-        run: make ipk FLAVOR=debug WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}'
+        run: make ipk FLAVOR=debug RUST_FEATFLAGS="--no-default-features --features devtriggers,threadcheck" RUST_TDIR=target-nocounter WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}'
 
       - name: Binary size budget
         # The STRIPPED binary `make ipk` just staged (the one inside the .ipk), not the unstripped

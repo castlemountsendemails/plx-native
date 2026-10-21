@@ -34,6 +34,11 @@ const K_SCROLL: f32 = 240.0;
 /// Air between the fixed items and the scrolling band, and the height of the band's edge fades.
 const BAND_GAP: f32 = theme::space::SM;
 const FADE_H: f32 = 40.0;
+/// How far short of the rail's own width the background panel stops, so a focused card at the
+/// content's left edge (its `CARD_FOCUS_SCALE` pop reaches about 9px past the card's base left
+/// edge) and its caption are not painted over. Only live while collapsed (`e` near 0): once the
+/// rail itself holds focus and expands, nothing in the content is popped.
+const COLLAPSED_BLEED_CLEARANCE: f32 = 32.0;
 
 pub enum RailMark {
     Icon(Icon),
@@ -71,6 +76,13 @@ pub struct RailItem {
 /// The rail's width at expansion `e` (0 collapsed, 1 expanded).
 pub fn width(e: f32) -> f32 {
     COLLAPSED_W + PUSH * e.clamp(0.0, 1.0)
+}
+
+/// The background panel's width at expansion `e`: [`width`], short of the clearance while
+/// collapsed, flush with it (and so with the content's own left edge) once expanded.
+fn panel_width(e: f32) -> f32 {
+    let e = e.clamp(0.0, 1.0);
+    width(e) - COLLAPSED_BLEED_CLEARANCE * (1.0 - e)
 }
 
 fn in_band(item: &RailItem) -> bool {
@@ -226,8 +238,9 @@ impl RailRender {
 
     /// `active` is the item of the screen on view; `focused` the key holding focus, if any.
     pub fn draw(&self, p: Painter, items: &[RailItem], active: Option<u32>, focused: Option<u32>) {
-        let w = width(self.expand_pos());
-        p.rect(Rect::new(0.0, 0.0, w, SCR_H), 0.0, theme::PANEL_TOP, theme::PANEL_BOT, 0.0);
+        let e = self.expand_pos();
+        let panel_w = panel_width(e);
+        p.rect(Rect::new(0.0, 0.0, panel_w, SCR_H), 0.0, theme::PANEL_TOP, theme::PANEL_BOT, 0.0);
         for item in items {
             self.draw_item(p, items, item.key, active, focused);
         }
@@ -235,10 +248,10 @@ impl RailRender {
         let b = band(items);
         let clear = |c: [f32; 4]| [c[0], c[1], c[2], 0.0];
         if self.scroll.pos > 0.5 {
-            p.rect(Rect::new(0.0, b.y, w, FADE_H), 0.0, theme::PANEL_TOP, clear(theme::PANEL_TOP), 0.0);
+            p.rect(Rect::new(0.0, b.y, panel_w, FADE_H), 0.0, theme::PANEL_TOP, clear(theme::PANEL_TOP), 0.0);
         }
         if self.scroll.pos < max_scroll(items) - 0.5 {
-            p.rect(Rect::new(0.0, b.y + b.h - FADE_H, w, FADE_H), 0.0, clear(theme::PANEL_BOT), theme::PANEL_BOT, 0.0);
+            p.rect(Rect::new(0.0, b.y + b.h - FADE_H, panel_w, FADE_H), 0.0, clear(theme::PANEL_BOT), theme::PANEL_BOT, 0.0);
         }
     }
 
@@ -421,6 +434,13 @@ mod tests {
         let row = members.iter().position(|m| m.elem == 200).unwrap();
         assert_eq!((members[row + 1].elem, members[row + 1].side), (400, true));
         assert_eq!(members.iter().filter(|m| m.side).count(), 3);
+    }
+
+    #[test]
+    fn the_collapsed_panel_clears_a_focused_card_but_the_expanded_one_is_flush_with_content() {
+        assert_eq!(panel_width(0.0), COLLAPSED_W - COLLAPSED_BLEED_CLEARANCE);
+        assert_eq!(panel_width(1.0), EXPANDED_W, "no content can be focused once the rail expands");
+        assert!(panel_width(0.5) > panel_width(0.0) && panel_width(0.5) < panel_width(1.0));
     }
 
     #[test]

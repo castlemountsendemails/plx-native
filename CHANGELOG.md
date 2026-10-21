@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] - 2026-10-21
+
+### Fixed
+- The developer frame counter in the top-right corner is gone from this build.
+- Home's focused Continue Watching card, and its caption, no longer sit partly behind the collapsed rail.
+
 ## [0.1.2] - 2026-10-21
 
 ### Added
