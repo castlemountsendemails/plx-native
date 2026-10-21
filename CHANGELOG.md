@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1] - 2026-10-21
+
+### Fixed
+- With many favorite libraries, the rail scrolls its library list, while Home, Search, Watchlist and Profile stay put, instead of piling the items on top of each other.
+- Back at the end of the chain closes the app on TVs that refuse to show their launcher (such as webOS 4.4), instead of doing nothing.
+
 ## [0.1.0] - 2026-10-21
 
 ### Added
