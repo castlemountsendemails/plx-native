@@ -150,7 +150,11 @@ pub(crate) unsafe fn run(app: &mut App) {
             crate::dev::framedump::iteration_begin(app);
         }
         plx_platform::tv::window::pump_bus();
-        plx_platform::tv::home::poll();
+        if plx_platform::tv::home::poll() {
+            // BACK at the root, on a television that would not show its launcher: leave as EXIT does.
+            log("root BACK: terminating");
+            app.running = false;
+        }
         // The one toast key mode owes the viewer (`net::keypin`'s facts), on every route.
         clock_notice.poll();
         // What the hold hint has taught since last frame, written once to the install's session.

@@ -1013,7 +1013,8 @@ impl Bridge {
         self.chrome.seed_for_test(name, initial);
     }
 
-    /// Step the rail: it is expanded while the page's focus is on it.
+    /// Step the rail: it is expanded while the page's focus is on it, and scrolled to its focused
+    /// item, or else the page's own.
     pub(crate) fn update_home_chrome(&mut self, d: &mut Dispatcher<AppHost>,
         _glass: &mut plx_ui::frame::glass::GlassPlan, dt: f32) {
         let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
@@ -1021,7 +1022,7 @@ impl Bridge {
         if let Some(key) = self.chrome.take_pulse() {
             self.rail.pulse(key);
         }
-        self.rail.update(self.chrome.focused_key(focus).is_some(), dt);
+        self.rail.update(self.chrome.items(), self.chrome.focused_key(focus), self.chrome.key_at(selected), dt);
         self.publish_strip(d, selected);
     }
 
@@ -1809,7 +1810,7 @@ impl Rig<AppHost> for Bridge {
     }
     /// A rail item's DRAWN rect: where the account menu grows from and shrinks back into.
     fn bar_member_rect(&self, elem: u32, _presented: plx_ui::screen::NavPresentation) -> Option<plx_ui::Rect> {
-        self.rail.item_rect(self.chrome.items(), elem)
+        self.rail.item_rect_of(self.chrome.items(), elem)
     }
     /// The account menu's opener lift (the dispatcher's `Z::OPENER` pass): the Profile item drawn
     /// again, lit, above the dim, on the chrome pass's own alpha.

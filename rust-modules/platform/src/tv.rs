@@ -23,7 +23,8 @@ pub struct Port {
     pub remove: fn(&secure::Backend, &str),
     pub system_locale: fn() -> LocaleReply,
     pub go_home: fn(),
-    pub poll_home: fn(),
+    /// `true` once a root press could not hand the screen back: the app quits instead.
+    pub poll_home: fn() -> bool,
     pub deliver_toast: fn(&str, toast::Identity) -> toast::Sent,
     pub bind_window: fn(*mut c_void),
     pub grab_surface: fn(*mut c_void),
@@ -58,7 +59,7 @@ static ABSENT: Port = Port {
     remove: |_, _| {},
     system_locale: || LocaleReply::NoPlatform,
     go_home: nothing,
-    poll_home: nothing,
+    poll_home: || false,
     deliver_toast: toast::deliver_without_port,
     bind_window: |_| {},
     grab_surface: |_| {},

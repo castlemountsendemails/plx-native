@@ -287,25 +287,12 @@ fn probe_jail() {
 ///    "backgrounds us", which is the webOS 5+ full-screen launcher's shape and not this set's. It
 ///    took a plain anonymous `LSRegister` to get there — [`ls2`]'s module doc has the table of
 ///    what the hub answers to each registration shape.
-/// 2. **Minimize the surface.** `SDL_MinimizeWindow`, which on LG's SDL fork reaches the webOS
-///    shell. The fork does bind that protocol: the harvested `libSDL2-2.0.so.0.4.1` off this set
-///    carries `wl_webos_shell`, `wl_webos_shell_interface` and `wl_webos_shell_surface_interface`
-///    in `.rodata`, and it is how `SDL_WEBOS_ACCESS_POLICY_KEYS_BACK` (set by `src/main.c`) becomes
-///    the surface property that lets BACK reach this app at all. `wl_webos_shell_surface.set_state`
-///    with `WL_WEBOS_SHELL_SURFACE_STATE_MINIMIZED = 1` is LG's own protocol
-///    (`wayland-webos-shell-client-protocol.h` / `webos-shell.xml` in the NDK sysroot), and it is
-///    what Kodi's webOS port drives from its `SetMinimized`. What is NOT proven from the binary is
-///    that LG's fork wires `SDL_MinimizeWindow` to it — the library is stripped and the driver's
-///    hook is an internal function pointer — so this is the FALLBACK and not the mechanism: SDL's
-///    own contract makes an unimplemented hook a silent no-op, which is the correct failure here.
+/// 2. **Quit.** When SAM refuses (webOS 4.4.3 answers this id with `-101 "not exist"`) or cannot be
+///    asked, the app ends the way the EXIT key ends it: the request reaches the frame thread
+///    through [`poll_home`]. Minimizing the surface (`SDL_MinimizeWindow`) is a silent no-op on
+///    that set, so it is only the forced `minimize` leg below.
 ///
-/// If BOTH legs fail the user stays exactly where they were, which is the right last resort: the
-/// alternative is ending the process, and "must not terminate the application" is the whole of what
-/// was asked for. `SDL_MinimizeWindow` returns void, so the app cannot even know the second leg
-/// failed — the log line says what was ASKED, never that it worked, and the screenshot is what
-/// says whether it did.
-///
-/// `/tmp/plxnative-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
+/// `/tmp/plxnative-gohome=<sam|minimize>` forces one leg, so each can be exercised in one device
 /// session instead of only whichever happens to answer first. Compiled out under `RELEASE=1`.
 ///
 /// **Not rate-limited here** — [`crate::tv::home::take_root_press`] is, and `app.rs` claims the
@@ -330,21 +317,26 @@ pub fn go_home() {
         if probe { ls2_probe(); }
         else if !launch_home() {
             if sam_only { plx_base::eventlog::log("gohome: no fallback — the trigger forced SAM only"); }
-            else { HOME_MINIMIZE.store(true, std::sync::atomic::Ordering::Release); }
+            else { request_quit(); }
         }
         HOME_PENDING.store(false, std::sync::atomic::Ordering::Release);
     }) {
         HOME_PENDING.store(false, std::sync::atomic::Ordering::Release);
-        if !probe && !sam_only { minimize(); }
+        if !probe && !sam_only { request_quit(); }
     }
 }
 
 static HOME_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static HOME_MINIMIZE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HOME_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// LS2 waits on its own context off-thread; only the SDL fallback returns to the frame thread.
-pub fn poll_home() {
-    if HOME_MINIMIZE.swap(false, std::sync::atomic::Ordering::AcqRel) { minimize(); }
+fn request_quit() {
+    plx_base::eventlog::log("gohome: the launcher could not be shown — the app quits instead");
+    HOME_QUIT.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// LS2 waits on its own context off-thread; only the quit returns to the frame thread.
+pub fn poll_home() -> bool {
+    HOME_QUIT.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 
 /// The Home launcher's app id.

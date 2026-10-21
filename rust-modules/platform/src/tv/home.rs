@@ -69,9 +69,9 @@ pub fn go_home() {
     (super::port().go_home)()
 }
 
-/// The frame thread's half of a root press: the platform's fallback leg, when its off-thread leg
-/// asked for one.
-pub fn poll() {
+/// The frame thread's half of a root press: `true` when the platform could not hand the screen
+/// back, and the app should quit instead.
+pub fn poll() -> bool {
     (super::port().poll_home)()
 }
 
