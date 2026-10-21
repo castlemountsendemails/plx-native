@@ -2045,6 +2045,7 @@ pub(crate) unsafe fn construct(
         down_sym,
         modal_repeat,
         diagnostics: crate::app::diagnostics::Diagnostics::default(),
+        exit_confirm: crate::app::exit_confirm::ExitConfirm::new(),
         player,
         adapters,
         repause_at,

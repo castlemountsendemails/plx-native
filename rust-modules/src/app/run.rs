@@ -157,7 +157,7 @@ pub(crate) unsafe fn run(app: &mut App) {
             crate::dev::framedump::iteration_begin(app);
         }
         plx_platform::tv::window::pump_bus();
-        if root_back_quits() { app.running = false; }
+        if root_back_quits() { app.exit_confirm.open(); }
         // The one toast key mode owes the viewer (`net::keypin`'s facts), on every route.
         clock_notice.poll();
         // What the hold hint has taught since last frame, written once to the install's session.
@@ -362,6 +362,7 @@ fn clock_and_press(app: &mut App, fr: &mut Frame) {
     let (_, press_moving) = plx_machine::idle::scoped_motion(|| {
         app.input.press.tick(fr.now, fr.dt);
     });
+    app.exit_confirm.update(fr.dt);
     // The motion of whatever page is UNDER a popover — Home, the Library or Search, since
     // the profile chip is a stop on all three. It was `home_underlay_moving` while only Home
     // could be underneath. The account popover's glass re-snapshots off this.
@@ -991,6 +992,25 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             controlled_key_input(app, event);
             return;
         }
+        // **The exit-confirm, above even the tree.** It has no owning screen, so it is checked
+        // here rather than through `tree_owns_key` below — the one arm in this ladder that is
+        // not the dispatcher's. Only a fresh press acts; a key-up or a repeat is swallowed with
+        // it, matching the modal discipline every other decision alert in the app gets from its
+        // owning screen's focus group.
+        if app.exit_confirm.is_open() {
+            if (state & 0xff) == 1 && state & 0x100 == 0 {
+                if matches!(key, Key::Ok) {
+                    if app.exit_confirm.on_ok() {
+                        app.running = false;
+                    }
+                } else if matches!(key, Key::Back) {
+                    app.exit_confirm.on_back();
+                } else {
+                    app.exit_confirm.move_focus(sym);
+                }
+            }
+            return;
+        }
         app.rec.input(super::recorder::enc_key(
             sym,
             wcode,
@@ -1251,12 +1271,10 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
                 key_pause(&mut app.adapters.player, app.last_input, &mut app.pages);
             }
         } else if matches!(key, Key::Exit) {
-            // The remote's EXIT key — LG's checklist item 38 wants the app terminated,
-            // and unlike BACK at Home's root there is nothing ambiguous about a key
-            // labelled EXIT, so unlike BACK it really does end the process — and it
-            // is now the only key that does.
-            log("EXIT key: terminating");
-            app.running = false;
+            // The remote's EXIT key — LG's checklist item 38 wants the app terminated. Raises
+            // the same exit-confirm root BACK does; only choosing *Exit* there ends the process.
+            log("EXIT key: confirm raised");
+            app.exit_confirm.open();
         // (Two player arms stood here — STOP's `exit_player`, and LEFT/RIGHT's `key_scrub`. Both
         // are `PlayerScreen`'s: `Key::Stop` asks for `PlayerReq::Exit` and reaches the very same
         // ritual through `player_requests`, and the scrub ladder is the page's three edges. Their
@@ -2837,6 +2855,9 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                     crate::lab::draw(app.diagnostics.frame_if_shown());
                     #[cfg(feature = "threadcheck")]
                     plx_ui::runtime_warning::draw(app.boot_initial.is_some());
+                    // Topmost on every route, including the player: it has no owning screen for
+                    // its own draw order to inherit.
+                    app.exit_confirm.draw();
                 });
             });
     (vx, vy, vw, vh)

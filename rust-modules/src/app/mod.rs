@@ -116,6 +116,7 @@ pub(crate) mod words;
 pub(crate) mod page_title;
 pub(crate) mod clock;
 mod clock_notice;
+mod exit_confirm;
 mod hint_taught;
 mod recorder;
 mod window_activity;
@@ -265,6 +266,9 @@ pub(crate) struct App {
     /// nine `static mut`s in `ui/stats.rs`. Not a `ModalStack` surface, and `diagnostics.rs`'s
     /// `Diagnostics` doc says why — the panel takes no keys and draws at two different z-positions.
     pub(crate) diagnostics: diagnostics::Diagnostics,
+    /// The "Exit PlxNative?" prompt, raised instead of quitting outright at root BACK or EXIT —
+    /// see `exit_confirm`'s module doc for why it lives here rather than on a screen.
+    pub(crate) exit_confirm: exit_confirm::ExitConfirm,
     /// **The Player machine** (restructure spec §2.2, phase 9): the playback session that was
     /// `route::decision::SESSION`, the app-switch lifecycle that was `App.foreground`, and this
     /// frame's tick. Reached as a parameter from here down — `plx_media::player::machine`'s doc says
