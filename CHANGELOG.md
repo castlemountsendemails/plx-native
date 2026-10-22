@@ -1,6 +1,12 @@
 # Changelog
 
-## [0.1.5] - 
+## [0.1.5] - 2026-10-22
+
+### Fixed
+- A library deleted on its server now drops out of the rail, More and the favorites order the next time that server's library list is re-read (e.g. Check shares), rather than lingering until the app restarts.
+
+### Updated
+- Moving a favorite in the rail is cancelled, not saved, if the library list is rebuilt while it is being moved.
 
 ### Added
 - Home's empty Continue Watching reads "Nothing in progress" / "Pick a library from the left." instead of the old discovery-hub wording, with no action — focus stays on the rail.
