@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.4] - 2026-10-21
+
+### Added
+- Hold OK on a favorite in the nav rail to reorder it: Up/Down move it, OK saves the new order, Back cancels.
+- A one-time hint teaches the hold-to-reorder gesture, shown once per install.
+
 ## [0.1.3] - 2026-10-21
 
 ### Fixed
