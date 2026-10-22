@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.6] - 2026-10-22
+
+### Fixed
+- The rail's "Hold OK to reorder" hint still appears after a card's item menu has been opened in the same run.
+
 ## [0.1.5] - 2026-10-22
 
 ### Fixed
