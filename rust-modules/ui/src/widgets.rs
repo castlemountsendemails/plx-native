@@ -6243,6 +6243,12 @@ pub fn star_of_tab_key(key: u32) -> Option<usize> {
 pub fn tab_key_server(source: usize) -> u32 {
     TAB_KEY_SERVER + (source as u32).min(TAB_KEY_LIBRARY_SPAN - 1)
 }
+/// A favorite whose server has not answered this run, by its slot in the favorites band. No
+/// destination reads this range, so OK on one does nothing and it cannot be held to reorder.
+const TAB_KEY_UNSEEN: u32 = crate::dispatch::STRIP_BASE + 0x8000;
+pub fn tab_key_unseen(slot: usize) -> u32 {
+    TAB_KEY_UNSEEN + (slot as u32).min(TAB_KEY_LIBRARY_SPAN - 1)
+}
 /// The top chrome band's y — the chip and the pills sit on it (Home and Library alike).
 ///
 /// **Derived from the overscan safe area, not chosen.** It was a bare `44.0` until 2026-08-23, which

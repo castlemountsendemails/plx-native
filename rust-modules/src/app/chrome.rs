@@ -126,13 +126,20 @@ fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open
         fixed(widgets::TAB_KEY_WATCHLIST, Icon::Bookmark, plx_platform::i18n::msg::watchlist_page_title(), RailRole::Top),
     ];
     let libraries = favorites(directory, order);
-    items.extend(libraries.iter().map(|&(i, title, server, dim)| {
+    let mut band: Vec<RailItem> = libraries.iter().map(|&(i, title, server, dim)| {
         // Two favorites with one name are told apart by their server.
         let shared = libraries.iter().filter(|(_, other, _, _)| *other == title).count() > 1;
         let label = if shared && !server.is_empty() { format!("{title} · {server}") } else { title.to_owned() };
         RailItem { key: widgets::tab_key_library(i), mark: RailMark::Badge(first_letter(title)), label: caps(&label),
             caps: true, role: RailRole::Band, dim }
-    }));
+    }).collect();
+    // Placeholders keep fixed slots, so a favorite being moved steps past them.
+    for unseen in directory.unseen_favorites() {
+        band.insert(unseen.slot.min(band.len()), RailItem { key: widgets::tab_key_unseen(unseen.slot),
+            mark: RailMark::Badge(first_letter(&unseen.name)), label: caps(&unseen.name), caps: true,
+            role: RailRole::Band, dim: unseen.dim });
+    }
+    items.extend(band);
     items.push(fixed(widgets::TAB_KEY_MORE, Icon::More, plx_platform::i18n::msg::browse_action_more(), RailRole::Band));
     if more_open {
         for src in 0..directory.sources().len() {
@@ -407,7 +414,8 @@ impl ChromeSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_data::stores::browse::{DirectorySnapshot, SecKind, SectionView, SrcRow};
+    use plx_data::stores::browse::{DirectorySnapshot, SecKind, SectionView, SrcRow, UnseenFavorite};
+    use plx_screens::registry::HomeTab;
 
     fn directory(pinned: &[(SecKind, &str, bool)]) -> DirectorySnapshot {
         let sid = plx_plex::plex::ServerId::from_raw(0);
@@ -511,6 +519,37 @@ mod tests {
         }
     }
 
+    /// A favorite whose server has not answered draws from its stored name at its saved slot,
+    /// dimmed only as told, names no destination, and keeps its slot while another favorite moves.
+    #[test]
+    fn an_unseen_favorite_holds_its_slot_and_goes_nowhere() {
+        let mut directory = directory(&[(SecKind::Movie, "A", true), (SecKind::Movie, "B", true)]);
+        directory.set_unseen_favorites_for_test(vec![
+            UnseenFavorite { slot: 1, name: "Kids".into(), dim: false },
+            UnseenFavorite { slot: 3, name: "Anime".into(), dim: true },
+        ]);
+        let items = rail_items(directory.view(), "", "", false, directory.view().favorite_order());
+        let band: Vec<_> = items[3..7].iter().map(|item| (item.key, item.label.to_str().unwrap(), item.dim)).collect();
+        assert_eq!(band, [
+            (widgets::tab_key_library(0), "A", false),
+            (widgets::tab_key_unseen(1), "KIDS", false),
+            (widgets::tab_key_library(1), "B", false),
+            (widgets::tab_key_unseen(3), "ANIME", true),
+        ]);
+        assert!(matches!(&items[4].mark, RailMark::Badge(letter) if letter.to_str().unwrap() == "K"));
+        assert_eq!(items[7].key, widgets::TAB_KEY_MORE);
+        assert!(HomeTab::of_rail_key(widgets::tab_key_unseen(1)).is_none(), "OK on it goes nowhere");
+        assert_eq!(widgets::library_of_tab_key(widgets::tab_key_unseen(1)), None, "so it cannot be held");
+
+        let mut chrome = ChromeSnapshot::default();
+        chrome.arm_rail_hold(1, 1_000);
+        chrome.enter_rail_move(directory.view());
+        chrome.step_rail_move(-1); // B above A
+        let order = chrome.drop_rail_move().expect("was moving");
+        let keys: Vec<_> = rail_items(directory.view(), "", "", false, &order)[3..7].iter().map(|item| item.key).collect();
+        assert_eq!(keys, [widgets::tab_key_library(1), widgets::tab_key_unseen(1),
+            widgets::tab_key_library(0), widgets::tab_key_unseen(3)], "B stepped past the placeholder");
+    }
     #[test]
     fn a_library_sits_on_its_favorite_item_else_its_more_row_else_more() {
         let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Anime", false)]);

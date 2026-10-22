@@ -694,3 +694,60 @@ fn a_full_answer_naming_every_known_library_moves_no_index() {
     assert_eq!(browse.state.table_epoch(), epoch);
     assert_eq!(titles(&browse), ["Movies", "Docs"], "a new library still appends after the known ones");
 }
+
+/// Two favorites on a server that answered, one on a server not yet dialled, and one the
+/// answered server no longer lists, saved in that interleaved order.
+fn unseen_fixture(browse: &mut TestBrowse) {
+    let mut silent = a_source("mach-1", "friend", true);
+    silent.state = SourceState::NotProbed;
+    silent.sections_done = false;
+    browse.seed_sources(vec![a_source("mach-0", "", true), silent]);
+    browse.append_sections(0, vec![(1, "A".into(), SecKind::Movie), (2, "B".into(), SecKind::Movie)]);
+    let lib = |machine_id: &str, key| plx_plex::plex::session::PinnedLib {
+        machine_id: machine_id.into(), key, extensions: Default::default() };
+    let entry = |machine_id: &str, key, name: &str| plx_plex::plex::session::OrderedLib {
+        machine_id: machine_id.into(), key, name: name.into(), kind: "movie".into(), extensions: Default::default() };
+    browse.state.resolve_pins_with(Some(plx_plex::plex::session::HomePins {
+        user: plx_plex::plex::session::current_profile_key(),
+        asked: true,
+        on: vec![lib("mach-0", 1), lib("mach-0", 2), lib("mach-1", 5)],
+        off: Vec::new(),
+        order: vec![entry("mach-0", 1, "A"), entry("mach-1", 5, "Kids"), entry("mach-0", 2, "B"),
+            entry("mach-0", 9, "Gone")],
+        extensions: Default::default(),
+    }));
+}
+
+#[test]
+fn a_favorite_whose_server_has_not_answered_is_unseen_in_its_slot() {
+    let _g = plx_base::testlock::serial();
+    let _t = TempPins::new("unseen-slot");
+    let mut browse = TestBrowse::default();
+    unseen_fixture(&mut browse);
+    assert_eq!(browse.state.favorite_order(), [0, 1]);
+    let unseen: Vec<_> = browse.state.unseen_favorites().into_iter()
+        .map(|(slot, entry)| (slot, entry.name.clone())).collect();
+    assert_eq!(unseen, [(1, "Kids".to_string())], "Gone's server answered without it");
+
+    browse.state.source_mut(0).unwrap().sections_done = false;
+    assert_eq!(browse.state.unseen_favorites().len(), 1, "a server re-listing its rows has still answered");
+    browse.state.source_mut(1).unwrap().sections_done = true;
+    assert!(browse.state.unseen_favorites().is_empty(), "an answer without the library ends it");
+}
+
+#[test]
+fn a_reorder_keeps_unseen_favorites_in_their_slots() {
+    let _g = plx_base::testlock::serial();
+    let t = TempPins::new("unseen-reorder");
+    t.watching("u-unseen");
+    let mut browse = TestBrowse::default();
+    unseen_fixture(&mut browse);
+
+    browse.state.reorder_favorites(&[1, 0]);
+    plx_base::storage_worker::drain_for_test();
+
+    let saved = plx_plex::plex::session::peek();
+    let record = saved.pins_for(&plx_plex::plex::session::current_profile_key()).expect("saved");
+    let names: Vec<_> = record.order.iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, ["B", "Kids", "A"], "Kids keeps slot 1; Gone is pruned");
+}

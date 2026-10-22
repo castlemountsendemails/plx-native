@@ -347,12 +347,22 @@ pub struct SectionView {
     pub row: super::SrcRow,
 }
 
+/// A saved favorite whose server has not answered this run, drawn from its stored name. `slot` is
+/// its place in the rail's favorites band; `dim` is set only once its server has failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnseenFavorite {
+    pub slot: usize,
+    pub name: String,
+    pub dim: bool,
+}
+
 #[derive(Default, Clone)]
 struct DirectoryData {
     sources: Vec<(ServerId, super::SrcGroup)>,
     sections: Vec<SectionView>,
     favorites: Vec<(ServerId, i64, bool)>,
     favorite_order: Vec<usize>,
+    unseen_favorites: Vec<UnseenFavorite>,
 }
 
 /// Retained by the Bridge-owned `BrowseStore` and captured from its `BrowseState`, never a new
@@ -410,6 +420,13 @@ impl DirectorySnapshot {
                     }).collect(),
                 favorites: state.favorite_sections(),
                 favorite_order: state.favorite_order().to_vec(),
+                unseen_favorites: state.unseen_favorites().into_iter().map(|(slot, entry)| UnseenFavorite {
+                    slot,
+                    name: entry.name.clone(),
+                    dim: state.sources().iter().find(|source| source.machine_id == entry.machine_id)
+                        .is_some_and(|source| !matches!(source.state,
+                            super::SourceState::Reachable | super::SourceState::NotProbed)),
+                }).collect(),
             });
             self.stamp = Some(stamp);
         }
@@ -441,6 +458,7 @@ impl DirectorySnapshot {
                 sections: Vec::new(),
                 favorites: Vec::new(),
                 favorite_order: Vec::new(),
+                unseen_favorites: Vec::new(),
             }),
             items: super::SecItems::default(),
             source: Some(0),
@@ -497,6 +515,7 @@ impl DirectorySnapshot {
                 sections,
                 favorites,
                 favorite_order,
+                unseen_favorites: Vec::new(),
             }),
             items: super::SecItems::default(),
             source: None,
@@ -515,6 +534,11 @@ impl DirectorySnapshot {
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_favorite_order_for_test(&mut self, order: Vec<usize>) {
         Arc::make_mut(&mut self.data).favorite_order = order;
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_unseen_favorites_for_test(&mut self, unseen: Vec<UnseenFavorite>) {
+        Arc::make_mut(&mut self.data).unseen_favorites = unseen;
     }
 
     pub fn view(&self) -> DirectoryView<'_> {
@@ -554,6 +578,9 @@ impl<'a> DirectoryView<'a> {
     /// The favorite libraries' section indices in the profile's rail order.
     pub fn favorite_order(self) -> &'a [usize] {
         &self.0.data.favorite_order
+    }
+    pub fn unseen_favorites(self) -> &'a [UnseenFavorite] {
+        &self.0.data.unseen_favorites
     }
     #[allow(dead_code)]
     pub fn favorite_sections(self) -> &'a [(ServerId, i64, bool)] {

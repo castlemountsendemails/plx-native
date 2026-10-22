@@ -2086,6 +2086,27 @@ impl BrowseState {
     fn favorite_order(&self) -> &[usize] {
         &self.favorite_order
     }
+    /// The saved favorites whose server has not answered its section list this run, each with its
+    /// slot in the rail's favorites band. A server holding any section in the table counts as
+    /// answered, so a library deleted on it never returns as a placeholder while it re-lists.
+    fn unseen_favorites(&self) -> Vec<(usize, &plx_plex::plex::session::OrderedLib)> {
+        let Some(record) = &self.recorded else { return Vec::new() };
+        let libraries = self.lib_refs();
+        let answered = |machine_id: &str| self.sources.iter().enumerate().any(|(si, source)|
+            source.machine_id == machine_id
+                && (source.sections_done || self.sections.iter().any(|section| section.src == si)));
+        let mut placed: Vec<usize> = Vec::new();
+        let mut out = Vec::new();
+        for entry in &record.order {
+            match libraries.iter().position(|lib| lib.machine_id == entry.machine_id && lib.key == entry.key) {
+                Some(i) => if self.favorite_order.contains(&i) && !placed.contains(&i) { placed.push(i) },
+                None if !entry.machine_id.is_empty() && !answered(&entry.machine_id) =>
+                    out.push((placed.len() + out.len(), entry)),
+                None => {}
+            }
+        }
+        out
+    }
     /// **The whole-table reconcile, plus the publication a moved row owes** — the one path for
     /// "something happened that can invalidate an already-resolved table".
     ///
@@ -2258,9 +2279,8 @@ impl BrowseState {
     /// Save a new FAVORITES order from the rail's hold-to-reorder gesture (§3.5): the same
     /// session-queue plumbing [`record_pins`](Self::record_pins) uses for a star toggle, except no
     /// pin is touched — `order` is every current favorite's section index, in the rail's new
-    /// order, and becomes `HomePins.order` verbatim (favorites not named in it, or whose server is
-    /// not currently known, are dropped — a sweep cannot happen here, since this writes the whole
-    /// profile record. The rail only ever hands back the favorites it already had).
+    /// order, and becomes `HomePins.order` with each [unseen favorite](Self::unseen_favorites)
+    /// put back in its slot. Favorites not named in `order` are dropped.
     ///
     /// Reconciled immediately against the pending selection, exactly as
     /// [`apply_pins`](Self::apply_pins) does, so the rail's own working order becomes
@@ -2284,16 +2304,19 @@ impl BrowseState {
             let answers = plx_plex::plex::pins::answers(&libraries, &[], &touched, None);
             plx_plex::plex::pins::record(&user, true, &libraries, &answers)
         });
-        record.order = order.iter().filter_map(|&i| {
+        let mut entries: Vec<plx_plex::plex::session::OrderedLib> = order.iter().filter_map(|&i| {
             let lib = libraries.get(i)?;
             if lib.machine_id.is_empty() { return None; }
             let (name, kind) = owned_titles.get(i).map_or(("", ""), |(n, k)| (n.as_str(), *k));
             Some(plx_plex::plex::session::OrderedLib { machine_id: lib.machine_id.to_string(), key: lib.key,
                 name: name.to_string(), kind: kind.to_string(), extensions: Default::default() })
         }).collect();
+        for (slot, entry) in self.unseen_favorites() {
+            entries.insert(slot.min(entries.len()), entry.clone());
+        }
+        record.order = entries.clone();
         let owned: Vec<_> = libraries.iter().map(|lib|
             (lib.machine_id.to_owned(), lib.key, lib.household, lib.household_type)).collect();
-        let order = order.to_vec();
         let pending_user = user.clone();
         let Ok(ticket) = plx_plex::plex::session::queue_update_ticket(move |session| {
             let libraries: Vec<_> = owned.iter().map(|(machine_id, key, household, household_type)|
@@ -2304,13 +2327,7 @@ impl BrowseState {
                 let answers = plx_plex::plex::pins::answers(&libraries, &[], &touched, None);
                 plx_plex::plex::pins::record(&user, true, &libraries, &answers)
             });
-            merged.order = order.iter().filter_map(|&i| {
-                let lib = libraries.get(i)?;
-                if lib.machine_id.is_empty() { return None; }
-                let (name, kind) = owned_titles.get(i).map_or(("", ""), |(n, k)| (n.as_str(), *k));
-                Some(plx_plex::plex::session::OrderedLib { machine_id: lib.machine_id.to_string(), key: lib.key,
-                    name: name.to_string(), kind: kind.to_string(), extensions: Default::default() })
-            }).collect();
+            merged.order = entries;
             let mut next = session.clone();
             next.set_pins_for(&user, merged);
             Some(next)
@@ -2377,9 +2394,15 @@ impl BrowseState {
                         }
                         self.append_sections_with(
                             source_index, list.unwrap_or_default(), preferences);
+                        let mut first_answer = false;
                         if let Some(source) = self.source_mut(source_index) {
+                            first_answer = answered && !source.sections_done;
                             source.sections_done = answered;
                             source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
+                        }
+                        // An answer adding no library still ends its server's unseen favorites.
+                        if first_answer {
+                            self.bump_source_facts_gen();
                         }
                         if !answered {
                             let who = self.sources.get(source_index)
