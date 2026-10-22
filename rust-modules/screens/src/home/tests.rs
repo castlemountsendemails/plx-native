@@ -407,12 +407,15 @@ fn a_failed_home_names_a_wrong_clock_when_key_mode_cannot_help() {
     assert_eq!(s.clock.blocked(), Some(Blocked::KeyChanged));
     assert_eq!(overlay.reason, Some(plx_platform::i18n::msg::browse_clock_key_changed_c()));
 
-    // A read-out that has not failed takes no reason, whatever the fact says.
-    for hub_state in [plx_data::pms::HubState::Loading, plx_data::pms::HubState::Ready] {
+    // A read-out that has not failed takes no clock reason, whatever the fact says.
+    for (hub_state, reason) in [
+        (plx_data::pms::HubState::Loading, None),
+        (plx_data::pms::HubState::Ready, Some(plx_platform::i18n::msg::browse_home_empty_hint_c())),
+    ] {
         plx_data::pms::seed_for_test(&mut state, &adapter, 0, hub_state);
         let snapshot = plx_data::pms::hubs_snapshot(&state);
         let overlay = status_overlay(snapshot.view(), &s.plaintext, &s.clock).unwrap();
-        assert_eq!((overlay.reason, overlay.glyph), (None, None), "{hub_state:?}");
+        assert_eq!((overlay.reason, overlay.glyph), (reason, None), "{hub_state:?}");
     }
 
     // The plaintext offer's reason (and its glyph) win: its own cause is the one the person can act on.

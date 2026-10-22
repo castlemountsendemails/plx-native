@@ -162,7 +162,8 @@ pub const READ_MS: u32 = 1000;
 // and a host test gets a fresh answer per test thread with no lock to forget.
 //
 // `LEARNED` is the within-a-run fact: the viewer has opened a context menu, so the self-appearing
-// hint retires everywhere for the rest of the run, and a held OK no longer shows the capsule either.
+// hint retires on every surface but the rail for the rest of the run, and a held OK there no longer
+// shows the capsule either.
 // It is NOT stored. What is stored, once per INSTALL, is `SHOWN`: one bit per [`Surface`], set when a
 // read showing happened on that surface (or a menu was opened, which teaches every surface). This
 // crate cannot name the session record (`plx_ui` may not name Plex types), so the application seeds
@@ -420,7 +421,7 @@ impl HoldHint {
     /// at most once per install per [`Surface`], on any screen. The first time a hint has stood in
     /// full for [`READ_MS`] it takes its surface's latch, and no hint stands on its own on that
     /// surface again, this run or after a relaunch. An opened item menu ([`learned`]) retires it as
-    /// well. A hint that never stood, or whose showing was cut short by a focus move before it had
+    /// well, except on the rail. A hint that never stood, or whose showing was cut short by a focus move before it had
     /// been readable, spends nothing and is offered again after the dwell; a physical hold shows it
     /// regardless, with its fill.
     pub const fn new() -> Self {
@@ -440,7 +441,8 @@ impl HoldHint {
             self.claimed = false;
             self.full_at = None;
         }
-        let focus = input.focus.filter(|_| !learned());
+        // An item menu teaches holding a card, not reordering the rail, so it never retires the rail.
+        let focus = input.focus.filter(|_| input.surface == Surface::Rail || !learned());
         if focus != self.key || input.surface != self.surface {
             self.key = focus;
             self.surface = input.surface;
@@ -533,7 +535,7 @@ impl HoldHint {
     /// [`wants_input`](Self::wants_input) for a hint that stands on `surface`. A page with both
     /// surfaces asks for each: the input is worth building if either could matter.
     pub fn wants_input_on(&self, surface: Surface, ok_held: bool) -> bool {
-        if learned() {
+        if learned() && surface != Surface::Rail {
             return false;
         }
         ok_held || self.claimed || self.visible() || self.fill > 0.0 || !shown(surface)

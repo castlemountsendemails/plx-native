@@ -473,7 +473,7 @@ fn a_failed_source_names_a_wrong_clock_when_key_mode_cannot_help() {
         let shared = plx_platform::i18n::msg::browse_library_shared_unreachable("friend");
         assert_eq!(shown.as_ref().and_then(|r| r.to_str().ok()), (!owner.is_empty()).then_some(shared.as_str()),
             "no fact: today's read-out");
-        assert_eq!(glyph, Some(Icon::ServerBadgeMinus));
+        assert_eq!(glyph, Some(Icon::WifiSlash));
 
         keypin::strict_failure(&key, 60, Some(10));
         let (stale, ..) = read(&page, &fixture);
@@ -500,7 +500,7 @@ fn a_failed_source_names_a_wrong_clock_when_key_mode_cannot_help() {
         let (shown, glyph, ..) = read(&page, &fixture);
         assert_eq!(shown.as_ref().and_then(|r| r.to_str().ok()), (!owner.is_empty()).then_some(shared.as_str()),
             "the fact cleared: the shared-by line is back");
-        assert_eq!(glyph, Some(Icon::ServerBadgeMinus));
+        assert_eq!(glyph, Some(Icon::WifiSlash));
     }
 
     // An offered plaintext server's reason outranks the clock's, glyph included.
@@ -519,7 +519,7 @@ fn a_failed_source_names_a_wrong_clock_when_key_mode_cannot_help() {
     assert!(page.clock.blocked().is_some(), "the clock fact stands");
     let (shown, glyph, ..) = read(&page, &fixture);
     assert!(shown.as_ref().and_then(|r| r.to_str().ok()).is_some_and(|r| r.contains("Select Connect")), "{shown:?}");
-    assert_eq!(glyph, Some(Icon::ServerBadgeMinus));
+    assert_eq!(glyph, Some(Icon::WifiSlash));
     plx_plex::plex::grant::reset_for_test();
 }
 
@@ -553,7 +553,7 @@ fn a_failed_source_ignores_a_clock_fact_about_another_server() {
     keypin::key_changed(&elsewhere);
     tick(&mut page);
     assert_eq!(page.clock.blocked(), None, "another server's fact is not this source's");
-    assert_eq!(shown(&page), (None, Some(Icon::ServerBadgeMinus)), "today's read-out");
+    assert_eq!(shown(&page), (None, Some(Icon::WifiSlash)), "today's read-out");
 
     keypin::strict_failure(&here, 60, Some(10));
     tick(&mut page);

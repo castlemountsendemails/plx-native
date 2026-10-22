@@ -7,8 +7,7 @@ use plx_machine::machine::FocusKey;
 use plx_ui::icons::Icon;
 use plx_ui::nav_rail::{RailItem, RailMark, RailRole};
 use plx_ui::widgets::{self, TopFocus};
-use plx_data::browse::SourceState;
-use plx_data::stores::browse::DirectoryView;
+use plx_data::stores::browse::{DirectoryView, SourceState};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Pill {
@@ -496,7 +495,7 @@ mod tests {
             assert!(items[3].dim, "a favorite on a {state:?} source draws dimmed");
             let header = items.iter().find(|item| item.role == RailRole::Header).expect("a server header");
             assert!(header.dim, "a {state:?} server's More header draws dimmed");
-            assert!(header.label.to_str().unwrap().contains(suffix), "{:?} should name '{suffix}'", header.label);
+            assert!(header.label.to_str().unwrap().contains(&suffix.to_uppercase()), "{:?} should name '{suffix}'", header.label);
             let row = items.iter().find(|item| matches!(item.role, RailRole::Row { .. })).expect("the server's row");
             assert!(row.dim, "a {state:?} server's rows draw dimmed too");
         }
