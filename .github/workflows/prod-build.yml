@@ -1,12 +1,14 @@
 name: Production build (fork)
 
-# Fork-only. Builds the stable package (`com.beb.plxnative`) of the ref it is dispatched on and
-# uploads it as an artifact; nothing is tagged, released or sent to Sentry.
+# Fork-only. Builds the stable package (`com.beb.plxnative`) on every push to `prod-0.9.0` and
+# uploads it as an artifact; nothing is tagged, released or sent to Sentry. A push trigger, because
+# GitHub dispatches only workflows present on the default branch, which stays an upstream mirror.
 # Telemetry credentials are the PLX_SENTRY_DSN / PLX_POSTHOG_KEY repository variables, which on
 # this fork hold placeholders that cannot deliver anything.
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [prod-0.9.0]
 
 permissions:
   contents: read
