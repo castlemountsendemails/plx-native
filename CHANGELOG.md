@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5] - 
+
+### Added
+- Home's empty Continue Watching reads "Nothing in progress" / "Pick a library from the left." instead of the old discovery-hub wording, with no action — focus stays on the rail.
+- A library whose server has refused this account's access (share revoked or grant gone stale) reads "{server} isn't shared with you right now" with a Check shares action, told apart from a server that is simply unreachable.
+- A favorite or More group on an unreachable or access-refused server draws dimmed, and More's group header names why ("{server} · offline" / "{server} · not shared").
+
 ## [0.1.4] - 2026-10-21
 
 ### Added

@@ -7,6 +7,10 @@
     "value": "Try Again",
     "description": "browse action retry_home"
   },
+  "browse.action.check_shares": {
+    "value": "Check shares",
+    "description": "Primary button on browse.library.not_shared's read-out: re-checks the account's shares (BrowseCmd::RecheckShares), as opposed to browse.action.retry which re-dials the server. Short form for the button; browse.library.check_shares is the longer wording used in the Sources list menu row."
+  },
   "browse.action.sign_in": {
     "value": "Sign in",
     "description": "browse action sign_in"
@@ -18,6 +22,20 @@
   "browse.action.more": {
     "value": "MORE",
     "description": "browse action more"
+  },
+  "browse.more.group_offline": {
+    "value": "{server} · offline",
+    "args": {
+      "server": "str"
+    },
+    "description": "More's server header when that source answers nothing (SourceState::Unreachable or InsecureOnly): the group reads this instead of the plain server name, and is drawn dimmed. {server} is the server's name."
+  },
+  "browse.more.group_not_shared": {
+    "value": "{server} · not shared",
+    "args": {
+      "server": "str"
+    },
+    "description": "More's server header when that source answered but refused the token (SourceState::Unauthorized): the group reads this instead of the plain server name, and is drawn dimmed. {server} is the server's name."
   },
   "browse.account.own": {
     "value": "This account",
@@ -220,12 +238,12 @@
     "description": "browse home failed"
   },
   "browse.home.empty": {
-    "value": "Nothing on this server yet",
-    "description": "browse home empty"
+    "value": "Nothing in progress",
+    "description": "Home's empty-state verdict when Continue Watching has nothing in it (the redesigned Home fetches only that hub, so an empty hub always means this). Not focusable; no action."
   },
-  "browse.home.refresh": {
-    "value": "Refresh",
-    "description": "browse home refresh"
+  "browse.home.empty_hint": {
+    "value": "Pick a library from the left.",
+    "description": "Second line under browse.home.empty, pointing at the nav rail."
   },
   "browse.library.sort_by": {
     "value": "Sort by",
@@ -258,6 +276,20 @@
   "browse.library.check_shares": {
     "value": "Check for new shares",
     "description": "browse library check_shares"
+  },
+  "browse.library.not_shared": {
+    "value": "{name} isn’t shared with you right now",
+    "args": {
+      "name": "str"
+    },
+    "description": "Failed read-out verdict for a library whose server answered but refused the token (HTTP 401): the share was revoked or the grant went stale. {name} is the server's name, the same value browse.library.unreachable interpolates. Distinct from unreachable: the server IS up, it just refused this account."
+  },
+  "browse.library.access_refused": {
+    "value": "{name} may have changed your access.",
+    "args": {
+      "name": "str"
+    },
+    "description": "Reason line under browse.library.not_shared. {name} is the server's name."
   },
   "browse.library.name": {
     "value": "Library",

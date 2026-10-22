@@ -39,6 +39,9 @@ const FADE_H: f32 = 40.0;
 /// edge) and its caption are not painted over. Only live while collapsed (`e` near 0): once the
 /// rail itself holds focus and expands, nothing in the content is popped.
 const COLLAPSED_BLEED_CLEARANCE: f32 = 32.0;
+/// §7's dim weight for an unreachable/access-refused item — the Sources list's own
+/// `Section::dim` alpha (`ui::table::GROUP_DIM_A`), reused here for the same visual meaning.
+const DIM_A: f32 = 0.52;
 
 pub enum RailMark {
     Icon(Icon),
@@ -71,6 +74,10 @@ pub struct RailItem {
     /// Tracked as a capital label (the destinations); the profile's name is drawn as written.
     pub caps: bool,
     pub role: RailRole,
+    /// §7: a favorite whose server is unreachable or has refused this account's access, or a
+    /// server's header in More when the whole group is. Drawn at reduced alpha; still focusable —
+    /// the item is dimmed, not disabled.
+    pub dim: bool,
 }
 
 /// The rail's width at expansion `e` (0 collapsed, 1 expanded).
@@ -266,10 +273,14 @@ impl RailRender {
         let clip = item_clip(items, i).intersect(Rect::new(0.0, 0.0, width(e) - INSET, SCR_H));
         if r.y + r.h <= clip.y || r.y >= clip.y + clip.h { return; }
         p.clip(clip);
+        // §7: a dimmed item (an unreachable/access-refused favorite, or More's header for such a
+        // server) draws at DIM_A throughout — mark, label and even its own focus pill, so focusing
+        // it is never the one bright thing on a rail that is telling you its server is down.
+        let dim_a = if item.dim { DIM_A } else { 1.0 };
         if item.role == RailRole::Header {
             if e > 0.0 {
                 let ty = plx_gfx::text::text_vcenter_y(theme::size::CAPTION, 1, r.y + r.h * 0.6);
-                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::CAPTION,
+                p.alpha(e * e * dim_a).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::CAPTION,
                     theme::TEXT_TERTIARY, 0, 1, LABEL_TRACKING);
             }
             p.clip_clear();
@@ -278,32 +289,32 @@ impl RailRender {
         let is_focused = focused == Some(key);
         let is_active = active == Some(key);
         if is_focused {
-            p.rrect(r, r.h * 0.5, r.h * 0.5, theme::ACCENT);
+            p.alpha(dim_a).rrect(r, r.h * 0.5, r.h * 0.5, theme::ACCENT);
         }
         if is_active {
-            p.rrect(Rect::new(0.0, r.y + 16.0, 4.0, r.h - 32.0), 2.0, 2.0, theme::ACCENT);
+            p.alpha(dim_a).rrect(Rect::new(0.0, r.y + 16.0, 4.0, r.h - 32.0), 2.0, 2.0, theme::ACCENT);
         }
         let ink = if is_focused { theme::INK_ON_ACCENT }
             else if is_active { theme::TEXT_PRIMARY }
             else { theme::CONTROL_TEXT_REST };
-        self.draw_mark(p, item, r, ink, is_focused);
+        self.draw_mark(p.alpha(dim_a), item, r, ink, is_focused);
         if e > 0.0 {
             let ty = plx_gfx::text::text_vcenter_y(theme::size::LABEL, 1, r.cy());
             let spacing = if item.caps { LABEL_TRACKING } else { 0.0 };
             if let RailRole::Row { star, starred } = item.role {
                 let s = star_rect(r);
                 p.clip(clip.intersect(Rect::new(0.0, 0.0, s.x, SCR_H)));
-                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+                p.alpha(e * e * dim_a).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
                 p.clip(clip);
-                self.draw_star(p.alpha(e * e), s, starred, focused == Some(star));
+                self.draw_star(p.alpha(e * e * dim_a), s, starred, focused == Some(star));
             } else if moving == Some(key) {
                 let s = star_rect(r);
                 p.clip(clip.intersect(Rect::new(0.0, 0.0, s.x, SCR_H)));
-                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+                p.alpha(e * e * dim_a).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
                 p.clip(clip);
-                self.draw_move_mark(p.alpha(e * e), s, ink);
+                self.draw_move_mark(p.alpha(e * e * dim_a), s, ink);
             } else {
-                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+                p.alpha(e * e * dim_a).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
             }
         }
         p.clip_clear();
@@ -361,7 +372,7 @@ mod tests {
     use super::*;
 
     fn item(key: u32, mark: RailMark, role: RailRole) -> RailItem {
-        RailItem { key, mark, label: CString::default(), caps: true, role }
+        RailItem { key, mark, label: CString::default(), caps: true, role, dim: false }
     }
 
     /// Home, Search, Watchlist, `libraries` favorites, More, then `rows` More rows under one

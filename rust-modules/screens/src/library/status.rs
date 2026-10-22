@@ -1,9 +1,20 @@
 //! Retained-view prose for the existing Library status surface.
 use std::ffi::{CStr, CString};
 use super::*;
+use plx_data::browse::SourceState;
+use plx_ui::icons::Icon;
 use plx_ui::widgets::{StatusKind, StatusOverlay};
 
 impl LibraryScreen {
+    /// The failed source's dial outcome, or [`SourceState::NotProbed`] off a readout that isn't
+    /// [`Readout::Failed`] — the one place both [`Self::status_overlay`] and [`Self::status_text`]
+    /// read it, so the glyph, the caption and the action button can never disagree about which
+    /// case they're in.
+    pub(super) fn failed_source_state<H: LibraryLike>(&self, cx: &Cx<'_, H>) -> SourceState {
+        if self.readout != Readout::Failed { return SourceState::default(); }
+        H::directory(cx).source().map_or(SourceState::default(), |(_, source)| source.state)
+    }
+
     pub(super) fn status_overlay<'a, H: LibraryLike>(&self, cx: &Cx<'_, H>, caption: &'a CStr, reason: Option<&'a CStr>) -> StatusOverlay<'a> {
         let kind = match self.readout {
             Readout::Failed => StatusKind::Failed, Readout::Loading => StatusKind::Working,
@@ -13,9 +24,18 @@ impl LibraryScreen {
         // lines (`StatusOverlay::page`) — level with Home's and the sign-in failure's — rather than
         // centring in the content region, which dropped it well below them. Loading and the
         // empty answer keep the region.
-        // Same untyped "can't reach" verdict as Home's — no typed cause here either, so the two
-        // pages share the glyph.
-        let glyph = self.clock_cause().map_or(plx_ui::icons::Icon::ServerBadgeMinus, |(_, glyph)| glyph);
+        // §7's one typed cause this page draws differently: Unauthorized (access refused) gets
+        // the lock glyph; every other Failed cause (unreachable, not yet probed, insecure-only)
+        // reads as the generic "can't reach" case and keeps the wifi-slash glyph.
+        let unauthorized = self.failed_source_state(cx) == SourceState::Unauthorized;
+        // Unauthorized is checked ahead of the clock cause below for the same reason §7's caption
+        // is: a 401 already proves the connection succeeded, so the two can never really compete,
+        // but keeping one priority order for both avoids ever drawing a mismatched pair.
+        let glyph = if unauthorized {
+            Icon::LockBadgeAlert
+        } else {
+            self.clock_cause().map_or(Icon::WifiSlash, |(_, glyph)| glyph)
+        };
         let mut overlay = StatusOverlay::new(self.status_frame(), caption, kind)
             .page(glyph).phase(cx.tick.ms)
             .focused(cx.focus.current == Some(self.key(RETRY)));
@@ -29,7 +49,13 @@ impl LibraryScreen {
         }
         if let Some(reason) = reason { overlay = overlay.reason(reason); }
         if self.readout == Readout::Failed {
-            overlay = overlay.action(super::super::plaintext_question::primary(self.plaintext.verdict()));
+            // Access refused (§7) re-checks the account's shares, a different fix than retrying a
+            // server that already answered; everything else keeps the existing retry/connect pill.
+            overlay = overlay.action(if unauthorized {
+                plx_platform::i18n::msg::browse_action_check_shares_c()
+            } else {
+                super::super::plaintext_question::primary(self.plaintext.verdict())
+            });
         }
         overlay
     }
@@ -79,6 +105,15 @@ impl LibraryScreen {
                 let source = directory.source().map(|(_, source)| source);
                 let name = source.map(|source| source.name.as_str()).filter(|name| !name.is_empty()).unwrap_or(plx_platform::i18n::msg::browse_library_server());
                 let owner = source.map(|source| source.handle.as_str()).filter(|owner| !owner.is_empty());
+                // Access refused (§7): the server answered with a 401, a fact independent of the
+                // plaintext/clock causes below (both are about reaching the server at all, which
+                // a 401 already did) — so it is checked first and the two never compete.
+                if source.is_some_and(|s| s.state == SourceState::Unauthorized) {
+                    return (
+                        CString::new(plx_platform::i18n::msg::browse_library_not_shared(name)).unwrap_or_default(),
+                        Some(CString::new(plx_platform::i18n::msg::browse_library_access_refused(name)).unwrap_or_default()),
+                    );
+                }
                 // Your own server is "your Plex server", the words Home uses for the same fault;
                 // a borrowed one is named, since "your" would be untrue of it.
                 let caption = match owner {

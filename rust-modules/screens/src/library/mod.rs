@@ -974,6 +974,12 @@ impl LibraryScreen {
             }
             return Handled::Yes;
         }
+        if elem == RETRY && self.failed_source_state(cx) == plx_data::browse::SourceState::Unauthorized {
+            // Access refused (§7): re-check the account's shares rather than re-dial a server
+            // that already answered — the same command the Sources list's own row sends.
+            fx.push(Fx::App(AppFx::Store(StoreId::Browse, StoreCmd::Browse(BrowseCmd::RecheckShares))));
+            return Handled::Yes;
+        }
         if elem == RETRY {
             if let Some(target) = self.address(cx) {
                 self.store(target, LibraryWork::Retry, fx);

@@ -7,6 +7,7 @@ use plx_machine::machine::FocusKey;
 use plx_ui::icons::Icon;
 use plx_ui::nav_rail::{RailItem, RailMark, RailRole};
 use plx_ui::widgets::{self, TopFocus};
+use plx_data::browse::SourceState;
 use plx_data::stores::browse::DirectoryView;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -22,13 +23,23 @@ fn server_name(directory: DirectoryView<'_>, src: usize) -> &str {
     directory.sources().get(src).map_or("", |(_, group)| group.name.as_str())
 }
 
-/// The favorite libraries in `order`'s sequence, as `(section index, title, server name)`. `order`
-/// is `directory.favorite_order()` except while the rail's hold-to-reorder gesture (§3.5) has a
-/// working order of its own not yet saved.
-fn favorites<'a>(directory: DirectoryView<'a>, order: &[usize]) -> Vec<(usize, &'a str, &'a str)> {
+/// §7: whether a source's state draws dimmed — unreachable, access-refused, or reachable only
+/// over a transport this build can't use. Not `NotProbed`: a source nobody has dialled yet must
+/// not open dimmed (the same rule `SrcGroup::reachable` and `BrowseSource::reachable` already
+/// apply to the Sources list and the Library page).
+fn source_dim(directory: DirectoryView<'_>, src: usize) -> bool {
+    directory.sources().get(src).is_some_and(|(_, group)|
+        !matches!(group.state, SourceState::Reachable | SourceState::NotProbed))
+}
+
+/// The favorite libraries in `order`'s sequence, as `(section index, title, server name, dim)`.
+/// `order` is `directory.favorite_order()` except while the rail's hold-to-reorder gesture (§3.5)
+/// has a working order of its own not yet saved.
+fn favorites<'a>(directory: DirectoryView<'a>, order: &[usize]) -> Vec<(usize, &'a str, &'a str, bool)> {
     order.iter().filter_map(|&i| {
         let section = directory.sections().get(i)?;
-        Some((i, section.row.title.as_str(), server_name(directory, section.row.src)))
+        Some((i, section.row.title.as_str(), server_name(directory, section.row.src),
+            source_dim(directory, section.row.src)))
     }).collect()
 }
 
@@ -108,33 +119,45 @@ fn first_letter(word: &str) -> CString {
 /// and More's list of every library, grouped by server, when `more_open`. `order` is the
 /// favorites' order (see [`favorites`]).
 fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open: bool, order: &[usize]) -> Vec<RailItem> {
-    let fixed = |key, icon, word: &str, role| RailItem { key, mark: RailMark::Icon(icon), label: caps(word), caps: true, role };
+    let fixed = |key, icon, word: &str, role| RailItem { key, mark: RailMark::Icon(icon), label: caps(word), caps: true, role, dim: false };
     let mut items = vec![
         fixed(widgets::TAB_KEY_HOME, Icon::Home, plx_platform::i18n::msg::browse_chrome_home(), RailRole::Top),
         fixed(widgets::TAB_KEY_SEARCH, Icon::Search, plx_platform::i18n::msg::browse_chrome_search(), RailRole::Top),
         fixed(widgets::TAB_KEY_WATCHLIST, Icon::Bookmark, plx_platform::i18n::msg::watchlist_page_title(), RailRole::Top),
     ];
     let libraries = favorites(directory, order);
-    items.extend(libraries.iter().map(|&(i, title, server)| {
+    items.extend(libraries.iter().map(|&(i, title, server, dim)| {
         // Two favorites with one name are told apart by their server.
-        let shared = libraries.iter().filter(|(_, other, _)| *other == title).count() > 1;
+        let shared = libraries.iter().filter(|(_, other, _, _)| *other == title).count() > 1;
         let label = if shared && !server.is_empty() { format!("{title} · {server}") } else { title.to_owned() };
         RailItem { key: widgets::tab_key_library(i), mark: RailMark::Badge(first_letter(title)), label: caps(&label),
-            caps: true, role: RailRole::Band }
+            caps: true, role: RailRole::Band, dim }
     }));
     items.push(fixed(widgets::TAB_KEY_MORE, Icon::More, plx_platform::i18n::msg::browse_action_more(), RailRole::Band));
     if more_open {
         for src in 0..directory.sources().len() {
             let mut rows = directory.sections().iter().enumerate().filter(|(_, section)| section.row.src == src).peekable();
             if rows.peek().is_none() { continue; }
+            // §7: the group header names the fault (offline for Unreachable/InsecureOnly, not
+            // shared for Unauthorized) and the whole group — header and rows alike — dims; a row
+            // still opens its page (the per-library Failed read-out covers what OK on it does).
+            let state = directory.sources().get(src).map_or(SourceState::NotProbed, |(_, group)| group.state);
+            let dim = !matches!(state, SourceState::Reachable | SourceState::NotProbed);
+            let server = server_name(directory, src);
+            let label = match state {
+                SourceState::Unauthorized => plx_platform::i18n::msg::browse_more_group_not_shared(server),
+                SourceState::Unreachable | SourceState::InsecureOnly => plx_platform::i18n::msg::browse_more_group_offline(server),
+                SourceState::Reachable | SourceState::NotProbed => server.to_owned(),
+            };
             items.push(RailItem { key: widgets::tab_key_server(src), mark: RailMark::None,
-                label: caps(server_name(directory, src)), caps: true, role: RailRole::Header });
+                label: caps(&label), caps: true, role: RailRole::Header, dim });
             items.extend(rows.map(|(i, section)| RailItem {
                 key: widgets::tab_key_more_row(i),
                 mark: RailMark::Badge(first_letter(&section.row.title)),
                 label: CString::new(section.row.title.as_str()).unwrap_or_default(),
                 caps: false,
                 role: RailRole::Row { star: widgets::tab_key_star(i), starred: section.row.pinned },
+                dim,
             }));
         }
     }
@@ -144,6 +167,7 @@ fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open
         label: CString::new(name).unwrap_or_default(),
         caps: false,
         role: RailRole::Foot,
+        dim: false,
     });
     items
 }
@@ -442,6 +466,41 @@ mod tests {
         let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
         assert!(items.iter().any(|item| item.role == RailRole::Header), "a server header leads its rows");
         assert!(items.iter().any(|item| item.role == RailRole::Row { star: widgets::tab_key_star(1), starred: false }));
+    }
+
+    /// §7: a favorite on a source that is unreachable or has refused this account's access draws
+    /// dimmed, and so does More's header for that server — named "offline" or "not shared" rather
+    /// than its bare name. `NotProbed` (nobody has dialled it yet) must not dim: see
+    /// [`source_dim`]'s own doc for why.
+    #[test]
+    fn an_unreachable_or_unauthorized_source_dims_its_favorite_and_more_group() {
+        let sid = plx_plex::plex::ServerId::from_raw(0);
+        let section = |title: &str| SectionView { sid: Some(sid), key: 1, kind: SecKind::Movie,
+            row: SrcRow { section: 0, title: title.to_owned(), pinned: true, ..Default::default() } };
+        for (state, suffix) in [
+            (SourceState::Unreachable, "offline"),
+            (SourceState::Unauthorized, "not shared"),
+        ] {
+            let server = plx_data::browse::SrcGroup { name: "Den".into(), state, ..Default::default() };
+            let directory = DirectorySnapshot::fixture_with_sources(7, 0, vec![(sid, server)], vec![section("Films")]);
+            let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
+            assert!(items[3].dim, "a favorite on a {state:?} source draws dimmed");
+            let header = items.iter().find(|item| item.role == RailRole::Header).expect("a server header");
+            assert!(header.dim, "a {state:?} server's More header draws dimmed");
+            assert!(header.label.to_str().unwrap().contains(suffix), "{:?} should name '{suffix}'", header.label);
+            let row = items.iter().find(|item| matches!(item.role, RailRole::Row { .. })).expect("the server's row");
+            assert!(row.dim, "a {state:?} server's rows draw dimmed too");
+        }
+        // Reachable and NotProbed (the default, nobody has dialled yet) must not dim.
+        for state in [SourceState::Reachable, SourceState::NotProbed] {
+            let server = plx_data::browse::SrcGroup { name: "Den".into(), state, ..Default::default() };
+            let directory = DirectorySnapshot::fixture_with_sources(7, 0, vec![(sid, server)], vec![section("Films")]);
+            let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
+            assert!(!items[3].dim, "a {state:?} source's favorite must not dim");
+            let header = items.iter().find(|item| item.role == RailRole::Header).unwrap();
+            assert!(!header.dim);
+            assert_eq!(header.label.to_str().unwrap(), "DEN");
+        }
     }
 
     #[test]

@@ -3331,10 +3331,13 @@ fn status_read(
             StatusKind::Failed,
             Some(plx_platform::i18n::msg::browse_action_retry_c()),
         ),
+        // The redesigned Home fetches only the Continue Watching hub (§2), so an empty answer
+        // here always means "nothing in progress" (spec §5) — never a discovery hub with nothing
+        // in it. No action: re-fetching tells the same honest answer again.
         plx_data::pms::HubState::Ready => (
             plx_platform::i18n::msg::browse_home_empty_c(),
             StatusKind::Empty,
-            Some(plx_platform::i18n::msg::browse_home_refresh_c()),
+            None,
         ),
     })
 }
@@ -3363,6 +3366,8 @@ fn status_overlay<'a>(view: HubsView<'_>, plaintext: &'a OfferWatch, clock: &Clo
             // brings its own glyph (the same placement, a different mark).
             overlay = overlay.reason(reason).page(glyph);
         }
+    } else if kind == StatusKind::Empty {
+        overlay = overlay.reason(plx_platform::i18n::msg::browse_home_empty_hint_c());
     }
     Some(match action {
         Some(label) => overlay.action(label),

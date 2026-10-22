@@ -299,7 +299,7 @@ fn the_status_readout_tells_loading_empty_and_failed_apart() {
     for (hub_state, kind, action) in [
         (plx_data::pms::HubState::Loading, StatusKind::Working, false),
         (plx_data::pms::HubState::Failed, StatusKind::Failed, true),
-        (plx_data::pms::HubState::Ready, StatusKind::Empty, true),
+        (plx_data::pms::HubState::Ready, StatusKind::Empty, false),
     ] {
         plx_data::pms::seed_for_test(&mut state, &adapter, 0, hub_state);
         let snapshot = plx_data::pms::hubs_snapshot(&state);
@@ -312,6 +312,24 @@ fn the_status_readout_tells_loading_empty_and_failed_apart() {
         assert!(status_read(plx_data::pms::hubs_snapshot(&state).view()).is_none(),
             "a failed refresh retains playable content, not a replacement readout");
     }
+}
+
+/// **§5's empty Continue Watching**: "Nothing in progress" over "Pick a library from the left.",
+/// no action (a second look answers the same honest "nothing yet"), and nothing of the hero's own
+/// to focus — so a reader arriving here lands on the rail, not a phantom button.
+#[test]
+fn home_s_empty_continue_watching_names_itself_and_takes_no_action() {
+    let _guard = plx_base::testlock::serial();
+    let mut state = plx_data::pms::PmsState::default();
+    let adapter = std::sync::Arc::new(plx_data::pms::PmsAdapter::default());
+    plx_data::pms::seed_for_test(&mut state, &adapter, 0, plx_data::pms::HubState::Ready);
+    let snapshot = plx_data::pms::hubs_snapshot(&state);
+    let (caption, kind, action) = status_read(snapshot.view()).unwrap();
+    assert_eq!((caption.to_str().unwrap(), kind), ("Nothing in progress", StatusKind::Empty));
+    assert!(action.is_none());
+    let overlay = status_overlay(snapshot.view(), &OfferWatch::default(), &ClockWatch::default()).unwrap();
+    assert_eq!(overlay.reason.map(|r| r.to_str().unwrap()), Some("Pick a library from the left."));
+    assert_eq!(screen(snapshot.view()).hero_len(snapshot.view()), 0);
 }
 
 /// **A failed Home stands on the page read-out's anchor** — the verdict hanging from
@@ -2242,14 +2260,15 @@ fn addressed_carousel_commands_mutate_the_owned_identity_not_focus() {
 }
 
 #[test]
-fn loading_has_no_phantom_hero_and_terminal_status_has_one_action() {
+fn loading_has_no_phantom_hero_and_only_failed_has_an_action() {
     let _guard = plx_base::testlock::serial();
     let mut state = plx_data::pms::PmsState::default();
     let adapter = std::sync::Arc::new(plx_data::pms::PmsAdapter::default());
     for (hub_state, expected) in [
         (plx_data::pms::HubState::Loading, 0),
         (plx_data::pms::HubState::Failed, 1),
-        (plx_data::pms::HubState::Ready, 1),
+        // Ready with no hubs is "nothing in progress" (§5): a quiet answer, not an action.
+        (plx_data::pms::HubState::Ready, 0),
     ] {
         plx_data::pms::seed_for_test(&mut state, &adapter, 0, hub_state);
         let snapshot = plx_data::pms::hubs_snapshot(&state);

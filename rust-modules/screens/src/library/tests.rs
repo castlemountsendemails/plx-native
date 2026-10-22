@@ -880,6 +880,36 @@ fn discovery_failure_retry_targets_the_source_without_a_section() {
         "Retry must issue work even when discovery never produced a section address");
 }
 
+/// **§7: a source that answered but refused the token reads "access refused", not "unreachable"**
+/// — a different verdict, reason and action (*Check shares* re-checks the account's grants
+/// instead of re-dialling a server that already answered).
+#[test]
+fn an_unauthorized_source_reads_access_refused_and_check_shares_rechecks_the_grant() {
+    let _guard = plx_base::testlock::serial();
+    let mut fixture = Fixture::new();
+    let sid = plx_plex::plex::ServerId::from_raw(7);
+    fixture.listing = plx_data::stores::browse::ListingSnapshot::empty_for_test();
+    fixture.directory = plx_data::browse::view::DirectorySnapshot::fixture_source(4, sid,
+        plx_data::browse::SrcGroup { name: "Cinema server".into(), handle: "friend".into(),
+            state: plx_data::browse::SourceState::Unauthorized, tier: None }, SecFetch::Failed);
+    let mut page = fixture.screen();
+    assert_eq!(page.readout, Readout::Failed);
+    let cx = fixture.cx(Some(page.key(RETRY)));
+    let (caption, reason) = page.status_text(&cx);
+    assert_eq!(caption.to_str().unwrap(), "Cinema server isn\u{2019}t shared with you right now");
+    assert_eq!(reason.as_deref().and_then(|r| r.to_str().ok()), Some("Cinema server may have changed your access."));
+    assert_eq!(page.status_overlay(&cx, &caption, reason.as_deref()).action, Some(c"Check shares"));
+    let mut out = Vec::new();
+    let mut present = plx_machine::present::Present::new();
+    page.activate(RETRY, false, &cx, &mut Effects::new(&mut out, MachineId::Instance(InstanceId(19)), &mut present));
+    assert!(out.iter().any(|effect| matches!(&effect.fx,
+        Fx::App(AppFx::Store(StoreId::Browse, StoreCmd::Browse(BrowseCmd::RecheckShares))))),
+        "Check shares must re-check the account's grants, not retry the server");
+    assert!(!out.iter().any(|e| matches!(&e.fx,
+        Fx::App(AppFx::Store(StoreId::Browse, StoreCmd::Browse(BrowseCmd::RetrySource { .. }))))),
+        "an access-refused read-out must not also retry");
+}
+
 /// **A failed source whose server discovery offers "Connect without encryption?" for asks it**
 /// (PLX-NATIVE-10, code review 3) — the SAME question Home and the sign-in ask
 /// (`screens::plaintext_question`): the reason says why, *Connect* replaces *Try again* and opens
