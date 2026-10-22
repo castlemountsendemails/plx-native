@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.7] - 2026-10-22
+
+### Added
+- A favorite whose server hasn't answered yet this run stays in the rail at its saved place, drawn from its saved name. It dims once its server is found offline or refusing access. OK on it does nothing until its server answers.
+
+### Fixed
+- Reordering favorites no longer drops the favorites of a server that hasn't answered from the saved order (they used to move to the end when the server came back).
+
 ## [0.1.6] - 2026-10-22
 
 ### Fixed
