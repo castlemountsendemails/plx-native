@@ -2360,6 +2360,21 @@ impl BrowseState {
                 match what {
                     SrcWhat::Sections(list) => {
                         let answered = list.is_some();
+                        // A full answer that no longer names one of this source's libraries. The
+                        // table is addressed by index everywhere (favorites, current library,
+                        // in-flight landings), so it is rebuilt the way a departed server's is,
+                        // rather than having one row cut out from under those indices.
+                        let removed = list.as_ref().is_some_and(|list| self.sections.iter().any(|section|
+                            section.src == source_index && !list.iter().any(|(key, _, _)| *key == section.key)));
+                        if removed {
+                            let who = self.sources.get(source_index)
+                                .map(|source| source.name.clone()).unwrap_or_default();
+                            plx_base::eventlog::log(&format!(
+                                "browse: source {source_index} ({who}) no longer lists a library — rebuilding the table"
+                            ));
+                            self.reset_owned(adapter);
+                            return true;
+                        }
                         self.append_sections_with(
                             source_index, list.unwrap_or_default(), preferences);
                         if let Some(source) = self.source_mut(source_index) {
@@ -3707,7 +3722,9 @@ pub fn queue_discovery_for_owner_test(
     plx_base::testlock::assert_held("discovery observation fixture");
     let _ = state.sync_roster_owned();
     let si = state.sources.iter().position(|source| source.sid == client.id()).unwrap();
-    let what = SrcWhat::Sections(ok.then(Vec::new));
+    // A success echoes the rows already known: an answer that drops one rebuilds the table.
+    let what = SrcWhat::Sections(ok.then(|| state.sections.iter().filter(|section| section.src == si)
+        .map(|section| (section.key, section.title.clone(), section.kind)).collect()));
     *adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()) = Some((
         state.table_epoch(),
         si,

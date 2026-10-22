@@ -3343,7 +3343,7 @@ fn rail_reorder(d: &mut Dispatcher<AppHost>, rig: &mut Bridge, tick: Tick, mut i
     let focused_section = Bridge::home_focus(d).and_then(|key| plx_ui::widgets::library_of_tab_key(key.elem));
     if let Some(section) = rig.chrome.rail_hold_section() {
         // Focus left the favorite the hold began on (or is moving on): abandoned, not dropped.
-        if Some(section) != focused_section {
+        if Some(section) != focused_section || rig.chrome.rail_move_outlived(rig.directory.view()) {
             rig.chrome.cancel_rail_hold();
         }
     }

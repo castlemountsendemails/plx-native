@@ -50,6 +50,7 @@ fn favorites<'a>(directory: DirectoryView<'a>, order: &[usize]) -> Vec<(usize, &
 struct MoveState {
     section: usize,
     order: Vec<usize>,
+    epoch: Option<u32>,
 }
 
 /// Where the rail's hold-to-reorder gesture (§3.5) stands. Owned here, not by the generic
@@ -262,9 +263,17 @@ impl ChromeSnapshot {
     /// no-op off `Armed` (the interceptor calls this only once [`rail_hold_long`](Self::rail_hold_long) holds).
     pub(crate) fn enter_rail_move(&mut self, directory: DirectoryView<'_>) {
         let RailHold::Armed { section, .. } = self.hold else { return };
-        self.hold = RailHold::Moving(MoveState { section, order: directory.favorite_order().to_vec() });
+        self.hold = RailHold::Moving(MoveState {
+            section, order: directory.favorite_order().to_vec(), epoch: directory.epoch(),
+        });
         plx_ui::hold_hint::mark_rail_taught();
         self.rebuild_on_next_refresh();
+    }
+
+    /// The section table was rebuilt since move mode began, so the working order's indices may
+    /// now name different libraries, or none; dropping it would save a wrong order.
+    pub(crate) fn rail_move_outlived(&self, directory: DirectoryView<'_>) -> bool {
+        matches!(&self.hold, RailHold::Moving(state) if state.epoch != directory.epoch())
     }
 
     /// Swap the moving favorite with its neighbour one slot (`-1` up, `1` down), clamped to the
@@ -582,6 +591,18 @@ mod tests {
         chrome.arm_rail_hold(1, 2_000);
         chrome.cancel_rail_hold();
         assert_eq!(chrome.rail_hold_section(), None);
+    }
+
+    #[test]
+    fn a_move_is_outlived_by_a_rebuilt_section_table() {
+        let directory = directory(&[(SecKind::Movie, "A", true), (SecKind::Movie, "B", true)]);
+        let rebuilt = DirectorySnapshot::fixture_with_sources(8, 0, Vec::new(), Vec::new());
+        let mut chrome = ChromeSnapshot::default();
+        chrome.arm_rail_hold(0, 1_000);
+        chrome.enter_rail_move(directory.view());
+
+        assert!(!chrome.rail_move_outlived(directory.view()));
+        assert!(chrome.rail_move_outlived(rebuilt.view()));
     }
 
     #[test]

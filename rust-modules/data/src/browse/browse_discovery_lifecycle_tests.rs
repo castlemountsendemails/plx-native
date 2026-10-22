@@ -639,3 +639,58 @@ fn the_source_table_tells_a_household_server_from_a_share_though_both_read_unown
         "plex.tv owns neither; only one of them is this house's",
     );
 }
+
+fn land_sections(browse: &mut TestBrowse, client: &'static plx_plex::plex::Client,
+    list: Option<Vec<(i64, String, SecKind)>>) {
+    let landing = SrcLanding {
+        client, token_gen: client.token_gen(), name: String::new(), what: SrcWhat::Sections(list),
+    };
+    *browse.adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((browse.state.table_epoch(), 0, landing));
+    let _ = browse.state.land_discovery_owned(&browse.adapter);
+}
+
+fn titles(browse: &TestBrowse) -> Vec<String> {
+    browse.state.sections().iter().map(|section| section.title.clone()).collect()
+}
+
+#[test]
+fn a_full_answer_without_a_known_library_rebuilds_the_table_without_it() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, _sid, client) = registered_page_source();
+    browse.append_sections(0, vec![(2, "Films".into(), SecKind::Movie)]);
+    let epoch = browse.state.table_epoch();
+
+    land_sections(&mut browse, client, Some(vec![(2, "Films".into(), SecKind::Movie)]));
+
+    assert_ne!(browse.state.table_epoch(), epoch, "landings and drafts from the old table go inert");
+    assert!(browse.state.sections().is_empty(), "no row outlives the indices it was addressed by");
+    browse.sync_roster();
+    land_sections(&mut browse, client, Some(vec![(2, "Films".into(), SecKind::Movie)]));
+    assert_eq!(titles(&browse), ["Films"]);
+}
+
+#[test]
+fn a_failed_answer_keeps_every_known_library() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, _sid, client) = registered_page_source();
+    let epoch = browse.state.table_epoch();
+
+    land_sections(&mut browse, client, None);
+
+    assert_eq!(browse.state.table_epoch(), epoch);
+    assert_eq!(titles(&browse), ["Movies"]);
+}
+
+#[test]
+fn a_full_answer_naming_every_known_library_moves_no_index() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, _sid, client) = registered_page_source();
+    let epoch = browse.state.table_epoch();
+
+    land_sections(&mut browse, client, Some(vec![
+        (1, "Movies".into(), SecKind::Movie), (3, "Docs".into(), SecKind::Movie)]));
+
+    assert_eq!(browse.state.table_epoch(), epoch);
+    assert_eq!(titles(&browse), ["Movies", "Docs"], "a new library still appends after the known ones");
+}
