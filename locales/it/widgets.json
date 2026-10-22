@@ -70,6 +70,7 @@
   "widgets.hint.return": "Premi {key} per tornare indietro",
   "widgets.hint.scroll": "Scorri",
   "widgets.hint.hold_options": "Tieni premuto {key} per le opzioni",
+  "widgets.hint.hold_reorder": "Tieni premuto {key} per riordinare",
   "widgets.failure.no_pass": "Questo server non ha {subscription}",
   "widgets.tracks.playing": "in riproduzione",
   "widgets.tracks.forced": "Forzati",

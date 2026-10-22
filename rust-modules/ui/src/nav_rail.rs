@@ -236,13 +236,14 @@ impl RailRender {
         Some(self.item_rect(items, i))
     }
 
-    /// `active` is the item of the screen on view; `focused` the key holding focus, if any.
-    pub fn draw(&self, p: Painter, items: &[RailItem], active: Option<u32>, focused: Option<u32>) {
+    /// `active` is the item of the screen on view; `focused` the key holding focus, if any;
+    /// `moving` the favorite currently held for reorder (§3.5), if any.
+    pub fn draw(&self, p: Painter, items: &[RailItem], active: Option<u32>, focused: Option<u32>, moving: Option<u32>) {
         let e = self.expand_pos();
         let panel_w = panel_width(e);
         p.rect(Rect::new(0.0, 0.0, panel_w, SCR_H), 0.0, theme::PANEL_TOP, theme::PANEL_BOT, 0.0);
         for item in items {
-            self.draw_item(p, items, item.key, active, focused);
+            self.draw_item(p, items, item.key, active, focused, moving);
         }
         // The band fades out at an edge where items are cut off.
         let b = band(items);
@@ -256,7 +257,8 @@ impl RailRender {
     }
 
     /// One item without the panel behind it: also the lit copy an opener lift draws above a dim.
-    pub fn draw_item(&self, p: Painter, items: &[RailItem], key: u32, active: Option<u32>, focused: Option<u32>) {
+    /// `moving` is the favorite currently held for reorder (§3.5), if any.
+    pub fn draw_item(&self, p: Painter, items: &[RailItem], key: u32, active: Option<u32>, focused: Option<u32>, moving: Option<u32>) {
         let Some(i) = items.iter().position(|item| item.key == key) else { return };
         let item = &items[i];
         let e = self.expand_pos();
@@ -294,6 +296,12 @@ impl RailRender {
                 p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
                 p.clip(clip);
                 self.draw_star(p.alpha(e * e), s, starred, focused == Some(star));
+            } else if moving == Some(key) {
+                let s = star_rect(r);
+                p.clip(clip.intersect(Rect::new(0.0, 0.0, s.x, SCR_H)));
+                p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
+                p.clip(clip);
+                self.draw_move_mark(p.alpha(e * e), s, ink);
             } else {
                 p.alpha(e * e).text_tracked(item.label.as_ptr(), LABEL_X, ty, theme::size::LABEL, ink, 0, 1, spacing);
             }
@@ -312,6 +320,15 @@ impl RailRender {
             (false, false) => (Icon::Star, theme::TEXT_TERTIARY),
         };
         crate::icons::draw(p, icon, Rect::new(s.cx() - STAR_D * 0.5, s.cy() - STAR_D * 0.5, STAR_D, STAR_D), ink);
+    }
+
+    /// The ⇅ mark (§3.5) at a favorite's ★ target, in the same box: a held OK has entered move
+    /// mode for it. Always on the accent fill, since move mode only ever runs on the focused item.
+    fn draw_move_mark(&self, p: Painter, s: Rect, ink: [f32; 4]) {
+        let d = STAR_D * 0.6;
+        let gap = 2.0;
+        crate::icons::draw(p, Icon::ChevronUp, Rect::new(s.cx() - d * 0.5, s.cy() - d - gap * 0.5, d, d), ink);
+        crate::icons::draw(p, Icon::ChevronDown, Rect::new(s.cx() - d * 0.5, s.cy() + gap * 0.5, d, d), ink);
     }
 
     fn draw_mark(&self, p: Painter, item: &RailItem, r: Rect, ink: [f32; 4], focused: bool) {

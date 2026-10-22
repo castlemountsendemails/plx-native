@@ -70,6 +70,7 @@
   "widgets.hint.return": "A visszatéréshez nyomja meg: {key}",
   "widgets.hint.scroll": "Görgetés",
   "widgets.hint.hold_options": "Az opciókhoz tartsa nyomva: {key}",
+  "widgets.hint.hold_reorder": "Az átrendezéshez tartsa nyomva: {key}",
   "widgets.failure.no_pass": "Ennek a szervernek nincs {subscription} előfizetése",
   "widgets.tracks.playing": "lejátszás alatt",
   "widgets.tracks.forced": "Kényszerített",

@@ -78,6 +78,10 @@ pub enum BrowseCmd {
     /// though it were a decision (`plex::pins::answers`). An EMPTY list is still a commit — the
     /// question was put and every default was left alone.
     ApplyPins(Vec<(usize, bool)>),
+    /// The nav rail's hold-to-reorder gesture (§3.5): save a new FAVORITES order, every pin
+    /// otherwise unchanged. `order` is every current favorite's section index, in the order the
+    /// rail should now show them — the rail's own working order at the moment OK dropped it.
+    ReorderFavorites(Vec<usize>),
     RetryDiscovery,
     /// The profile/account switch: wipe everything and supersede everything in flight.
     Reset,

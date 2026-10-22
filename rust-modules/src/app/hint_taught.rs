@@ -18,7 +18,7 @@ use plx_plex::plex::session::{self, HoldHintTaught};
 /// "shown" latches come back: a taught install still shows the capsule and its fill on a physical
 /// held OK, it just never offers itself again.
 pub(crate) fn seed(taught: HoldHintTaught) {
-    plx_ui::hold_hint::seed_taught(taught.card, taught.pill);
+    plx_ui::hold_hint::seed_taught(taught.card, taught.pill, taught.rail);
 }
 
 /// What the frame loop owns: nothing but the poll.
@@ -42,7 +42,7 @@ impl HintTaught {
     fn poll_with(&mut self, controlled: bool, write: impl FnOnce(HoldHintTaught) -> bool) {
         if let Some(taught) = plx_ui::hold_hint::take_newly_taught() {
             if !controlled {
-                write(HoldHintTaught { card: taught.card, pill: taught.pill });
+                write(HoldHintTaught { card: taught.card, pill: taught.pill, rail: taught.rail });
             }
         }
     }
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn a_taught_install_seeds_the_latches_without_issuing_a_write() {
         let _fresh = Fresh::new();
-        seed(HoldHintTaught { card: true, pill: false });
+        seed(HoldHintTaught { card: true, pill: false, rail: false });
         assert!(plx_ui::hold_hint::shown_this_run(), "the card latch is down");
         let writes = RefCell::new(Vec::new());
         HintTaught::new().poll_with(false, |t| { writes.borrow_mut().push(t); true });
@@ -92,7 +92,7 @@ mod tests {
         for _ in 0..3 {
             poller.poll_with(false, |t| { writes.borrow_mut().push(t); true });
         }
-        assert_eq!(*writes.borrow(), vec![HoldHintTaught { card: true, pill: true }],
+        assert_eq!(*writes.borrow(), vec![HoldHintTaught { card: true, pill: true, rail: false }],
             "one write for the rising edge, none while it stays up");
     }
 

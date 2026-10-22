@@ -22,12 +22,36 @@ fn server_name(directory: DirectoryView<'_>, src: usize) -> &str {
     directory.sources().get(src).map_or("", |(_, group)| group.name.as_str())
 }
 
-/// The favorite libraries in the profile's rail order, as `(section index, title, server name)`.
-fn favorites(directory: DirectoryView<'_>) -> impl Iterator<Item = (usize, &str, &str)> {
-    directory.favorite_order().iter().filter_map(move |&i| {
+/// The favorite libraries in `order`'s sequence, as `(section index, title, server name)`. `order`
+/// is `directory.favorite_order()` except while the rail's hold-to-reorder gesture (§3.5) has a
+/// working order of its own not yet saved.
+fn favorites<'a>(directory: DirectoryView<'a>, order: &[usize]) -> Vec<(usize, &'a str, &'a str)> {
+    order.iter().filter_map(|&i| {
         let section = directory.sections().get(i)?;
         Some((i, section.row.title.as_str(), server_name(directory, section.row.src)))
-    })
+    }).collect()
+}
+
+/// A reorder of the favorites in progress (§3.5): which one is held and its favorites order as
+/// arranged so far. Not yet saved — the live `directory.favorite_order()` is untouched until
+/// [`ChromeSnapshot::drop_rail_move`], so leaving move mode any other way simply stops overriding
+/// it, which is all "restore the order from before the hold" (Back) needs.
+struct MoveState {
+    section: usize,
+    order: Vec<usize>,
+}
+
+/// Where the rail's hold-to-reorder gesture (§3.5) stands. Owned here, not by the generic
+/// press/focus engine: only the favorites band may hold, and `ElemKind` is one setting for the
+/// whole rail strip (`containers::tabs::TabContainer::strip_group`) — see `bridge::rail_reorder`,
+/// which drives this at the raw input level instead.
+#[derive(Default)]
+enum RailHold {
+    #[default]
+    Idle,
+    /// OK is down on this favorite, not yet long enough to enter move mode.
+    Armed { section: usize, down_at: u32 },
+    Moving(MoveState),
 }
 
 /// The focus keys the rail publishes, in rail order: every item but the headers, each More row
@@ -45,7 +69,7 @@ fn rail_keys(items: &[RailItem]) -> Vec<u32> {
 }
 
 pub(crate) fn pill_at(directory: DirectoryView<'_>, i: usize) -> Pill {
-    pill_in(i, &rail_keys(&rail_items(directory, "", "", false)))
+    pill_in(i, &rail_keys(&rail_items(directory, "", "", false, directory.favorite_order())))
 }
 
 /// The destination a rail index names, by the KEY published at that index.
@@ -81,15 +105,16 @@ fn first_letter(word: &str) -> CString {
 }
 
 /// The rail's items for `directory`, with the profile item named `name` and drawn with `initial`,
-/// and More's list of every library, grouped by server, when `more_open`.
-fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open: bool) -> Vec<RailItem> {
+/// and More's list of every library, grouped by server, when `more_open`. `order` is the
+/// favorites' order (see [`favorites`]).
+fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open: bool, order: &[usize]) -> Vec<RailItem> {
     let fixed = |key, icon, word: &str, role| RailItem { key, mark: RailMark::Icon(icon), label: caps(word), caps: true, role };
     let mut items = vec![
         fixed(widgets::TAB_KEY_HOME, Icon::Home, plx_platform::i18n::msg::browse_chrome_home(), RailRole::Top),
         fixed(widgets::TAB_KEY_SEARCH, Icon::Search, plx_platform::i18n::msg::browse_chrome_search(), RailRole::Top),
         fixed(widgets::TAB_KEY_WATCHLIST, Icon::Bookmark, plx_platform::i18n::msg::watchlist_page_title(), RailRole::Top),
     ];
-    let libraries: Vec<_> = favorites(directory).collect();
+    let libraries = favorites(directory, order);
     items.extend(libraries.iter().map(|&(i, title, server)| {
         // Two favorites with one name are told apart by their server.
         let shared = libraries.iter().filter(|(_, other, _)| *other == title).count() > 1;
@@ -138,6 +163,8 @@ pub(crate) struct ChromeSnapshot {
     more_open: bool,
     /// The non-favorite library More was last opened for, so it opens once per arrival.
     opened_for: Option<usize>,
+    /// The rail's hold-to-reorder gesture (§3.5): see [`RailHold`].
+    hold: RailHold,
 }
 
 impl ChromeSnapshot {
@@ -159,6 +186,98 @@ impl ChromeSnapshot {
     pub(crate) fn follow_library(&mut self, section: Option<usize>) {
         if section.is_some() && section != self.opened_for { self.set_more_open(true); }
         self.opened_for = section;
+    }
+
+    /// Rebuild [`items`](Self::items) on the next [`refresh_with_profile`](Self::refresh_with_profile):
+    /// the directory itself has not changed, but what the rail should show from it has.
+    fn rebuild_on_next_refresh(&mut self) {
+        self.directory_stamp = None;
+        plx_machine::idle::invalidate();
+    }
+
+    /// The favorite the rail's hold-to-reorder gesture (§3.5) is armed or moving on, if any — the
+    /// interceptor's own check that the hold is still on the favorite it began on.
+    pub(crate) fn rail_hold_section(&self) -> Option<usize> {
+        match &self.hold {
+            RailHold::Idle => None,
+            RailHold::Armed { section, .. } | RailHold::Moving(MoveState { section, .. }) => Some(*section),
+        }
+    }
+
+    /// Move mode is live: Up/Down/OK/Back on the rail belong to the gesture, not to navigation.
+    pub(crate) fn rail_moving(&self) -> bool {
+        matches!(self.hold, RailHold::Moving(_))
+    }
+
+    /// OK went down on favorite `section`: start the hold's clock. A fresh press always re-arms,
+    /// whatever the hold was doing before (the interceptor only calls this on an `Edge::Down`).
+    pub(crate) fn arm_rail_hold(&mut self, section: usize, now: u32) {
+        self.hold = RailHold::Armed { section, down_at: now };
+    }
+
+    /// The armed hold has crossed `press::LONG_MS` while OK is still physically down — the live
+    /// test [`enter_rail_move`](Self::enter_rail_move) acts on, mirroring how a card's hold opens
+    /// its item menu on the live `Press::is_long` rather than waiting for the release.
+    pub(crate) fn rail_hold_long(&self, now: u32) -> bool {
+        matches!(self.hold, RailHold::Armed { down_at, .. } if now.wrapping_sub(down_at) >= plx_ui::press::LONG_MS)
+    }
+
+    /// How long the current hold has run, for the hint's fill (§3.5.1) — `None` whenever OK is
+    /// not down on a favorite (including while already `Moving`: the hint has nothing left to
+    /// teach there).
+    pub(crate) fn rail_held_ms(&self, now: u32) -> Option<u32> {
+        match self.hold {
+            RailHold::Armed { down_at, .. } => Some(now.wrapping_sub(down_at)),
+            _ => None,
+        }
+    }
+
+    /// Enter move mode for the currently-armed favorite: a working copy of the favorites order
+    /// the rail now draws from instead of `directory.favorite_order()`, and the hint retired
+    /// (§3.5.1) — independently of the card hint, see `plx_ui::hold_hint::mark_rail_taught`. A
+    /// no-op off `Armed` (the interceptor calls this only once [`rail_hold_long`](Self::rail_hold_long) holds).
+    pub(crate) fn enter_rail_move(&mut self, directory: DirectoryView<'_>) {
+        let RailHold::Armed { section, .. } = self.hold else { return };
+        self.hold = RailHold::Moving(MoveState { section, order: directory.favorite_order().to_vec() });
+        plx_ui::hold_hint::mark_rail_taught();
+        self.rebuild_on_next_refresh();
+    }
+
+    /// Swap the moving favorite with its neighbour one slot (`-1` up, `1` down), clamped to the
+    /// first and last favorite — it never moves past Watchlist or More, because it never leaves
+    /// the favorites band at all. A no-op off `Moving`, or at an end already.
+    pub(crate) fn step_rail_move(&mut self, delta: i32) {
+        let RailHold::Moving(state) = &mut self.hold else { return };
+        let Some(at) = state.order.iter().position(|&i| i == state.section) else { return };
+        let Some(to) = at.checked_add_signed(delta as isize).filter(|&to| to < state.order.len()) else { return };
+        state.order.swap(at, to);
+        self.rebuild_on_next_refresh();
+    }
+
+    /// Back: leave move mode without saving. The live order was never touched (only the working
+    /// copy was), so simply no longer overriding it IS "restore the order from before the hold" —
+    /// also the stale-hold path, when focus has left the favorite the hold was armed on. A no-op
+    /// already `Idle`.
+    pub(crate) fn cancel_rail_hold(&mut self) {
+        if matches!(self.hold, RailHold::Idle) { return; }
+        self.hold = RailHold::Idle;
+        self.rebuild_on_next_refresh();
+    }
+
+    /// OK while moving: take the final working order to persist, and leave move mode. `None` off
+    /// `Moving`.
+    pub(crate) fn drop_rail_move(&mut self) -> Option<Vec<usize>> {
+        let RailHold::Moving(state) = std::mem::take(&mut self.hold) else { return None };
+        self.rebuild_on_next_refresh();
+        Some(state.order)
+    }
+
+    /// The rail key currently drawn with the move mark (§3.5), if any.
+    pub(crate) fn moving_key(&self) -> Option<u32> {
+        match &self.hold {
+            RailHold::Moving(state) => Some(widgets::tab_key_library(state.section)),
+            _ => None,
+        }
     }
 
     /// The rail index of `pill`'s item, as published now.
@@ -210,7 +329,11 @@ impl ChromeSnapshot {
             changed = true;
         }
         if changed {
-            self.items = rail_items(directory, &self.name, &self.initial, self.more_open);
+            let order: &[usize] = match &self.hold {
+                RailHold::Moving(state) => &state.order,
+                _ => directory.favorite_order(),
+            };
+            self.items = rail_items(directory, &self.name, &self.initial, self.more_open, order);
             self.keys = rail_keys(&self.items);
         }
     }
@@ -244,7 +367,7 @@ impl ChromeSnapshot {
         self.name = name.to_owned();
         self.initial = initial.to_owned();
         self.profile_generation = Some(1);
-        self.items = rail_items(directory.view(), name, initial, false);
+        self.items = rail_items(directory.view(), name, initial, false, directory.view().favorite_order());
         self.keys = rail_keys(&self.items);
     }
 }
@@ -287,7 +410,7 @@ mod tests {
     }
 
     fn keys(directory: &DirectorySnapshot, more_open: bool) -> Vec<u32> {
-        rail_keys(&rail_items(directory.view(), "", "", more_open))
+        rail_keys(&rail_items(directory.view(), "", "", more_open, directory.view().favorite_order()))
     }
 
     #[test]
@@ -316,7 +439,7 @@ mod tests {
         let more = keys.iter().position(|&k| k == widgets::TAB_KEY_MORE).unwrap();
         assert_eq!(keys[more + 1..keys.len() - 1], [widgets::tab_key_more_row(0), widgets::tab_key_star(0),
             widgets::tab_key_more_row(1), widgets::tab_key_star(1)], "rows of favorites and the rest alike");
-        let items = rail_items(directory.view(), "", "", true);
+        let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
         assert!(items.iter().any(|item| item.role == RailRole::Header), "a server header leads its rows");
         assert!(items.iter().any(|item| item.role == RailRole::Row { star: widgets::tab_key_star(1), starred: false }));
     }
@@ -344,10 +467,62 @@ mod tests {
     #[test]
     fn same_named_favorites_carry_their_server() {
         let directory = directory(&[(SecKind::Movie, "Movies", true), (SecKind::Movie, "Movies", true)]);
-        let items = rail_items(directory.view(), "Sam", "S", false);
+        let items = rail_items(directory.view(), "Sam", "S", false, directory.view().favorite_order());
         assert_eq!(items.len(), 7);
         assert!(items[3].label.to_str().unwrap().starts_with("MOVIES"));
         assert!(matches!(items[6].mark, RailMark::Avatar(_)), "the profile is the last item");
+    }
+
+    /// §3.5: a hold that crosses `press::LONG_MS` while OK is still down enters move mode live,
+    /// and Up/Down swap the held favorite with its neighbour, clamped at the first and last
+    /// favorite — it can never cross into Watchlist or More, because it never leaves the
+    /// favorites band's own order at all.
+    #[test]
+    fn a_long_enough_hold_enters_move_mode_and_up_down_clamp_at_both_ends() {
+        let directory = directory(&[(SecKind::Movie, "A", true), (SecKind::Movie, "B", true),
+            (SecKind::Movie, "C", true)]);
+        let mut chrome = ChromeSnapshot::default();
+        chrome.arm_rail_hold(1, 1_000); // B, the middle favorite
+        assert!(!chrome.rail_hold_long(1_000 + plx_ui::press::LONG_MS - 1), "not yet");
+        assert!(chrome.rail_hold_long(1_000 + plx_ui::press::LONG_MS), "the live threshold");
+        chrome.enter_rail_move(directory.view());
+        assert!(chrome.rail_moving());
+        assert_eq!(chrome.moving_key(), Some(widgets::tab_key_library(1)));
+
+        chrome.step_rail_move(-1); // B above A: [B, A, C]
+        chrome.step_rail_move(-1); // already first: clamped, a no-op
+        let order = chrome.drop_rail_move().expect("was moving");
+        assert_eq!(order, vec![1, 0, 2], "clamped at the first favorite");
+        assert!(!chrome.rail_moving(), "OK dropped it");
+
+        chrome.arm_rail_hold(0, 2_000);
+        chrome.enter_rail_move(directory.view());
+        chrome.step_rail_move(1);
+        chrome.step_rail_move(1); // already last: clamped, a no-op
+        assert_eq!(chrome.drop_rail_move().unwrap(), vec![1, 2, 0], "clamped at the last favorite");
+    }
+
+    /// Back cancels the hold and restores the order from before it: the working copy is simply
+    /// dropped without ever touching the real `favorite_order`, which a cancelled hold never
+    /// wrote to in the first place.
+    #[test]
+    fn back_cancels_the_hold_without_saving_the_working_order() {
+        let directory = directory(&[(SecKind::Movie, "A", true), (SecKind::Movie, "B", true)]);
+        let mut chrome = ChromeSnapshot::default();
+        chrome.arm_rail_hold(0, 1_000);
+        chrome.enter_rail_move(directory.view());
+        chrome.step_rail_move(1); // [B, A]
+        assert!(chrome.rail_moving());
+
+        chrome.cancel_rail_hold();
+        assert!(!chrome.rail_moving(), "left move mode");
+        assert_eq!(chrome.moving_key(), None);
+        assert_eq!(chrome.drop_rail_move(), None, "nothing left to drop — cancel, not save");
+
+        // A hold armed but never long enough to move is just as cleanly abandoned.
+        chrome.arm_rail_hold(1, 2_000);
+        chrome.cancel_rail_hold();
+        assert_eq!(chrome.rail_hold_section(), None);
     }
 
     #[test]

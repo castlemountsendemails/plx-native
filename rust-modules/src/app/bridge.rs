@@ -412,6 +412,10 @@ pub(crate) struct Bridge {
     /// The nav rail's render state (its expansion and the Watchlist pulse). `Bridge` is the rail's
     /// one owner: the only `Rig::draw_chrome` implementation, and where `update_home_chrome` steps it.
     rail: plx_ui::nav_rail::RailRender,
+    /// The rail's own "Hold [OK] to reorder" hint (§3.5.1) — `plx_ui::hold_hint::Surface::Rail`,
+    /// stepped alongside `rail` in `update_home_chrome` from `chrome.rail_held_ms`, independent of
+    /// any screen's own card hint.
+    rail_hint: plx_ui::hold_hint::HoldHint,
     home_commands: std::collections::VecDeque<HomeCmd>,
     library_commands: std::collections::VecDeque<plx_screens::registry::LibraryCmd>,
     consent: ConsentMachine,
@@ -631,6 +635,7 @@ impl Bridge {
             chrome: super::chrome::ChromeSnapshot::default(),
             chrome_selection: 0,
             rail: plx_ui::nav_rail::RailRender::new(),
+            rail_hint: plx_ui::hold_hint::HoldHint::new(),
             home_commands: std::collections::VecDeque::new(),
             library_commands: std::collections::VecDeque::new(),
             consent: ConsentMachine::from_initial(consent),
@@ -853,6 +858,13 @@ impl Bridge {
         self.browse_run(plx_data::stores::browse::BrowseCmd::ApplyPins(vec![(section, !row.pinned)]));
     }
 
+    /// Save the rail's own working favorites order, dropped by the hold-to-reorder gesture's OK
+    /// (§3.5, `bridge::rail_reorder`). No pin changes — the same `ApplyPins`-style session-queue
+    /// plumbing `toggle_star` uses, reordering within it.
+    fn reorder_favorites(&mut self, order: Vec<usize>) {
+        self.browse_run(plx_data::stores::browse::BrowseCmd::ReorderFavorites(order));
+    }
+
     fn deliver_library_commands(&mut self, d: &mut Dispatcher<AppHost>) {
         if d.nav.top_page().is_none_or(|page| page.arg != AppArg::Library || page.inst.is_none()) { return; }
         while let Some(command) = self.library_commands.pop_front() { Self::library_command(d, command); }
@@ -1027,15 +1039,23 @@ impl Bridge {
     }
 
     /// Step the rail: it is expanded while the page's focus is on it, and scrolled to its focused
-    /// item, or else the page's own.
+    /// item, or else the page's own. Also steps the rail's own "Hold [OK] to reorder" hint
+    /// (§3.5.1), from whatever the hold-to-reorder gesture's own clock reports — `now` is the
+    /// frame's tick, the same clock `bridge::rail_reorder` arms the hold against.
     pub(crate) fn update_home_chrome(&mut self, d: &mut Dispatcher<AppHost>,
-        _glass: &mut plx_ui::frame::glass::GlassPlan, dt: f32) {
+        _glass: &mut plx_ui::frame::glass::GlassPlan, dt: f32, now: u32) {
         let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
         let focus = Self::home_focus(d);
         if let Some(key) = self.chrome.take_pulse() {
             self.rail.pulse(key);
         }
         self.rail.update(self.chrome.items(), self.chrome.focused_key(focus), self.chrome.key_at(selected), dt);
+        let rail_focus = self.chrome.focused_key(focus)
+            .filter(|&key| plx_ui::widgets::library_of_tab_key(key).is_some() && !self.chrome.rail_moving());
+        let held_ms = self.chrome.rail_held_ms(now);
+        let input = plx_ui::hold_hint::HintInput::new(rail_focus, true, held_ms)
+            .surface(plx_ui::hold_hint::Surface::Rail);
+        self.rail_hint.step(input, now, dt, &mut |ev| plx_machine::idle::note(ev));
         self.publish_strip(d, selected);
     }
 
@@ -1819,7 +1839,8 @@ impl Rig<AppHost> for Bridge {
         let p = plx_ui::Painter::root().alpha(nav.chrome_alpha);
         let selected = nav.view_tab.unwrap_or(self.chrome_selection) as i32;
         self.rail.draw(p, self.chrome.items(), self.chrome.key_at(selected),
-            self.chrome.focused_key(parts.focus.current));
+            self.chrome.focused_key(parts.focus.current), self.chrome.moving_key());
+        self.rail_hint.draw(p, &self.measure);
     }
     /// A rail item's DRAWN rect: where the account menu grows from and shrinks back into.
     fn bar_member_rect(&self, elem: u32, _presented: plx_ui::screen::NavPresentation) -> Option<plx_ui::Rect> {
@@ -1830,7 +1851,7 @@ impl Rig<AppHost> for Bridge {
     fn lift_bar_member(&mut self, elem: u32, presented: plx_ui::screen::NavPresentation,
         _material: Option<plx_gfx::gfx::GlassFace>, _ground: &plx_ui::underlay::UnderlayField) {
         let p = plx_ui::Painter::root().alpha(presented.chrome_alpha);
-        self.rail.draw_item(p, self.chrome.items(), elem, None, Some(elem));
+        self.rail.draw_item(p, self.chrome.items(), elem, None, Some(elem), None);
     }
     fn content_dx(&self) -> f32 {
         self.rail.content_dx()
@@ -2114,6 +2135,7 @@ pub(crate) fn frame_with_tap(
         execute_session_command(d, plx_session::auth::SessionCmd::TakeReady);
     }
     let inputs = rail_back(d, rig, inputs);
+    let inputs = rail_reorder(d, rig, tick, inputs);
     frame_ingest(d, rig, tick, inputs, Bridge::take_live_results, tap)
 }
 
@@ -3297,6 +3319,61 @@ fn rail_back(d: &mut Dispatcher<AppHost>, rig: &mut Bridge, mut inputs: Vec<Inpu
         rig.chrome.set_more_open(false);
         reseat_top(d, plx_ui::widgets::TAB_KEY_MORE);
     }
+    inputs
+}
+
+/// **Hold OK on a favorite (§3.5, `press::LONG_MS`) to reorder it**: the hold enters move mode
+/// live, the instant it crosses the threshold with the key still down — same as a card's hold
+/// opening its item menu. Up/Down then swap it with a neighbour, OK drops and saves, Back cancels
+/// and restores.
+///
+/// Owned entirely here, at the raw input level, rather than through the generic press/focus
+/// engine: `ElemKind` (§7.4) is one setting for the WHOLE rail strip
+/// (`containers::tabs::TabContainer::strip_group`), and only the favorites band may hold — turning
+/// the whole rail holdable would swallow a plain tap on Home, Search, Watchlist, More, a More row
+/// or its ★ the moment a press crossed `LONG_MS`, which only a card's own hold is meant to do.
+/// So this owns the physical OK key directly while it sits on a favorite, and cancels the generic
+/// engine's own in-flight press (armed as the ordinary non-holdable control press it already is)
+/// the instant the hold is taken — the same release a declined card hold gets.
+fn rail_reorder(d: &mut Dispatcher<AppHost>, rig: &mut Bridge, tick: Tick, mut inputs: Vec<InputEvent<u32>>) -> Vec<InputEvent<u32>> {
+    if !d.top_arg().is_some_and(wears_tab_bar) {
+        rig.chrome.cancel_rail_hold();
+        return inputs;
+    }
+    let focused_section = Bridge::home_focus(d).and_then(|key| plx_ui::widgets::library_of_tab_key(key.elem));
+    if let Some(section) = rig.chrome.rail_hold_section() {
+        // Focus left the favorite the hold began on (or is moving on): abandoned, not dropped.
+        if Some(section) != focused_section {
+            rig.chrome.cancel_rail_hold();
+        }
+    }
+    if rig.chrome.rail_hold_long(tick.ms) {
+        d.input.cancel_press();
+        rig.chrome.enter_rail_move(rig.directory.view());
+    }
+    inputs.retain(|event| {
+        let InputKind::Key { key, edge, .. } = event.kind else { return true };
+        if rig.chrome.rail_moving() {
+            match (key, edge) {
+                (Key::Up, Edge::Down | Edge::Repeat) => rig.chrome.step_rail_move(-1),
+                (Key::Down, Edge::Down | Edge::Repeat) => rig.chrome.step_rail_move(1),
+                (Key::Ok, Edge::Down) => if let Some(order) = rig.chrome.drop_rail_move() {
+                    rig.reorder_favorites(order);
+                },
+                (Key::Back, Edge::Down) => rig.chrome.cancel_rail_hold(),
+                _ => {}
+            }
+            return false; // every key is swallowed while moving (§3.5: "other keys do nothing")
+        }
+        match (key, edge) {
+            (Key::Ok, Edge::Down) => if let Some(section) = focused_section {
+                rig.chrome.arm_rail_hold(section, tick.ms);
+            },
+            (Key::Ok, Edge::Up) => rig.chrome.cancel_rail_hold(),
+            _ => {}
+        }
+        true
+    });
     inputs
 }
 

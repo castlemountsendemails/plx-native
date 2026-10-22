@@ -1312,26 +1312,32 @@ impl UnderPosters {
 }
 
 /// **Which "Hold [OK] for options" hints this install has been taught** (`plx_ui::hold_hint`): one
-/// flag per surface, `card` for any media card and `pill` for the Detail season tabs. Each is set
-/// once a read showing happened on that surface (or an item menu was opened, which sets both) and
-/// is never cleared, so the self-appearing hint stands once per INSTALL and survives relaunches.
-/// Install-wide: kept across sign-out, shared by every profile. Absence is "not taught yet";
-/// each flag is soft-parsed on its own, so garbage costs only that flag.
+/// flag per surface, `card` for any media card, `pill` for the Detail season tabs, and `rail` for
+/// a favorite in the nav rail (its own "Hold [OK] to reorder" hint, §3.5.1 — taught independently:
+/// opening an item menu sets `card` and `pill` but never `rail`, and entering the rail's move mode
+/// sets only `rail`). Each is set once a read showing happened on that surface (or, for `card`/
+/// `pill`, once an item menu was opened) and is never cleared, so the self-appearing hint stands
+/// once per INSTALL and survives relaunches. Install-wide: kept across sign-out, shared by every
+/// profile. Absence is "not taught yet"; each flag is soft-parsed on its own, so garbage costs
+/// only that flag.
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HoldHintTaught {
     #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "std::ops::Not::not")]
     pub card: bool,
     #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "std::ops::Not::not")]
     pub pill: bool,
+    #[serde(default, deserialize_with = "de_soft_bool", skip_serializing_if = "std::ops::Not::not")]
+    pub rail: bool,
 }
 
 impl HoldHintTaught {
     /// Nothing taught: the default, and what an absent key reads.
-    pub const NONE: HoldHintTaught = HoldHintTaught { card: false, pill: false };
+    pub const NONE: HoldHintTaught = HoldHintTaught { card: false, pill: false, rail: false };
 
     /// Both sets joined: a surface taught in either stays taught.
     pub fn union(self, other: HoldHintTaught) -> HoldHintTaught {
-        HoldHintTaught { card: self.card || other.card, pill: self.pill || other.pill }
+        HoldHintTaught { card: self.card || other.card, pill: self.pill || other.pill,
+            rail: self.rail || other.rail }
     }
 }
 
@@ -6126,15 +6132,15 @@ mod server_key_pin_tests {
         let _serial = plx_base::testlock::serial();
         let _session = test_support::TempSession::new("hold-hint-learn");
         save(&test_support::signed_in());
-        let card = HoldHintTaught { card: true, pill: false };
+        let card = HoldHintTaught { card: true, pill: false, rail: false };
         assert!(learn_hold_hint_taught(card), "news is queued");
         plx_base::storage_worker::drain_for_test();
         assert_eq!(peek().hold_hint_taught(), card);
         assert!(!learn_hold_hint_taught(card), "the same lesson is not");
         assert!(!learn_hold_hint_taught(HoldHintTaught::NONE), "nothing taught is not news");
-        assert!(learn_hold_hint_taught(HoldHintTaught { card: false, pill: true }), "another surface is");
+        assert!(learn_hold_hint_taught(HoldHintTaught { card: false, pill: true, rail: false }), "another surface is");
         plx_base::storage_worker::drain_for_test();
-        assert_eq!(peek().hold_hint_taught(), HoldHintTaught { card: true, pill: true }, "joined, never replaced");
+        assert_eq!(peek().hold_hint_taught(), HoldHintTaught { card: true, pill: true, rail: false }, "joined, never replaced");
         assert_eq!(peek().account_token, "acct", "the credentials are untouched");
     }
 

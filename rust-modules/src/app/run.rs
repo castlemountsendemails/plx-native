@@ -2366,7 +2366,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             // one UNDER the account popover and its glass backdrop is refreshed off the
             // underlay's motion.
             let (_, moving) = plx_machine::idle::scoped_motion(|| {
-                app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
+                app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt, fr.now);
             });
             fr.underlay_moving |= moving;
         }

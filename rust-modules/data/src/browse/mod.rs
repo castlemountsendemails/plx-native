@@ -2255,6 +2255,70 @@ impl BrowseState {
             ),
         }
     }
+    /// Save a new FAVORITES order from the rail's hold-to-reorder gesture (§3.5): the same
+    /// session-queue plumbing [`record_pins`](Self::record_pins) uses for a star toggle, except no
+    /// pin is touched — `order` is every current favorite's section index, in the rail's new
+    /// order, and becomes `HomePins.order` verbatim (favorites not named in it, or whose server is
+    /// not currently known, are dropped — a sweep cannot happen here, since this writes the whole
+    /// profile record. The rail only ever hands back the favorites it already had).
+    ///
+    /// Reconciled immediately against the pending selection, exactly as
+    /// [`apply_pins`](Self::apply_pins) does, so the rail's own working order becomes
+    /// [`favorite_order`](Self::favorite_order) at once rather than waiting on the storage worker.
+    fn reorder_favorites(&mut self, order: &[usize]) {
+        let libraries = self.lib_refs();
+        let user = plx_plex::plex::session::current_profile_key();
+        let snapshot = plx_plex::plex::session::peek();
+        if snapshot.client_id.is_empty() {
+            plx_base::eventlog::log(
+                "browse: no session to reorder favorites against — the rail's order stands for this run only");
+            return;
+        }
+        let previous = self.recorded.clone().or_else(|| snapshot.pins_for(&user).cloned());
+        let owned_titles: Vec<(String, &'static str)> = self.sections.iter()
+            .map(|section| (section.title.clone(), section.kind.wire())).collect();
+        // `on` is never read: every row's `touched` below is false, and `answers` only consults
+        // `on` for a touched row.
+        let touched = vec![false; libraries.len()];
+        let mut record = previous.clone().unwrap_or_else(|| {
+            let answers = plx_plex::plex::pins::answers(&libraries, &[], &touched, None);
+            plx_plex::plex::pins::record(&user, true, &libraries, &answers)
+        });
+        record.order = order.iter().filter_map(|&i| {
+            let lib = libraries.get(i)?;
+            if lib.machine_id.is_empty() { return None; }
+            let (name, kind) = owned_titles.get(i).map_or(("", ""), |(n, k)| (n.as_str(), *k));
+            Some(plx_plex::plex::session::OrderedLib { machine_id: lib.machine_id.to_string(), key: lib.key,
+                name: name.to_string(), kind: kind.to_string(), extensions: Default::default() })
+        }).collect();
+        let owned: Vec<_> = libraries.iter().map(|lib|
+            (lib.machine_id.to_owned(), lib.key, lib.household, lib.household_type)).collect();
+        let order = order.to_vec();
+        let pending_user = user.clone();
+        let Ok(ticket) = plx_plex::plex::session::queue_update_ticket(move |session| {
+            let libraries: Vec<_> = owned.iter().map(|(machine_id, key, household, household_type)|
+                plx_plex::plex::pins::LibRef { machine_id, key: *key, household: *household, household_type: *household_type }).collect();
+            let touched = vec![false; libraries.len()];
+            let previous = session.pins_for(&user);
+            let mut merged = previous.cloned().unwrap_or_else(|| {
+                let answers = plx_plex::plex::pins::answers(&libraries, &[], &touched, None);
+                plx_plex::plex::pins::record(&user, true, &libraries, &answers)
+            });
+            merged.order = order.iter().filter_map(|&i| {
+                let lib = libraries.get(i)?;
+                if lib.machine_id.is_empty() { return None; }
+                let (name, kind) = owned_titles.get(i).map_or(("", ""), |(n, k)| (n.as_str(), *k));
+                Some(plx_plex::plex::session::OrderedLib { machine_id: lib.machine_id.to_string(), key: lib.key,
+                    name: name.to_string(), kind: kind.to_string(), extensions: Default::default() })
+            }).collect();
+            let mut next = session.clone();
+            next.set_pins_for(&user, merged);
+            Some(next)
+        }) else { return };
+        self.pending_pins = Some((pending_user, std::sync::Arc::new(std::sync::Mutex::new(PinWrite { ticket, saved: None }))));
+        self.recorded = Some(record.clone());
+        self.reconcile_pins(Some(record));
+    }
     fn retry_discovery(&mut self) {
         for source in &mut self.sources {
             if !source.sections_done {
@@ -2548,6 +2612,10 @@ impl BrowseState {
             }
             BrowseCmd::ApplyPins(edits) => {
                 self.apply_pins(&edits);
+                true
+            }
+            BrowseCmd::ReorderFavorites(order) => {
+                self.reorder_favorites(&order);
                 true
             }
             BrowseCmd::RetryDiscovery => {

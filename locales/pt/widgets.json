@@ -70,6 +70,7 @@
   "widgets.hint.return": "Prima {key} para voltar",
   "widgets.hint.scroll": "Deslocar",
   "widgets.hint.hold_options": "Mantenha {key} para opções",
+  "widgets.hint.hold_reorder": "Mantenha {key} para reordenar",
   "widgets.failure.no_pass": "Este servidor não tem {subscription}",
   "widgets.tracks.playing": "em reprodução",
   "widgets.tracks.forced": "Forçadas",

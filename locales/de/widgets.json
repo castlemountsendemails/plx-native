@@ -70,6 +70,7 @@
   "widgets.hint.return": "Drücke {key}, um zurückzukehren",
   "widgets.hint.scroll": "Blättern",
   "widgets.hint.hold_options": "Halte {key} für Optionen",
+  "widgets.hint.hold_reorder": "Halte {key} zum Verschieben",
   "widgets.failure.no_pass": "Dieser Server hat keinen {subscription}",
   "widgets.tracks.playing": "läuft",
   "widgets.tracks.forced": "Erzwungen",

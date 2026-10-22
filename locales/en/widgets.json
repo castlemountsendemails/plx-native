@@ -322,6 +322,13 @@
       "key": "str"
     }
   },
+  "widgets.hint.hold_reorder": {
+    "value": "Hold {key} to reorder",
+    "description": "Complete sentence in the standing hint capsule, teaching that holding the remote's OK button on a favorite in the expanded nav rail enters move mode to reorder it. {key} is the OK button rendered as a keycap; keep exactly one occurrence. Must fit one line in the capsule at CAPTION size in every shipped language.",
+    "args": {
+      "key": "str"
+    }
+  },
   "widgets.failure.no_pass": {
     "value": "This server has no {subscription}",
     "description": "Player error caption or supporting subscription fact.",

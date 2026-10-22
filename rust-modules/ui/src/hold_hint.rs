@@ -187,6 +187,11 @@ pub enum Surface {
     Card,
     /// A season tab on the Detail page: a held OK on it opens the season's item menu.
     SeasonPill,
+    /// A favorite in the expanded nav rail: a held OK on it enters the rail's reorder move mode
+    /// (§3.5/§3.5.1). Independent of [`Card`](Self::Card): opening an item menu ([`mark_learned`])
+    /// does not teach this one, and entering move mode does not teach those — see
+    /// [`mark_rail_taught`].
+    Rail,
 }
 
 impl Surface {
@@ -194,13 +199,14 @@ impl Surface {
         match self {
             Surface::Card => 1,
             Surface::SeasonPill => 2,
+            Surface::Rail => 4,
         }
     }
 
     /// How long focus must rest on this surface before the hint appears.
     fn dwell_ms(self) -> u32 {
         match self {
-            Surface::Card => DWELL_MS,
+            Surface::Card | Surface::Rail => DWELL_MS,
             Surface::SeasonPill => DWELL_PILL_MS,
         }
     }
@@ -211,6 +217,7 @@ impl Surface {
 pub struct Taught {
     pub card: bool,
     pub pill: bool,
+    pub rail: bool,
 }
 
 /// The viewer has opened a context menu, so the hint has done its job and never shows again.
@@ -231,6 +238,15 @@ pub fn mark_learned() {
 #[cfg(any(test, feature = "test-support"))]
 pub fn reset_learned_for_test() {
     LEARNED.with(|l| l.set(false));
+}
+
+/// Entering the nav rail's reorder move mode (§3.5) retires the "Hold [OK] to reorder" hint for
+/// good on [`Surface::Rail`] — the way opening an item menu retires [`Surface::Card`] and
+/// [`Surface::SeasonPill`] ([`mark_learned`]), but independently: this teaches only the rail, and
+/// [`mark_learned`] deliberately does not teach this (see its own doc on why that is two explicit
+/// calls and not a loop over every surface). Idempotent.
+pub fn mark_rail_taught() {
+    mark_shown(Surface::Rail);
 }
 
 /// Whether `surface`'s one showing has been read on this install (seeded or this run).
@@ -254,8 +270,9 @@ fn mark_shown(surface: Surface) {
 
 /// Seed the latches from what the install stored. Raises no signal: it is the stored fact, not news.
 /// Only ever turns a surface on.
-pub fn seed_taught(card: bool, pill: bool) {
-    let bits = u8::from(card) * Surface::Card.bit() | u8::from(pill) * Surface::SeasonPill.bit();
+pub fn seed_taught(card: bool, pill: bool, rail: bool) {
+    let bits = u8::from(card) * Surface::Card.bit() | u8::from(pill) * Surface::SeasonPill.bit()
+        | u8::from(rail) * Surface::Rail.bit();
     SHOWN.with(|s| s.set(s.get() | bits));
 }
 
@@ -265,7 +282,8 @@ pub fn seed_taught(card: bool, pill: bool) {
 pub fn take_newly_taught() -> Option<Taught> {
     CHANGED.with(|c| c.replace(false)).then(|| {
         let bits = SHOWN.with(|s| s.get());
-        Taught { card: bits & Surface::Card.bit() != 0, pill: bits & Surface::SeasonPill.bit() != 0 }
+        Taught { card: bits & Surface::Card.bit() != 0, pill: bits & Surface::SeasonPill.bit() != 0,
+            rail: bits & Surface::Rail.bit() != 0 }
     })
 }
 
@@ -285,7 +303,7 @@ pub fn reset_shown_for_test() {
 #[cfg(feature = "devtriggers")]
 pub fn teach_all_for_dev() {
     LEARNED.with(|l| l.set(true));
-    seed_taught(true, true);
+    seed_taught(true, true, true);
 }
 
 /// What the owner tells the hint each frame. Build it with [`HintInput::new`].
@@ -1022,6 +1040,34 @@ mod tests {
         assert!(!h.visible());
         assert!(shown(Surface::Card) && shown(Surface::SeasonPill), "the menu taught every surface; the hint itself never stood");
         reset_learned_for_test();
+    }
+
+    /// §3.5.1: the rail's "Hold [OK] to reorder" hint is its own surface, taught only by entering
+    /// move mode — never by the item menu, which is `mark_learned`'s doc on why that call stays
+    /// two explicit lines rather than a loop over every `Surface`.
+    #[test]
+    fn opening_an_item_menu_never_teaches_the_rail_hint() {
+        let (_g, _) = fresh();
+        mark_learned();
+        assert!(!shown(Surface::Rail), "the menu taught card and pill, never the rail");
+        let mut h = HoldHint::new();
+        run(&mut h, rested(7).surface(Surface::Rail), secs(3.5));
+        assert!(h.visible(), "the rail hint still self-appears after the card hint has retired");
+        assert!(shown(Surface::Rail));
+    }
+
+    /// The other half: entering the rail's move mode (`mark_rail_taught`) retires the rail hint
+    /// alone and leaves the card hint (and `learned`) untouched.
+    #[test]
+    fn entering_move_mode_retires_only_the_rail_hint() {
+        let (_g, _) = fresh();
+        mark_rail_taught();
+        assert!(shown(Surface::Rail), "move mode taught the rail");
+        assert!(!shown(Surface::Card) && !shown(Surface::SeasonPill) && !learned(),
+            "…and nothing else — the card and pill hints still have their own one showing to give");
+        let mut h = HoldHint::new();
+        run(&mut h, rested(7), secs(3.5));
+        assert!(h.visible(), "the card hint still self-appears");
     }
 
     #[test]
