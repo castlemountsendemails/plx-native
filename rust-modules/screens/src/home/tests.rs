@@ -327,7 +327,8 @@ fn home_s_empty_continue_watching_names_itself_and_takes_no_action() {
     let (caption, kind, action) = status_read(snapshot.view()).unwrap();
     assert_eq!((caption.to_str().unwrap(), kind), ("Nothing in progress", StatusKind::Empty));
     assert!(action.is_none());
-    let overlay = status_overlay(snapshot.view(), &OfferWatch::default(), &ClockWatch::default()).unwrap();
+    let (offers, clock) = (OfferWatch::default(), ClockWatch::default());
+    let overlay = status_overlay(snapshot.view(), &offers, &clock).unwrap();
     assert_eq!(overlay.reason.map(|r| r.to_str().unwrap()), Some("Pick a library from the left."));
     assert_eq!(screen(snapshot.view()).hero_len(snapshot.view()), 0);
 }

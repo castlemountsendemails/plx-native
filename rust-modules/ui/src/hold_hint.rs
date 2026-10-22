@@ -1296,7 +1296,7 @@ mod tests {
     #[test]
     fn a_seeded_taught_card_surface_never_self_appears() {
         let (_g, mut h) = fresh();
-        seed_taught(true, false);
+        seed_taught(true, false, false);
         run(&mut h, rested(7), secs(6.0));
         assert!(!h.visible(), "an install that was taught the card hint is not offered it again");
         assert_eq!(take_newly_taught(), None, "a seed is the stored fact, not news");
@@ -1380,13 +1380,13 @@ mod tests {
         run(&mut h, rested(7), secs(1.9));
         assert_eq!(take_newly_taught(), None, "a showing that has not been read is not a lesson");
         run(&mut h, rested(7), secs(2.0));
-        assert_eq!(take_newly_taught(), Some(Taught { card: true, pill: false }));
+        assert_eq!(take_newly_taught(), Some(Taught { card: true, pill: false, rail: false }));
         assert_eq!(take_newly_taught(), None, "drained");
         run(&mut h, rested(7), secs(2.0));
         assert_eq!(take_newly_taught(), None, "nothing new on a later frame");
         let mut pill = HoldHint::new();
         run(&mut pill, rested_pill(7), secs(2.5));
-        assert_eq!(take_newly_taught(), Some(Taught { card: true, pill: true }), "the second surface reports both");
+        assert_eq!(take_newly_taught(), Some(Taught { card: true, pill: true, rail: false }), "the second surface reports both");
     }
 
     #[test]
@@ -1394,7 +1394,7 @@ mod tests {
         let (_g, _) = fresh();
         mark_learned();
         assert!(shown(Surface::Card) && shown(Surface::SeasonPill));
-        assert_eq!(take_newly_taught(), Some(Taught { card: true, pill: true }));
+        assert_eq!(take_newly_taught(), Some(Taught { card: true, pill: true, rail: false }));
         mark_learned();
         assert_eq!(take_newly_taught(), None, "idempotent");
         reset_learned_for_test();

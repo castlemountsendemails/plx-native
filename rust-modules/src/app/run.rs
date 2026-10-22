@@ -3405,6 +3405,7 @@ mod lifecycle_regression_tests {
             down_sym: Default::default(),
             modal_repeat: RepeatGate::IDLE,
             diagnostics: Default::default(),
+            exit_confirm: crate::app::exit_confirm::ExitConfirm::new(),
             player: plx_media::player::machine::Player::new(),
             adapters: Adapters {
                 player: plx_media::player::adapter::PlayerAdapter::new(unsafe {

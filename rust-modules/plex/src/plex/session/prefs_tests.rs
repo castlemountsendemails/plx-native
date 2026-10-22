@@ -118,7 +118,7 @@ fn every_marker_names_its_own_field() {
     check_row::<TrailerAutoplayPref>(true);
     check_row::<LastHeroBlurPref>(Some([[0.5, 0.25, 0.125]; 4]));
     check_row::<UiResolutionPref>(UiResolution::Hd720);
-    check_row::<HoldHintTaughtPref>(HoldHintTaught { card: true, pill: false });
+    check_row::<HoldHintTaughtPref>(HoldHintTaught { card: true, pill: false, rail: false });
     // The table lists exactly these sixteen `Setting` rows, the four list rows below, the two
     // memory-door rows (`TrackMemoryPref`, whose field check is
     // `track_memory_tests::the_list_row_names_its_own_field`, and `SubtitleOffsetsPref`, checked by
@@ -270,9 +270,9 @@ fn the_taught_hold_hints_default_absent_round_trip_and_are_install_wide() {
     assert_eq!(absent.hold_hint_taught, HoldHintTaught::NONE);
 
     for taught in [
-        HoldHintTaught { card: true, pill: false },
-        HoldHintTaught { card: false, pill: true },
-        HoldHintTaught { card: true, pill: true },
+        HoldHintTaught { card: true, pill: false, rail: false },
+        HoldHintTaught { card: false, pill: true, rail: false },
+        HoldHintTaught { card: true, pill: true, rail: false },
     ] {
         let session = Session::default().with_pref::<HoldHintTaughtPref>(taught);
         let legacy: Session = serde_json::from_slice(&serde_json::to_vec(&session).unwrap()).unwrap();
@@ -281,11 +281,11 @@ fn the_taught_hold_hints_default_absent_round_trip_and_are_install_wide() {
         assert_eq!(super::join_canonical(&public, &protected).unwrap().hold_hint_taught(), taught);
         assert_eq!(super::public_session(&public).hold_hint_taught(), taught);
     }
-    let one = serde_json::to_value(Session::default().with_pref::<HoldHintTaughtPref>(HoldHintTaught { card: true, pill: false })).unwrap();
+    let one = serde_json::to_value(Session::default().with_pref::<HoldHintTaughtPref>(HoldHintTaught { card: true, pill: false, rail: false })).unwrap();
     assert_eq!(one["hold_hint_taught"], json!({"card": true}), "only the flag that is set is written");
 
     let damaged: Preferences = serde_json::from_value(json!({"hold_hint_taught": {"card": "yes", "pill": true}})).unwrap();
-    assert_eq!(damaged.hold_hint_taught, HoldHintTaught { card: false, pill: true }, "a damaged flag costs only itself");
+    assert_eq!(damaged.hold_hint_taught, HoldHintTaught { card: false, pill: true, rail: false }, "a damaged flag costs only itself");
 
     let row = DESCRIPTORS.iter().find(|d| d.key == "hold_hint_taught").expect("the row is in the table");
     assert_eq!((row.scope, row.account_bound, row.live, row.settings), (Scope::Install, false, false, None));
