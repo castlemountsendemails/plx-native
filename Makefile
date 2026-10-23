@@ -1598,7 +1598,8 @@ check-cargo-lint: lint
 # binary's `test result:` line printed, any failing binary fails the gate). It must run from
 # `rust-modules/` like the cargo line it wraps. UNIT_SUITE is the same package list as the literal
 # `-p` lists in the recipes below (those stay literal because ci/test_ci_split.py greps for them);
-# ci/test_test_crate.py pins the two equal.
+# ci/test_test_crate.py pins the two equal. `check-cargo-unit-default` also names `plx_android`, the
+# Fire TV crate, whose host tests are only its key mapping.
 UNIT_RUN = python3 ../tools/cargo-test-parallel.py
 UNIT_SUITE = plxnative-modules plx_base plx_machine plx_platform plx_gfx plx_net plx_ui plx_plex plx_telemetry plx_data plx_session plx_media plx_appkit plx_screens
 
@@ -1629,7 +1630,7 @@ check-cargo-unit-default:
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" PLXNATIVE_RUNTIME_DIR="$$d" \
 	  $(TELEMETRY_ENV) \
 	  $(HOST_ENV) \
-	  $(UNIT_RUN) -- cargo +$(RUST_TOOLCHAIN) test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net -p plx_ui -p plx_plex -p plx_telemetry -p plx_data -p plx_session -p plx_media -p plx_appkit -p plx_screens
+	  $(UNIT_RUN) -- cargo +$(RUST_TOOLCHAIN) test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net -p plx_ui -p plx_plex -p plx_telemetry -p plx_data -p plx_session -p plx_media -p plx_appkit -p plx_screens -p plx_android
 	RUST_TOOLCHAIN=$(RUST_TOOLCHAIN) python3 ci/test_storage_service_package.py
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" cargo +$(RUST_TOOLCHAIN) test -p plxnative-storage --bin plxnative-storage
 	@# The helper is its own package, so building it compiles no copy of the app library; this reads

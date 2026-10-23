@@ -312,7 +312,7 @@ class RequiredChecksReportOnEveryPr(unittest.TestCase):
     ci.yml starts on every PR; a `changes` job decides whether the heavy jobs run, and each required
     name is an always-running aggregator that is green when they were skipped for a reason."""
 
-    HEAVY = ("host-lint", "host-unit-default", "host-unit-hostsim", "host-python", "host-python-harness", "cross-build")
+    HEAVY = ("host-lint", "host-unit-default", "host-unit-hostsim", "host-python", "host-python-harness", "cross-build", "firetv")
     REQUIRED = {"host-checks": "host checks (NOT a device gate)",
                 "cross-build-required": "cross-build (armv7) + artifact assertions"}
 

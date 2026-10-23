@@ -1,0 +1,21 @@
+[package]
+name = "plx_android"
+version = "0.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "PlxNative Fire TV entry: the libmain.so that SDLActivity loads and enters through SDL_main."
+repository = "https://github.com/GLinnik21/plx-native"
+publish = false
+
+# SDLActivity loads `lib<last of getLibraries()>.so`, so the file must be libmain.so.
+[lib]
+name = "main"
+crate-type = ["cdylib"]
+
+# ci/module_graph.py reads this crate into the app's module tree as module `android`, so its
+# modules are `android::keys` and `android::jni`.
+[package.metadata.plx]
+mount = "android"
+
+[lints]
+workspace = true
