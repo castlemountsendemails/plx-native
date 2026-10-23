@@ -24,9 +24,10 @@ check() {
 }
 has() { grep -qE -- "$2" <<<"$1"; }
 lacks() { ! has "$@"; }
+# apksigner prints one digest line per signer and scheme ("Signer #1", "V2 Signer", ...).
 one_signer() {
-  [ "$(grep -c 'certificate SHA-256 digest' <<<"$signers")" = 1 ] &&
-    has "$signers" "^Signer #1 certificate SHA-256 digest: $cert$"
+  [ "$(grep -oE 'certificate SHA-256 digest: [0-9a-f]+$' <<<"$signers" | sort -u)" = \
+    "certificate SHA-256 digest: $cert" ]
 }
 
 check "package $package, versionCode $code, versionName $name" \
