@@ -111,6 +111,11 @@ on:
   # NO `paths` here, deliberately: see the comment on `push`'s list.
   pull_request:
   workflow_dispatch:
+    inputs:
+      firetv-release-version-code:
+        description: Also build a release-signed Fire TV skeleton (com.beb.plxnative) with this versionCode
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -667,6 +672,11 @@ jobs:
     env:
       # One of the NDKs on the ubuntu-24.04 image; android/build.gradle.kts names the same one.
       ANDROID_NDK_VERSION: 27.3.13750724
+      FIRETV_VERSION_NAME: 0.10.0-dev
+      # The certificates the FIRETV_*_KEYSTORE_B64 secrets hold; ci/check-apk.sh fails an APK signed by any other.
+      FIRETV_DEBUG_CERT_SHA256: C8:01:79:87:10:F1:F5:D5:BF:BB:48:96:EE:3D:6F:D4:FF:41:54:EA:34:54:F0:89:16:13:BE:67:35:5B:78:3F
+      FIRETV_RELEASE_CERT_SHA256: F6:EB:3F:EB:72:C3:D8:15:84:90:03:A2:7A:3A:37:A0:5B:0E:CF:98:13:71:13:CC:98:89:63:2C:9D:F7:1D:0F
+      RELEASE_VERSION_CODE: ${{ inputs.firetv-release-version-code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -729,20 +739,58 @@ jobs:
           gradle-version: 8.14.3
           cache-provider: basic
 
-      - name: Build the APK
+      - name: Build, sign and check the debug APK
         working-directory: android
+        env:
+          FIRETV_DEBUG_KEYSTORE_B64: ${{ secrets.FIRETV_DEBUG_KEYSTORE_B64 }}
+          FIRETV_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.FIRETV_DEBUG_KEYSTORE_PASSWORD }}
+          FIRETV_DEBUG_KEY_ALIAS: ${{ secrets.FIRETV_DEBUG_KEY_ALIAS }}
+          FIRETV_DEBUG_KEY_PASSWORD: ${{ secrets.FIRETV_DEBUG_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          export FIRETV_DEBUG_KEYSTORE="$RUNNER_TEMP/debug.jks"
+          tr -d ' \r\n' <<<"$FIRETV_DEBUG_KEYSTORE_B64" | base64 --decode > "$FIRETV_DEBUG_KEYSTORE"
           gradle --no-daemon assembleDebug \
             "-Pplx.sdlJava=$SDL_PREFIX/java" \
             "-Pplx.jniLibs=$RUNNER_TEMP/jniLibs" \
-            "-Pplx.assets=$RUNNER_TEMP/assets"
-          unzip -l build/outputs/apk/debug/*.apk | grep -E 'lib/|assets/|classes'
+            "-Pplx.assets=$RUNNER_TEMP/assets" \
+            "-Pplx.versionName=$FIRETV_VERSION_NAME"
+          rm "$FIRETV_DEBUG_KEYSTORE"
+          mkdir -p "$RUNNER_TEMP/apk"
+          apk="$RUNNER_TEMP/apk/plxnative-$FIRETV_VERSION_NAME-firetv-debug.apk"
+          mv build/outputs/apk/debug/*.apk "$apk"
+          unzip -l "$apk" | grep -E 'lib/|assets/|classes'
+          ../ci/check-apk.sh "$apk" com.beb.plxnative.debug 900 "$FIRETV_VERSION_NAME" "$FIRETV_DEBUG_CERT_SHA256" true
+
+      # Only on a dispatch that names a versionCode: the throwaway skeletons of the downgrade test.
+      - name: Build, sign and check the release skeleton
+        if: env.RELEASE_VERSION_CODE != ''
+        working-directory: android
+        env:
+          FIRETV_RELEASE_KEYSTORE_B64: ${{ secrets.FIRETV_RELEASE_KEYSTORE_B64 }}
+          FIRETV_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.FIRETV_RELEASE_KEYSTORE_PASSWORD }}
+          FIRETV_RELEASE_KEY_ALIAS: ${{ secrets.FIRETV_RELEASE_KEY_ALIAS }}
+          FIRETV_RELEASE_KEY_PASSWORD: ${{ secrets.FIRETV_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]] || { echo "::error::versionCode must be a positive integer"; exit 1; }
+          export FIRETV_RELEASE_KEYSTORE="$RUNNER_TEMP/release.jks"
+          tr -d ' \r\n' <<<"$FIRETV_RELEASE_KEYSTORE_B64" | base64 --decode > "$FIRETV_RELEASE_KEYSTORE"
+          gradle --no-daemon assembleRelease \
+            "-Pplx.sdlJava=$SDL_PREFIX/java" \
+            "-Pplx.jniLibs=$RUNNER_TEMP/jniLibs" \
+            "-Pplx.assets=$RUNNER_TEMP/assets" \
+            "-Pplx.versionName=$FIRETV_VERSION_NAME" \
+            "-Pplx.versionCode=$RELEASE_VERSION_CODE"
+          rm "$FIRETV_RELEASE_KEYSTORE"
+          apk="$RUNNER_TEMP/apk/plxnative-$FIRETV_VERSION_NAME-firetv-release.apk"
+          mv build/outputs/apk/release/*.apk "$apk"
+          ../ci/check-apk.sh "$apk" com.beb.plxnative "$RELEASE_VERSION_CODE" "$FIRETV_VERSION_NAME" "$FIRETV_RELEASE_CERT_SHA256" false
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: firetv-${{ github.sha }}
-          path: android/build/outputs/apk/debug/*.apk
+          path: ${{ runner.temp }}/apk/*.apk
           if-no-files-found: error
 
   # The production webOS package (`com.beb.plxnative`): stable flavour, production telemetry

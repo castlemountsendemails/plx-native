@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.0] - 2026-10-23
+
+### Added
+- The Fire TV APK is now signed: CI names it `plxnative-0.10.0-dev-firetv-debug.apk` and fails the build unless the APK has the armeabi-v7a library, minSdk 25, targetSdk 28, native libraries extracted at install, backup off, a Leanback launcher entry and the expected signing key. Still not installed on any stick.
+- A manual CI run can also build a release-signed, non-debuggable skeleton under `com.beb.plxnative` with a chosen versionCode, for the downgrade test.
+
 ## [0.1.9] - 2026-10-23
 
 ### Added
