@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.8] - 2026-10-23
+
+### Added
+- A Fire TV skeleton APK, built by CI's new `firetv` job: it launches and draws a line of text on a fixed 1920×1080 surface. It has no Plex features yet and is not installed on any stick.
+
 ## [0.1.7] - 2026-10-22
 
 ### Added
