@@ -1,6 +1,6 @@
 # A cargo workspace with this package as its ROOT; the other members are the storage helper and the
 # layer crates split out of the application so far (base/, machine/, net/, platform/, gfx/, ui/, plex/, telemetry/, data/, session/, media/, appkit/, screens/;
-# docs/module-layers.md).
+# docs/module-layers.md), and the Fire TV `libmain.so` crate (android/).
 # The root keeps the literal `version` below (release tooling reads it), `make`/CI run their usual
 # commands from this directory against this package (a bare `cargo test`/`check`/`build` here still
 # means the app only), and the helper is built with an explicit `-p plxnative-storage`. One
@@ -21,6 +21,7 @@ members = [
     "appkit",
     "screens",
     "storage",
+    "android",
 ]
 resolver = "2"
 

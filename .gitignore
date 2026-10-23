@@ -210,3 +210,7 @@ tests/fixtures/softfloat/arm.tbl
 
 # Node tools (tools/package.json): `npm ci --prefix tools`
 tools/node_modules/
+
+# The Fire TV Gradle project's build output
+android/build/
+android/.gradle/
