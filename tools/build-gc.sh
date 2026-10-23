@@ -1219,6 +1219,7 @@ derived_output() {
     pkg/*.dylib|pkg/symbols|pkg/.ffabi-ok|pkg/.ffabi-host-ok|pkg/.build-config|pkg/.config-local-stamp) ;;
     pkg/.flavor|pkg/PlxNative.app|pkg/PlxNative-*|pkg/*.link.*|pkg/link-evidence) ;;
     ipkroot/*.tar.gz|ipkroot/debian-binary|ipkroot/data/usr|stub/*.so|*.o) ;;
+    android/build|android/.gradle) ;;                       # the Fire TV Gradle project's output
     tools/node_modules|__pycache__|*/__pycache__|*.pyc|.DS_Store|*/.DS_Store) ;;
     .tv-*.pid|.tv-*.log) ;;                                     # a session's scratch, not its address or password
     tests/fixtures/out|tests/fixtures/*.mkv|tests/fixtures/*.mp4|tests/fixtures/*.sup|tests/fixtures/fixtures.json) ;;
