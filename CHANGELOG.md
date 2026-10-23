@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.9] - 2026-10-23
+
+### Added
+- The Fire TV skeleton reacts to the remote: it shows the last key pressed on screen and logs it, mapped as the port's key table says (MENU, or BACK held for a second, is Exit). Still not installed on any stick.
+
 ## [0.1.8] - 2026-10-23
 
 ### Added
