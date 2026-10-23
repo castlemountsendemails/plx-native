@@ -12,7 +12,7 @@ on:
     # A maintenance line (`release/vX.Y`, cut from a tag for a patch release) is a trunk of its own
     # for `release.yml`'s `line` input, so it gets the same push gate `main` does — otherwise the
     # first time a hotfix's changes are compiled in a clean checkout is the release run itself.
-    branches: [main, 'release/v*']
+    branches: [main, trunk, 'release/v*']
     # This gate is host checks (lint + unit suite) and an ARM cross-build — expensive (#261 spent
     # ~20 runner-minutes on a README-only PR, #513 the same on issue templates and docs), and
     # neither stage reads prose, images or repository metadata. The policy: start from `'**'`,
@@ -654,3 +654,23 @@ jobs:
           fi
           echo '::error::the armv7 cross-build did not succeed (see the results above)'
           exit 1
+
+  # The production webOS package (`com.beb.plxnative`), built the way prod-build.yml did on
+  # `prod-0.9.0`: stable flavour, production telemetry (the PLX_SENTRY_DSN / PLX_POSTHOG_KEY
+  # repository variables, placeholders on this fork), nothing tagged, released or sent to Sentry.
+  webos:
+    name: webos
+    uses: ./.github/workflows/build-package.yml
+    with:
+      ref: ${{ github.sha }}
+      flavor: stable
+      telemetry: production
+      artifact: prod-package
+      homebrew-manifest: false
+      source-asset: false
+      fwcompat: true
+      upload-debug-files: false
+      caches: false
+    secrets:
+      # Required by build-package.yml's signature but read only when upload-debug-files is true.
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN || 'unused' }}

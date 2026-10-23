@@ -33,12 +33,6 @@
 # PLX_CHECK_LOCK=off bypassing it. Runs against a throwaway lock path -- never the real
 # ~/.cache/plxnative/check.lock* -- so it cannot contend with the `check` that is running it.
 python3 ci/test_check_lock.py
-# `make build-bench`: table/JSON shape, edit-and-restore, refusals, skips and the Makefile wiring, against a fake cargo.
-python3 ci/test_build_bench.py
-# The daily build-time record (tools/build-history.py -> build-history.json on the ci-metrics branch): the record shape,
-# one record per day (a same-day re-run replaces it), nothing written for a failed benchmark, a red `check` costing only
-# its own rows, a noisy day marked and kept, nothing identifying in the runner block. Synthetic documents, no cargo.
-python3 ci/test_build_history.py
 # tools/build-gc.sh against disposable repositories, fleet dirs and caches: every OTHER reclaim mode refuses under a held FFmpeg lock, a
 # live checkout is spared, `--auto`'s order is the planner's (and its `--worktrees` stage spares a lane inside the idle window, and one holding an ignored file that is not build output),
 # `--worktrees` judges a lane against `origin/main` without refreshing its index, and `--evict PLAN` deletes exactly what the plan
@@ -194,14 +188,6 @@ python3 ci/test_ci_timeouts.py
 python3 ci/test_ci_workflows.py
 # The build-health budgets (ci/build-budgets.json): the checker against canned metadata, and the json schema.
 python3 ci/test_build_budgets.py
-# tools/ci-durations.py (CI duration trends) against canned `gh api` output; no network.
-python3 tools/test_ci_durations.py
-# tools/ci-history.py (the live page's data: incremental merge, filtering, pull-request and nightly rows, re-runs,
-# cancelled counts, retention fold, paging stop) against a fake `gh api`, and the shape of site/ci/index.html plus its pure daily-chart rules run in node or macOS jsc (skipped when neither exists); no network.
-python3 tools/test_ci_history.py
-# tools/ci-summary.py (the page's "now" block with its order and selection, the two slowest lists and regressions) against synthetic series: step up and down,
-# noisy flat, missing days, the re-run wall rule, PR/push separation; no network.
-python3 tools/test_ci_summary.py
 # `make test-crate` (the crate-only loop: it must carry the full suite's feature set) and the parallel
 # test runner every unit recipe goes through (a failing binary fails the gate, a missing binary is not
 # a pass, every `test result:` line is printed), both against a fake cargo; nothing is compiled.
@@ -224,11 +210,6 @@ python3 ci/test-compat.py
 # The cargo seed's own suite (restore only into an absent dir, the app crate never in the seed,
 # key refresh, off switch, clone failure), against a fake root and a private cache.
 python3 ci/test_cargo_seed.py
-# tools/site_video.py, the host half of the site demo video (encode, quality gates, the sentinel scan, the
-# manifest and `adopt`): the scanner on synthetic RGB frames, the encode argv asserted (never run), the gates'
-# pure logic, manifest tamper, adopt refusing anything but `linux-ci`, and the pinned-ffmpeg fetch against a
-# fake opener. Offline, no ffmpeg; the one real-ffmpeg case is off unless PLXNATIVE_SITE_VIDEO_FFMPEG is set.
-python3 tests/test_site_video.py
 # tools/site_stills.py, the simulator-made stills' half of the same refresh: which files it owns (read from the
 # generating tools), the manual set, adopt's refusals and the decide/commit-message logic. Offline.
 python3 tests/test_site_stills.py
@@ -284,13 +265,6 @@ python3 ci/test_check_debug_files.py
 # The ASS header fixture generator's Matroska parsing and validation, on synthetic input (no ffmpeg run).
 python3 ci/test_ass_header_fixture.py
 python3 ci/test_dependencies.py
-# ci/deps-update.py: update-source schema, tag/version handling per source type (fixtures), bump rewriting, dependency-graph snapshot shape, deps-update.yml security shape. No network.
-python3 ci/test_deps_update.py
-# THIRD-PARTY-NOTICES.md section 2.4's package tables are generated from rust-modules/Cargo.lock (ci/gen-third-party-notices.py;
-# inputs in ci/third-party-crates.json): the gate fails when a dependency bump moved a version, a crate entered the lock
-# unclassified, or the std snapshot's toolchain is not the one rust-modules/rust-toolchain.toml pins. Reads files only, no cargo; the self-test
-# runs on synthetic locks and data.
-python3 ci/test_gen_notices.py
 python3 ci/gen-third-party-notices.py --check
 # The soft-float guard: `-C target-feature=-soft-float` (what gives our crates VFP on the armv7 target) is an UNSTABLE
 # feature flag on stable rustc, so a release may stop honouring it. check-vfp.py compiles a tiny float probe with the

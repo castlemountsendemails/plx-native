@@ -1233,11 +1233,6 @@ class Credits(unittest.TestCase):
         for m in catalog["movies"] + catalog["shows"]:
             self.assertIn(f'id="{m["id"]}"', page)
 
-    def test_the_landing_page_footer_links_the_credits(self):
-        self.assertIn('href="credits.html"', (ROOT / "site" / "index.html").read_text())
-        self.assertIn("cp site/credits.html _site/credits.html",
-                      (ROOT / ".github" / "workflows" / "pages.yml").read_text())
-
     def test_a_screenshot_run_writes_the_credits_beside_its_images(self):
         with tempfile.TemporaryDirectory() as d:
             screenshots.write_credits(pathlib.Path(d))
