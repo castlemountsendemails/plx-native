@@ -74,3 +74,5 @@ mod port;
 #[cfg(feature = "hostsim")]
 pub use app::synthetic_home_initial;
 
+
+compile_error!("branch-protection test: this PR must be blocked");
