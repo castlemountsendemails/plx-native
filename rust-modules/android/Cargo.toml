@@ -12,5 +12,10 @@ publish = false
 name = "main"
 crate-type = ["cdylib"]
 
+# ci/module_graph.py reads this crate into the app's module tree as module `android`, so its
+# modules are `android::keys` and `android::jni`.
+[package.metadata.plx]
+mount = "android"
+
 [lints]
 workspace = true
