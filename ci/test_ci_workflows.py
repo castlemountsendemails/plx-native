@@ -107,8 +107,8 @@ class BundledLibrarySymbols(unittest.TestCase):
 
     def test_the_cross_builds_give_the_libraries_a_build_id_and_ffmpeg_keeps_the_unstripped_copy(self):
         ffmpeg = (ROOT / "ci/build-ffmpeg.sh").read_text()
-        # cross branch only: the HOST build links with Apple's ld, which has no --build-id
-        self.assertEqual(ffmpeg.count("--build-id=sha1"), 2)   # the comment names it once more
+        # webOS and Android branches only: the HOST build links with Apple's ld, which has no --build-id
+        self.assertEqual(ffmpeg.count("--build-id=sha1"), 3)   # the comment names it once more
         self.assertIn("--sysroot=\"$SYSROOT\" \\\n    --extra-ldflags='-Wl,--build-id=sha1'", ffmpeg)
         # the copy is taken BEFORE the strip, from the link output, into a directory no lib glob reaches
         keep = ffmpeg.index('cp "$elf" "$PREFIX/lib/unstripped/')
