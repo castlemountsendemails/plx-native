@@ -1,7 +1,11 @@
 package com.beb.plxnative;
 
 import android.content.Context;
+import android.content.Intent;
 import android.view.KeyEvent;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
@@ -11,6 +15,21 @@ public class PlxActivity extends SDLActivity {
     @Override
     protected String[] getLibraries() {
         return new String[] {"SDL2", "SDL2_ttf", "main"};
+    }
+
+    // SDL_main's arguments: each intent extra the native harness reads, as key=value. SDL asks once,
+    // before it starts the native thread, so a new clip needs a fresh start (am start -S).
+    @Override
+    protected String[] getArguments() {
+        List<String> args = new ArrayList<>();
+        Intent intent = getIntent();
+        for (String key : new String[] {"clip", "vc", "ac", "fps"}) {
+            String value = intent == null ? null : intent.getStringExtra(key);
+            if (value != null) {
+                args.add(key + "=" + value);
+            }
+        }
+        return args.toArray(new String[0]);
     }
 
     // The UI is drawn at 1920x1080 on every stick; the display hardware scales it to the panel.

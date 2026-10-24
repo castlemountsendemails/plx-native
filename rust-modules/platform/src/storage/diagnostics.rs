@@ -740,7 +740,8 @@ fn probe(label: Directory, path: &Path) -> Probe {
     p
 }
 fn safe_destination(stat: &libc::stat, uid: u32) -> bool {
-    stat.st_mode & libc::S_IFMT == libc::S_IFREG && stat.st_uid == uid && stat.st_nlink == 1
+    // `st_mode` is wider than `mode_t` on 32-bit Android; the file-type bits fit either.
+    (stat.st_mode as libc::mode_t) & libc::S_IFMT == libc::S_IFREG && stat.st_uid == uid && stat.st_nlink == 1
 }
 fn destination(dir: &File) -> io::Result<()> {
     let _block = guard();

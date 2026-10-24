@@ -750,6 +750,13 @@ jobs:
           cp vendor/ffmpeg-prefix-android/lib/lib*-plx.so "$libs/armeabi-v7a/"
           ls -l "$libs/armeabi-v7a"
           readelf -d "$libs/armeabi-v7a/libmain.so" | grep -E 'NEEDED|SONAME'
+          # Android loads libraries RTLD_NOW, so a webOS-only symbol left undefined fails the app at start.
+          und=$(readelf --dyn-syms -W "$libs/armeabi-v7a/libmain.so" | awk '$7 == "UND" {print $8}' | sort -u)
+          echo "$und"
+          if grep -E '^(sf_|vp_|acb_|LS|g_main_|glBind)' <<<"$und"; then
+            echo "::error::libmain.so needs a webOS symbol no Android library provides"
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/assets"
           cp pkg/appfont.ttf "$RUNNER_TEMP/assets/"
 

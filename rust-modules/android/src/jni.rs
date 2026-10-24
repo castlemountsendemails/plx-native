@@ -5,17 +5,19 @@ use std::ffi::c_void;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
-use crate::keys::{self, Keys, Press};
+use crate::keys::{self, Edge, Key, Keys, Press};
 use crate::skeleton::{log, LOG_INFO};
 
 struct Bridge {
     keys: Keys,
     readout: String,
+    back: bool,
 }
 
 static BRIDGE: Mutex<Bridge> = Mutex::new(Bridge {
     keys: Keys::new(),
     readout: String::new(),
+    back: false,
 });
 
 fn bridge() -> MutexGuard<'static, Bridge> {
@@ -30,6 +32,7 @@ fn now_ms() -> u64 {
 impl Bridge {
     fn record(&mut self, presses: Vec<Press>) {
         for Press { key, edge, code } in presses {
+            self.back |= key == Key::Back && edge == Edge::Down;
             self.readout = format!("keycode {code} -> {key:?} ({edge:?})");
             log(LOG_INFO, &self.readout);
         }
@@ -61,4 +64,9 @@ pub fn tick() {
 /// The last press, as the skeleton draws it; empty before the first.
 pub fn readout() -> String {
     bridge().readout.clone()
+}
+
+/// Whether BACK was pressed since the last call.
+pub fn take_back() -> bool {
+    std::mem::take(&mut bridge().back)
 }

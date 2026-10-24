@@ -684,6 +684,13 @@ dependencies = [
 [[package]]
 name = "plx_android"
 version = "0.0.0"
+dependencies = [
+ "libc",
+ "plx_base",
+ "plx_data",
+ "plx_media",
+ "plx_platform",
+]
 
 [[package]]
 name = "plx_appkit"

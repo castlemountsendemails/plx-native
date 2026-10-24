@@ -344,6 +344,8 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libavformat-plx.so.63",
         "libavformat-plx.63.dylib",
+        // The Android APK's: FFmpeg's android target puts no major in the file name or SONAME.
+        "libavformat-plx.so",
     ] {
     // Declared beside libavformat's other entry points because that is the library that DEFINES
     // it. Under `#[link]` the final link resolved every name against every library at once and
@@ -401,6 +403,8 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libavcodec-plx.so.63",
         "libavcodec-plx.63.dylib",
+        // The Android APK's: FFmpeg's android target puts no major in the file name or SONAME.
+        "libavcodec-plx.so",
     ] {
     fn avcodec_version() -> c_uint;
     fn av_packet_alloc() -> *mut AVPacket;
@@ -447,6 +451,8 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libavutil-plx.so.61",
         "libavutil-plx.61.dylib",
+        // The Android APK's: FFmpeg's android target puts no major in the file name or SONAME.
+        "libavutil-plx.so",
     ] {
     fn avutil_version() -> c_uint;
     fn av_malloc(size: usize) -> *mut c_void;
@@ -476,6 +482,8 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libswscale-plx.so.10",
         "libswscale-plx.10.dylib",
+        // The Android APK's: FFmpeg's android target puts no major in the file name or SONAME.
+        "libswscale-plx.so",
     ] {
     fn sws_getContext(
         src_w: c_int, src_h: c_int, src_fmt: c_int,
@@ -1299,7 +1307,12 @@ fn load_libraries() -> bool {
     // The bundled FFmpeg lives beside the binary, which is on no library search path — so it is
     // opened by ABSOLUTE PATH. That is not a convenience: webOS 11.2.0 ships FFmpeg 6 itself, and
     // a bare SONAME there could open the television's copy instead of ours.
+    #[cfg(not(target_os = "android"))]
     let dir = Some(plx_base::paths::app_dir());
+    // An Android app's executable is the system's `app_process`, so the libraries are opened by
+    // bare name, which the linker resolves in the APK's own library directory.
+    #[cfg(target_os = "android")]
+    let dir = None;
 
     // DEPENDENCY ORDER, and it is load-bearing. libavformat NEEDs libavcodec NEEDs libavutil by
     // SONAME, and these libraries carry no rpath (FFmpeg's configure evals its flags, so
