@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.2] - 2026-10-24
+
+### Added
+- The Fire TV APK can be started on a test clip over adb (`am start -S ... --es clip <url>`): the app's own player engine streams it from a plain-http server and shows the clip, its resolution, the position and how much it has read on screen; BACK stops it and returns to the skeleton screen. Nothing is decoded or shown yet; the engine's log goes to logcat. Started without a clip, the app is the skeleton as before.
+
 ## [0.2.1] - 2026-10-24
 
 ### Added
