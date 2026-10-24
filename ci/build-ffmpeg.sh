@@ -58,6 +58,10 @@
 # The output is `vendor/ffmpeg-prefix-host` and `libavformat-plx.63.dylib` — Mach-O naming, so
 # nothing here can be confused with the shipped ELF even by basename, and `make ipk`'s
 # `lib*-plx.so.*` glob cannot pick it up.
+#
+# ANDROID=1 BUILDS IT FOR THE FIRE TV APK (armeabi-v7a, API 25, ANDROID_NDK_HOME), with the same
+# component list, into `vendor/ffmpeg-prefix-android`. `--target-os=android` names each library and
+# its SONAME `lib<name>-plx.so` with no major: PackageManager extracts only `lib*.so` from an APK.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -76,9 +80,15 @@ else
   VERSION=$(python3 "$DEPS" get ffmpeg version)
   SHA256=$(python3 "$DEPS" get ffmpeg sha256)
 fi
-NDK=${WEBOS_SDK:-$HOME/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot}
-SYSROOT="$NDK/arm-webos-linux-gnueabi/sysroot"
 HOST=${HOST:-}
+ANDROID=${ANDROID:-}
+if [ -n "$ANDROID" ]; then
+  NDK="${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME to the Android NDK}/toolchains/llvm/prebuilt/linux-x86_64"
+  SYSROOT="$NDK/sysroot"
+else
+  NDK=${WEBOS_SDK:-$HOME/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot}
+  SYSROOT="$NDK/arm-webos-linux-gnueabi/sysroot"
+fi
 # WHERE EACH HALF LIVES, and why they are no longer in the same place.
 #
 # The PREFIX — the 3.8 MB of installed libraries and headers — stays inside the checkout, exactly
@@ -111,6 +121,8 @@ HOST=${HOST:-}
 # copy instead of downloading it twice.
 if [ -n "$HOST" ]; then
   PREFIX="$ROOT/vendor/ffmpeg-prefix-host"
+elif [ -n "$ANDROID" ]; then
+  PREFIX="$ROOT/vendor/ffmpeg-prefix-android"
 else
   PREFIX="$ROOT/vendor/ffmpeg-prefix"
 fi
@@ -143,8 +155,12 @@ fi
 # with "toolchain-wrapper.c: readlink: No such file or directory" and configure reports the
 # misleading "C compiler test failed", so --cross-prefix must be absolute.
 CROSS="$NDK/bin/arm-webos-linux-gnueabi-"
-
-if [ -z "$HOST" ]; then
+if [ -n "$ANDROID" ]; then
+  # The NDK has no prefixed binutils, only `llvm-*`; the API level lives in the clang name.
+  CROSS="$NDK/bin/llvm-"
+  ANDROID_CC="$NDK/bin/armv7a-linux-androideabi25-clang"
+  [ -x "$ANDROID_CC" ] || { echo "ffmpeg: no NDK clang at $ANDROID_CC" >&2; exit 1; }
+elif [ -z "$HOST" ]; then
   [ -x "${CROSS}gcc" ] || { echo "ffmpeg: no NDK at $NDK — run 'make setup-env'" >&2; exit 1; }
 fi
 
@@ -194,6 +210,13 @@ fi
 if [ -n "$HOST" ]; then
   # No --arch/--cpu/--target-os: configure detects this Mac, which is the point.
   set -- --prefix=/plx
+elif [ -n "$ANDROID" ]; then
+  # `--cxx` only because configure would otherwise derive `llvm-clang++` from the prefix.
+  set -- --prefix=/plx \
+    --enable-cross-compile --cross-prefix="$CROSS" --host-cc=cc \
+    --cc="$ANDROID_CC" --cxx="$ANDROID_CC++" \
+    --arch=arm --target-os=android \
+    --extra-ldflags='-Wl,--build-id=sha1'
 else
   # `--build-id=sha1` gives each shared object the same stable identity the app binary carries
   # (ci/check-elf.sh), which is what pairs a crash frame inside it with the symbols
@@ -234,7 +257,7 @@ fi
 # and a host build share this script and must not share a tree), the NDK and sysroot paths that
 # end up on the configure line, and the flag list itself — which is what keeps a RELEASE tree and
 # a dev tree apart.
-if [ -n "$HOST" ]; then ARCHTAG=host; else ARCHTAG=arm; fi
+if [ -n "$HOST" ]; then ARCHTAG=host; elif [ -n "$ANDROID" ]; then ARCHTAG=android; else ARCHTAG=arm; fi
 CACHE_ROOT=${PLX_BUILD_CACHE-$HOME/.cache/plxnative}
 # ABSOLUTE, because this script `cd`s into $SRC before it uses $WORK again. A relative root such
 # as `PLX_BUILD_CACHE=.plx-cache` would leave $WORK relative too, and after the `cd` every later
@@ -261,6 +284,8 @@ if [ -n "$CACHE_ROOT" ]; then
   # changed.
   if [ -n "$HOST" ]; then
     TOOLCHAIN="$(cc -dumpmachine 2>/dev/null)|$(cc --version 2>/dev/null | head -1)"
+  elif [ -n "$ANDROID" ]; then
+    TOOLCHAIN="$("$ANDROID_CC" -dumpmachine 2>/dev/null)|$("$ANDROID_CC" --version 2>/dev/null | head -1)|$(grep Pkg.Revision "$ANDROID_NDK_HOME/source.properties" 2>/dev/null)"
   else
     # `${CROSS}gcc` is a symlink to `toolchain-wrapper`, and so is every other tool name in this
     # NDK — so `-L` follows to the WRAPPER, one file that all of them share and that a sysroot or
@@ -367,7 +392,7 @@ if [ -n "$CACHE_ROOT" ]; then
   trap 'release_lock; trap - INT  EXIT; kill -INT  $$' INT
   trap 'release_lock; trap - TERM EXIT; kill -TERM $$' TERM
 else
-  if [ -n "$HOST" ]; then WORK="$ROOT/vendor/ffmpeg-build-host"; else WORK="$ROOT/vendor/ffmpeg-build"; fi
+  if [ -n "$HOST" ]; then WORK="$ROOT/vendor/ffmpeg-build-host"; elif [ -n "$ANDROID" ]; then WORK="$ROOT/vendor/ffmpeg-build-android"; else WORK="$ROOT/vendor/ffmpeg-build"; fi
 fi
 SRC="$WORK/ffmpeg-$VERSION"
 mkdir -p "$WORK" "$TARDIR"
@@ -456,7 +481,7 @@ if [ ! -d "$SRC" ]; then
 fi
 
 cd "$SRC"
-if [ -z "$HOST" ]; then
+if [ -z "$HOST" ] && [ -z "$ANDROID" ]; then
   # Relative configure spelling avoids embedding the checkout path in avutil_configuration.
   cp "$ROOT/ci/arm-cc.py" ./plx-arm-cc.py
   cp "$ROOT/ci/check-link-evidence.py" ./check-link-evidence.py
@@ -481,7 +506,7 @@ make install DESTDIR="$WORK/destdir" > "$WORK/install.log" 2>&1
 mkdir -p "$PREFIX"
 cp -R "$WORK/destdir/plx/." "$PREFIX/"
 # Strip each real ELF, then prove the exact strip transformation against its link receipt.
-if [ -z "$HOST" ]; then
+if [ -z "$HOST" ] && [ -z "$ANDROID" ]; then
   for elf in "$SRC"/libavutil/libavutil-plx.so.* "$SRC"/libavcodec/libavcodec-plx.so.* "$SRC"/libavformat/libavformat-plx.so.* "$SRC"/libswscale/libswscale-plx.so.*; do
     case "$elf" in *.link.*) continue ;; esac
     [ -f "$elf" ] && [ ! -L "$elf" ] || continue
@@ -494,6 +519,18 @@ if [ -z "$HOST" ]; then
     cp "$elf" "$PREFIX/lib/unstripped/$(basename "$elf")"
     "${CROSS}strip" --strip-unneeded "$target"
     python3 "$ROOT/ci/stage-link-evidence.py" "$elf" "$target" --stripped
+  done
+fi
+# The stick's loader matches DT_NEEDED against SONAME and refuses text relocations at API 23+, so
+# either fault would only show as a failed dlopen on the device.
+if [ -n "$ANDROID" ]; then
+  for f in "$PREFIX"/lib/lib*-plx.so; do
+    dyn=$("${CROSS}readelf" -d "$f")
+    soname=$(printf '%s\n' "$dyn" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
+    [ "$soname" = "$(basename "$f")" ] || { echo "ffmpeg: $f has SONAME '$soname'" >&2; exit 1; }
+    if printf '%s\n' "$dyn" | grep -E '\(TEXTREL\)|\(NEEDED\).*-plx\.so\.' >&2; then
+      echo "ffmpeg: $f has a text relocation or a versioned -plx DT_NEEDED" >&2; exit 1
+    fi
   done
 fi
 
@@ -513,7 +550,7 @@ echo "ffmpeg: installed to $PREFIX"
 # installed. Make then fails the target on a COLD tree while a second run succeeds, because by then
 # the header exists and the recipe never re-runs. That reads as a flake and is not one; CI builds
 # clean, so it fails there every time.
-for f in "$PREFIX"/lib/lib*-plx.so.* "$PREFIX"/lib/lib*-plx.*.dylib; do
+for f in "$PREFIX"/lib/lib*-plx.so.* "$PREFIX"/lib/lib*-plx.*.dylib "$PREFIX"/lib/lib*-plx.so; do
   case "$f" in *.link.*) continue ;; esac
   if [ -f "$f" ] && [ ! -L "$f" ]; then
     printf '  %-28s %6s KB\n' "$(basename "$f")" "$(( $(wc -c < "$f") / 1024 ))"

@@ -189,6 +189,9 @@ __pycache__/
 # after it had been removed. Both forms are covered without the slash.
 vendor/ffmpeg-build-host
 vendor/ffmpeg-prefix-host
+# The Fire TV build (`ANDROID=1 ci/build-ffmpeg.sh`).
+vendor/ffmpeg-build-android
+vendor/ffmpeg-prefix-android
 pkg/*.dylib
 pkg/.ffabi-host-ok
 rust-modules/target-sym/
