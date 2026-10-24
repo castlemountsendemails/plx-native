@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.1] - 2026-10-24
+
+### Added
+- The Fire TV APK now carries its own FFmpeg, built for the sticks by CI, and CI fails a build whose APK is missing it. The FFmpeg source and its build script come in the same download as the APK. Nothing in the app uses FFmpeg yet.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
