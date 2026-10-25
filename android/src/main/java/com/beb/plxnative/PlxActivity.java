@@ -134,6 +134,17 @@ public class PlxActivity extends SDLActivity {
         MediaCodec codec = null;
         try {
             codec = MediaCodec.createByCodecName(name);
+            // The engine passes the clip's largest raster (3840x2160 for a 1080p clip); the HD and 3rd gen
+            // AVC decoder rejects that in configure, so the size is capped to what the decoder reports.
+            MediaCodecInfo.VideoCapabilities caps = codec.getCodecInfo().getCapabilitiesForType(mime).getVideoCapabilities();
+            if (!caps.isSizeSupported(width, height)) {
+                int w = Math.min(width, caps.getSupportedWidths().getUpper());
+                int h = Math.min(height, caps.getSupportedHeights().getUpper());
+                Log.w(TAG, "video: " + name + " rejects " + width + "x" + height + ", configuring " + w + "x" + h
+                        + " (widths " + caps.getSupportedWidths() + ", heights " + caps.getSupportedHeights() + ")");
+                width = w;
+                height = h;
+            }
             MediaFormat format = MediaFormat.createVideoFormat(mime, width, height);
             // Room for a whole access unit at the largest raster; the default can be smaller than a 4K keyframe.
             format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, width * height * 3 / 4);

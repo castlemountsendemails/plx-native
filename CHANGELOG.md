@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.4] - 2026-10-25
+
+### Updated
+- The Fire TV clip decoder now caps the size it opens to what the stick's H.264 decoder reports it supports, instead of always asking for the clip's largest raster (3840x2160). Aimed at the HD and 3rd gen sticks, where the decoder refused to open; not yet confirmed on either stick.
+
 ## [0.2.3] - 2026-10-25
 
 ### Added
