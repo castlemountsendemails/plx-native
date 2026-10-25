@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.6] - 2026-10-25
+
+### Added
+- The Fire TV APK now carries its own third-party notice, `THIRD-PARTY-NOTICES-FIRETV.md`, and the licence texts it names, in the app's assets. It covers FFmpeg, SDL2, SDL2_ttf with FreeType, the Inter font, and the Rust crates the APK links. CI generates the crate tables from the Android build and fails a build whose APK is missing the notice or a licence text it names.
+
 ## [0.2.5] - 2026-10-25
 
 ### Updated
