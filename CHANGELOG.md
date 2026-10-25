@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.3] - 2026-10-25
+
+### Added
+- The Fire TV test clip is now decoded and shown: the stick's own hardware decoder plays the clip's video under the on-screen label, which now names the decoder and counts the frames fed, shown and dropped as late. There is still no sound, and BACK stops it as before.
+
 ## [0.2.2] - 2026-10-24
 
 ### Added
