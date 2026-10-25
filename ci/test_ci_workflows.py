@@ -149,7 +149,8 @@ class ToolchainPin(unittest.TestCase):
 
     # The files that must carry the release: the pin itself, and the snapshot / generated table derived from it
     # (ci/gen-third-party-notices.py checks them against the pin, and --derive-toolchain rewrites them).
-    DERIVED = {"rust-modules/rust-toolchain.toml", "ci/third-party-crates.json", "THIRD-PARTY-NOTICES.md"}
+    DERIVED = {"rust-modules/rust-toolchain.toml", "ci/third-party-crates.json", "THIRD-PARTY-NOTICES.md",
+               "THIRD-PARTY-NOTICES-FIRETV.md"}
 
     def test_dependabot_bumps_the_toolchain_file(self):
         body = (ROOT / ".github/dependabot.yml").read_text()
