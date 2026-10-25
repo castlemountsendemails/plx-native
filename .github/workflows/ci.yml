@@ -249,6 +249,12 @@ jobs:
         # dependabot-notices.yml; this is its backstop.)
         run: python3 ci/gen-third-party-notices.py --check --verify-graph
 
+      - name: Fire TV notices vs the Android graph
+        # THIRD-PARTY-NOTICES-FIRETV.md's Rust tables are generated from `cargo tree` for plx_android on
+        # armv7-linux-androideabi (it resolves and compiles nothing); a crate the APK links with no row
+        # in ci/third-party-crates.json fails here with the name to classify.
+        run: python3 ci/gen-firetv-notices.py --check
+
       - name: Type-check the simulator feature set
         # The host simulator is a real build configuration with real users (the `ui-sim` skill, and
         # `make macapp`, which ships `--release --no-default-features --features hostsim` to
@@ -757,8 +763,9 @@ jobs:
             echo "::error::libmain.so needs a webOS symbol no Android library provides"
             exit 1
           fi
-          mkdir -p "$RUNNER_TEMP/assets"
-          cp pkg/appfont.ttf "$RUNNER_TEMP/assets/"
+          mkdir -p "$RUNNER_TEMP/assets/licenses"
+          cp pkg/appfont.ttf LICENSE TRADEMARKS.md THIRD-PARTY-NOTICES-FIRETV.md "$RUNNER_TEMP/assets/"
+          cp licenses/*.txt pkg/OFL.txt "$RUNNER_TEMP/assets/licenses/"
 
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:

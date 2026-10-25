@@ -37,6 +37,10 @@ check "armeabi-v7a libmain.so" has "$files" '^lib/armeabi-v7a/libmain\.so$'
 for lib in avutil avcodec avformat; do
   check "armeabi-v7a lib$lib-plx.so" has "$files" "^lib/armeabi-v7a/lib$lib-plx\\.so\$"
 done
+# The notice and the licence texts it names, which the CI step copies into the assets.
+for asset in THIRD-PARTY-NOTICES-FIRETV.md licenses/LGPL-2.1.txt licenses/Zlib.txt licenses/FreeType.txt licenses/OFL.txt; do
+  check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
+done
 check "minSdk 25" has "$badging" "^(min)?[sS]dkVersion:'25'$"
 check "targetSdk 28" has "$badging" "^targetSdkVersion:'28'$"
 # aapt2 prints a boolean attribute as true/false, older builds as its raw (type 0x12) value.
