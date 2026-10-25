@@ -3,7 +3,7 @@
 
 use plx_platform::tv::{sandbox, toast, LocaleReply, Port};
 
-use crate::log_sink::LogSink;
+use crate::amediacodec::AmcSink;
 
 fn nothing() {}
 
@@ -34,5 +34,5 @@ pub static PORT: Port = Port {
     frame_probe_waiting: nothing,
     frame_probe_acquired: nothing,
     frame_probe_fields: String::new,
-    sink: &LogSink,
+    sink: &AmcSink,
 };

@@ -42,6 +42,7 @@ const SDL_INIT_VIDEO: u32 = 0x20;
 const SDL_WINDOW_FULLSCREEN: u32 = 0x1;
 const SDL_RENDERER_ACCELERATED: u32 = 0x2;
 const SDL_QUIT: u32 = 0x100;
+const SDL_GL_ALPHA_SIZE: c_int = 3;
 pub const LOG_INFO: c_int = 4;
 pub const LOG_ERROR: c_int = 6;
 
@@ -49,6 +50,8 @@ extern "C" {
     fn SDL_Init(flags: u32) -> c_int;
     fn SDL_Quit();
     fn SDL_GetError() -> *const c_char;
+    fn SDL_SetHint(name: *const c_char, value: *const c_char) -> c_int;
+    fn SDL_GL_SetAttribute(attr: c_int, value: c_int) -> c_int;
     fn SDL_CreateWindow(
         title: *const c_char,
         x: c_int,
@@ -125,6 +128,10 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
         if TTF_Init() != 0 {
             return Err(sdl_error("TTF_Init"));
         }
+        // An alpha channel that SurfaceFlinger honours, so the video SurfaceView under this one
+        // shows wherever the UI clears to transparent.
+        SDL_SetHint(c"SDL_VIDEO_EGL_ALLOW_TRANSPARENCY".as_ptr(), c"1".as_ptr());
+        SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
         // Android sizes the window to the surface, which PlxActivity fixes at 1920x1080.
         let window = SDL_CreateWindow(
             c"PlxNative".as_ptr(),
@@ -186,7 +193,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                 redraw = true;
             }
             if redraw {
-                draw(renderer, font, w, &shown);
+                draw(renderer, font, w, &shown, playing);
                 redraw = false;
             }
             // Short, so a held BACK turns into Exit on time; shorter while playing, because the
@@ -213,8 +220,9 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
 }
 
 // Textures are rebuilt on every draw and resuming sends SDL events that trigger one, so a GL context
-// lost while the app is paused costs nothing.
-fn draw(renderer: Handle, font: Handle, width: c_int, lines: &[String]) {
+// lost while the app is paused costs nothing. While a clip plays, the screen is cleared to transparent
+// and the label sits at the top, over the video.
+fn draw(renderer: Handle, font: Handle, width: c_int, lines: &[String], playing: bool) {
     let gold = Color {
         r: 0xe5,
         g: 0xa0,
@@ -222,9 +230,13 @@ fn draw(renderer: Handle, font: Handle, width: c_int, lines: &[String]) {
         a: 0xff,
     };
     unsafe {
-        SDL_SetRenderDrawColor(renderer, 0x1f, 0x1f, 0x1f, 0xff);
+        if playing {
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 0x1f, 0x1f, 0x1f, 0xff);
+        }
         SDL_RenderClear(renderer);
-        let mut y = 420;
+        let mut y = if playing { 40 } else { 420 };
         for line in lines {
             let line = CString::new(line.replace('\0', " ")).unwrap_or_default();
             let surface = TTF_RenderUTF8_Blended(font, line.as_ptr(), gold);

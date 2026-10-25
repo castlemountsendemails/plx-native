@@ -5,8 +5,8 @@ use plx_base::task::MainThread;
 use plx_media::player::{self, adapter::PlayerAdapter};
 use plx_media::route::{self, PlaybackSession};
 
+use crate::amediacodec;
 use crate::clip::Clip;
-use crate::log_sink;
 use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
 
 pub struct Harness {
@@ -88,17 +88,18 @@ impl Harness {
     pub fn label(&self) -> Vec<String> {
         let (w, h) = player::video_raster();
         let secs = player::playpos_ns().max(0) / 1_000_000_000;
-        let (video, audio) = log_sink::fed_counts();
+        let (decoder, fed, shown, late) = amediacodec::stats();
+        let decoder = if decoder.is_empty() { "-".into() } else { decoder };
         vec![
             self.clip.url.clone(),
-            format!("decoder -   declared {}/{}", self.clip.vc, self.clip.ac),
+            format!("decoder {decoder}   declared {}/{}", self.clip.vc, self.clip.ac),
             format!(
                 "{w}x{h}   {}:{:02}   {:?}",
                 secs / 60,
                 secs % 60,
                 player::state(&self.ps)
             ),
-            format!("fed video {video}, audio {audio}"),
+            format!("fed {fed}, shown {shown}, late {late}"),
         ]
     }
 }
