@@ -41,7 +41,7 @@ public class PlxActivity extends SDLActivity {
     protected String[] getArguments() {
         List<String> args = new ArrayList<>();
         Intent intent = getIntent();
-        for (String key : new String[] {"clip", "vc", "ac", "fps"}) {
+        for (String key : new String[] {"clip", "vc", "ac", "fps", "size"}) {
             String value = intent == null ? null : intent.getStringExtra(key);
             if (value != null) {
                 args.add(key + "=" + value);

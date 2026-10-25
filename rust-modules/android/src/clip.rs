@@ -1,5 +1,5 @@
 //! The clip the video harness plays, read from the `key=value` arguments `PlxActivity` builds from
-//! its intent extras (`am start ... --es clip <url> [--es vc hevc] [--es ac aac] [--es fps 23.976]`).
+//! its intent extras (`am start ... --es clip <url> [--es vc hevc] [--es ac aac] [--es fps 23.976] [--es size 1920x804]`).
 //! No JNI or SDL in here, so the host unit suite tests it.
 
 #[derive(Clone, Debug, PartialEq)]
@@ -11,6 +11,10 @@ pub struct Clip {
     /// `eac3`, `aac` or `dts`.
     pub ac: String,
     pub fps: f64,
+    /// The clip's own raster, as the item's dimensions are in a real playback. The engine sizes the
+    /// decoder's declaration from it; without it the declaration is the widest raster, which the
+    /// HD and 3rd gen H.264 decoders refuse.
+    pub size: Option<(u16, u16)>,
 }
 
 /// `None` without a `clip=` argument, which leaves the skeleton screen as it was. Arguments
@@ -21,6 +25,7 @@ pub fn parse<'a>(args: impl IntoIterator<Item = &'a str>) -> Option<Clip> {
         vc: "h264".into(),
         ac: "ac3".into(),
         fps: 23.976,
+        size: None,
     };
     for arg in args {
         let Some((key, value)) = arg.split_once('=') else {
@@ -36,6 +41,11 @@ pub fn parse<'a>(args: impl IntoIterator<Item = &'a str>) -> Option<Clip> {
                         clip.fps = fps;
                     }
                 }
+            }
+            "size" => {
+                clip.size = value.split_once('x').and_then(|(w, h)| {
+                    Some((w.parse().ok().filter(|w| *w > 0)?, h.parse().ok().filter(|h| *h > 0)?))
+                });
             }
             _ => {}
         }
@@ -72,6 +82,16 @@ mod tests {
         .unwrap();
         assert_eq!(clip.url, "http://192.0.2.1:8000/hevc-4k.mkv?a=1&b=2");
         assert_eq!((clip.vc.as_str(), clip.ac.as_str(), clip.fps), ("hevc", "aac", 25.0));
+    }
+
+    #[test]
+    fn size_is_a_positive_wxh_and_anything_else_is_unset() {
+        let size = |s: &str| parse(["clip=http://h/c.mkv", s]).unwrap().size;
+        assert_eq!(size("size=1920x804"), Some((1920, 804)));
+        for bad in ["size=1920", "size=0x804", "size=axb", "size=1920x-1"] {
+            assert_eq!(size(bad), None, "{bad}");
+        }
+        assert_eq!(parse(["clip=http://h/c.mkv"]).unwrap().size, None);
     }
 
     #[test]

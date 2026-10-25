@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.5] - 2026-10-25
+
+### Updated
+- The Fire TV clip harness takes the clip's own size (`--es size 1920x804`) and tells the player engine, as a real Plex item's size does, so a 1080p H.264 clip is declared at 1080p and not at the widest raster the engine knows.
+
 ## [0.2.4] - 2026-10-25
 
 ### Updated

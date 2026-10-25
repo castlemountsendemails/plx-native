@@ -49,6 +49,9 @@ impl Harness {
             plx_data::metadata::Dovi::default(),
             false,
         );
+        if let Some((w, h)) = clip.size {
+            route::set_stream_source_raster(&mut ps, w, h);
+        }
         let active = if declared {
             route::set_url(&mut ps, &clip.url);
             player::start_bufferfeed(&mut ps, &mut pa)
