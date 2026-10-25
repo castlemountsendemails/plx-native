@@ -43,6 +43,7 @@ const SDL_WINDOW_FULLSCREEN: u32 = 0x1;
 const SDL_RENDERER_ACCELERATED: u32 = 0x2;
 const SDL_QUIT: u32 = 0x100;
 const SDL_GL_ALPHA_SIZE: c_int = 3;
+const LABEL_EVERY_MS: u32 = 250;
 pub const LOG_INFO: c_int = 4;
 pub const LOG_ERROR: c_int = 6;
 
@@ -159,6 +160,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
         let mut size = (0, 0);
         let mut shown: Vec<String> = Vec::new();
         let mut redraw = true;
+        let mut labelled_at = 0;
         let mut event = Event {
             kind: 0,
             _rest: [0; 52],
@@ -180,8 +182,15 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                 log(LOG_INFO, &format!("surface {w}x{h}"));
                 redraw = true;
             }
+            // The label's counters change every frame; re-rendering it every loop slows the loop, and
+            // the engine feeds the decoder only once per loop.
+            let label_due = SDL_GetTicks().wrapping_sub(labelled_at) >= LABEL_EVERY_MS;
             let lines = match harness.as_ref().filter(|_| playing) {
-                Some(harness) => harness.label(),
+                Some(_) if !label_due && !redraw => shown.clone(),
+                Some(harness) => {
+                    labelled_at = SDL_GetTicks();
+                    harness.label()
+                }
                 None => {
                     let readout = jni::readout();
                     let key = if readout.is_empty() { "press a key".into() } else { readout };

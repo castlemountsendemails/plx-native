@@ -14,7 +14,11 @@ pub struct Harness {
     ps: PlaybackSession,
     pa: PlayerAdapter,
     active: bool,
+    pumps: u32,
+    pumps_since: u32,
 }
+
+const PUMP_LOG_MS: u32 = 10_000;
 
 impl Harness {
     /// Once per process, on the SDL thread: it mints the engine's main-thread token there.
@@ -62,7 +66,7 @@ impl Harness {
                 clip.fps
             ),
         );
-        Self { clip, ps, pa, active }
+        Self { clip, ps, pa, active, pumps: 0, pumps_since: 0 }
     }
 
     pub fn active(&self) -> bool {
@@ -74,6 +78,23 @@ impl Harness {
         self.pa.poll_release();
         if self.active && player::is_started() {
             player::pump(&mut self.ps, &mut self.pa, now_ms);
+            self.note_pump(now_ms);
+        }
+    }
+
+    /// Logs the pump rate every [`PUMP_LOG_MS`]: the engine feeds the sink only when pumped.
+    fn note_pump(&mut self, now_ms: u32) {
+        if self.pumps_since == 0 {
+            self.pumps_since = now_ms;
+            return;
+        }
+        self.pumps += 1;
+        let elapsed = now_ms.wrapping_sub(self.pumps_since);
+        if elapsed >= PUMP_LOG_MS {
+            let pumps = self.pumps;
+            log(LOG_INFO, &format!("harness: {pumps} pumps in {elapsed} ms ({} ms each)", elapsed / pumps));
+            self.pumps = 0;
+            self.pumps_since = now_ms;
         }
     }
 

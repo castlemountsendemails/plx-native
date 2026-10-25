@@ -39,6 +39,7 @@ static FED: AtomicU64 = AtomicU64::new(0);
 static SHOWN: AtomicU64 = AtomicU64::new(0);
 static LATE: AtomicU64 = AtomicU64::new(0);
 static AUDIO_DROPPED: AtomicU64 = AtomicU64::new(0);
+static FEED_MAX_US: AtomicU64 = AtomicU64::new(0);
 
 static DECODER: Mutex<Option<Decoder>> = Mutex::new(None);
 static DRAIN: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -156,19 +157,20 @@ fn teardown() {
     log(
         LOG_INFO,
         &format!(
-            "amc: closed after fed={} shown={} late={} audio dropped={}",
+            "amc: closed after fed={} shown={} late={} audio dropped={} slowest feed={}us",
             FED.load(Relaxed),
             SHOWN.load(Relaxed),
             LATE.load(Relaxed),
-            AUDIO_DROPPED.load(Relaxed)
+            AUDIO_DROPPED.load(Relaxed),
+            FEED_MAX_US.load(Relaxed)
         ),
     );
 }
 
-fn note_feed(size: c_uint, pts: i64) {
+fn note_feed(size: c_uint, pts: i64, took_us: u64) {
     let n = FED.fetch_add(1, Relaxed) + 1;
     if n <= 5 || n.is_multiple_of(LOG_EVERY) {
-        log(LOG_INFO, &format!("amc: feed video #{n} pts={}ms size={size}", pts / 1_000_000));
+        log(LOG_INFO, &format!("amc: feed video #{n} pts={}ms size={size} took={took_us}us", pts / 1_000_000));
     }
 }
 
@@ -191,7 +193,7 @@ impl VideoSink for AmcSink {
         log(LOG_INFO, &format!("amc: {} started for {format:?}", codec.name));
         lock(&NAME).clone_from(&codec.name);
         *lock(&DECODER) = Some(Decoder { codec, pending: None, playing: false, clock: Clock::default(), last_fed_us: 0 });
-        for count in [&FED, &SHOWN, &LATE, &AUDIO_DROPPED] {
+        for count in [&FED, &SHOWN, &LATE, &AUDIO_DROPPED, &FEED_MAX_US] {
             count.store(0, Relaxed);
         }
         FULL_LOGGED.store(false, Relaxed);
@@ -279,6 +281,7 @@ impl VideoSink for AmcSink {
         }
         let data = if p.is_null() { &[][..] } else { std::slice::from_raw_parts(p, size as usize) };
         let pts_us = pts / 1_000;
+        let started = now_ns();
         let queued = with_decoder(|d| {
             let input = d.codec.queue(data, pts_us, false);
             if matches!(input, Some(Input::Queued)) {
@@ -286,9 +289,11 @@ impl VideoSink for AmcSink {
             }
             (input, d.playing)
         });
+        let took_us = ((now_ns() - started) / 1_000).max(0) as u64;
+        FEED_MAX_US.fetch_max(took_us, Relaxed);
         match queued {
             Some((Some(Input::Queued), _)) => {
-                note_feed(size, pts);
+                note_feed(size, pts, took_us);
                 FEED_OK
             }
             Some((Some(Input::Full), playing)) => {
