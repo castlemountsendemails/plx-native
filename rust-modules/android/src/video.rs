@@ -42,35 +42,46 @@ const LEAD_NS: i64 = 20_000_000;
 const EARLY_NS: i64 = 50_000_000;
 /// A frame this late is dropped rather than shown.
 const LATE_NS: i64 = 40_000_000;
+/// For this long after a reset, a late frame restarts the clock instead: a decoder can stall for
+/// most of a second after its first frames, and dropping them would skip that stretch of video.
+const SETTLE_NS: i64 = 1_000_000_000;
 
 /// Maps frame PTS to `CLOCK_MONOTONIC` render times (the clock of `releaseOutputBuffer`'s
 /// timestamp). It anchors on the first frame after a reset and runs at real time from there.
 #[derive(Default)]
 pub struct Clock {
     anchor: Option<(i64, i64)>,
+    started_ns: Option<i64>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Action {
     Wait,
     Show(i64),
+    /// Shown at this time, with the clock restarted on this frame.
+    Restart(i64),
     Drop,
 }
 
 impl Clock {
     pub fn reset(&mut self) {
         self.anchor = None;
+        self.started_ns = None;
     }
 
     pub fn action(&mut self, pts_ns: i64, now_ns: i64) -> Action {
         let (at_ns, anchor_pts) = *self.anchor.get_or_insert((now_ns + LEAD_NS, pts_ns));
+        let started_ns = *self.started_ns.get_or_insert(at_ns);
         let render_ns = at_ns + (pts_ns - anchor_pts);
         if render_ns - now_ns > EARLY_NS {
             Action::Wait
-        } else if now_ns - render_ns > LATE_NS {
-            Action::Drop
-        } else {
+        } else if now_ns - render_ns <= LATE_NS {
             Action::Show(render_ns)
+        } else if now_ns - started_ns < SETTLE_NS {
+            self.anchor = Some((now_ns + LEAD_NS, pts_ns));
+            Action::Restart(now_ns + LEAD_NS)
+        } else {
+            Action::Drop
         }
     }
 }
@@ -105,7 +116,27 @@ mod tests {
         assert_eq!(clock.action(5_041_700_000, now), Action::Wait);
         let next = now + 41_700_000;
         assert_eq!(clock.action(5_041_700_000, next), Action::Show(next + LEAD_NS));
-        assert_eq!(clock.action(5_000_000_000, now + LEAD_NS + LATE_NS + 1), Action::Drop);
+        let after_settling = now + LEAD_NS + SETTLE_NS;
+        assert_eq!(clock.action(5_000_000_000, after_settling), Action::Drop);
+    }
+
+    #[test]
+    fn a_stall_just_after_the_start_restarts_the_clock_instead_of_dropping() {
+        let mut clock = Clock::default();
+        clock.action(0, 0);
+        // The decoder's third frame (83 ms) arrives 700 ms after the first.
+        let stalled = 700_000_000;
+        assert_eq!(clock.action(83_000_000, stalled), Action::Restart(stalled + LEAD_NS));
+        assert_eq!(clock.action(108_000_000, stalled), Action::Show(stalled + LEAD_NS + 25_000_000));
+    }
+
+    #[test]
+    fn a_restart_does_not_extend_the_settling_window() {
+        let mut clock = Clock::default();
+        clock.action(0, 0);
+        assert_eq!(clock.action(83_000_000, 900_000_000), Action::Restart(900_000_000 + LEAD_NS));
+        // Late again 1.5 s after the first start: dropped, though only 0.6 s after the restart.
+        assert_eq!(clock.action(125_000_000, 1_500_000_000), Action::Drop);
     }
 
     #[test]

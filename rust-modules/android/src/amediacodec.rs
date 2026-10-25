@@ -108,6 +108,10 @@ impl Decoder {
         let render = match self.clock.action(pts, now_ns()) {
             Action::Wait => return Step::Idle,
             Action::Show(at) => Some(at),
+            Action::Restart(at) => {
+                log(LOG_INFO, &format!("amc: frame pts={}ms came late just after the start; clock restarted", pts / 1_000_000));
+                Some(at)
+            }
             Action::Drop => None,
         };
         self.pending = None;
