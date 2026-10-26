@@ -107,8 +107,8 @@ class BundledLibrarySymbols(unittest.TestCase):
 
     def test_the_cross_builds_give_the_libraries_a_build_id_and_ffmpeg_keeps_the_unstripped_copy(self):
         ffmpeg = (ROOT / "ci/build-ffmpeg.sh").read_text()
-        # cross branch only: the HOST build links with Apple's ld, which has no --build-id
-        self.assertEqual(ffmpeg.count("--build-id=sha1"), 2)   # the comment names it once more
+        # webOS and Android branches only: the HOST build links with Apple's ld, which has no --build-id
+        self.assertEqual(ffmpeg.count("--build-id=sha1"), 3)   # the comment names it once more
         self.assertIn("--sysroot=\"$SYSROOT\" \\\n    --extra-ldflags='-Wl,--build-id=sha1'", ffmpeg)
         # the copy is taken BEFORE the strip, from the link output, into a directory no lib glob reaches
         keep = ffmpeg.index('cp "$elf" "$PREFIX/lib/unstripped/')
@@ -149,7 +149,8 @@ class ToolchainPin(unittest.TestCase):
 
     # The files that must carry the release: the pin itself, and the snapshot / generated table derived from it
     # (ci/gen-third-party-notices.py checks them against the pin, and --derive-toolchain rewrites them).
-    DERIVED = {"rust-modules/rust-toolchain.toml", "ci/third-party-crates.json", "THIRD-PARTY-NOTICES.md"}
+    DERIVED = {"rust-modules/rust-toolchain.toml", "ci/third-party-crates.json", "THIRD-PARTY-NOTICES.md",
+               "THIRD-PARTY-NOTICES-FIRETV.md"}
 
     def test_dependabot_bumps_the_toolchain_file(self):
         body = (ROOT / ".github/dependabot.yml").read_text()

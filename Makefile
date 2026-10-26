@@ -1879,11 +1879,13 @@ check-python-rest:
 	@python3 tools/check-parallel.py --steps ci/check-python-steps.txt
 
 # `make notices` — regenerate THIRD-PARTY-NOTICES.md section 2.4's package tables from
-# rust-modules/Cargo.lock after a dependency bump (`make check` runs the same script with --check).
+# rust-modules/Cargo.lock after a dependency bump (`make check` runs the same script with --check),
+# and the Rust tables of THIRD-PARTY-NOTICES-FIRETV.md from the Android graph.
 # `make notices-verify` also proves the data file against `cargo tree` and the pinned toolchain's rust-src.
 .PHONY: notices notices-verify
 notices:
 	@python3 ci/gen-third-party-notices.py
+	@python3 ci/gen-firetv-notices.py
 notices-verify:
 	@python3 ci/gen-third-party-notices.py --check --verify-graph --verify-toolchain
 

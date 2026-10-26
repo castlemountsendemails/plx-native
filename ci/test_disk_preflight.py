@@ -106,6 +106,7 @@ NOT_BUILDS = {
     "ci/deps.py": "reads and edits the pinned dependency list; `cargo tree` / `metadata` only",
     "ci/stage-link-evidence.py": "copies the linker's sidecar files; cargo appears in prose",
     "ci/gen-third-party-notices.py": "renders notices from Cargo.lock; never starts a build",
+    "ci/gen-firetv-notices.py": "renders the Fire TV notice from `cargo tree`, which resolves and compiles nothing",
     "tools/disk-budget.py": "the preflight itself",
     "tools/build-gc.sh": "the reclaim tool: it names cargo as a process to wait for, never to run",
 }

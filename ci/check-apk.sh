@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fails unless a Fire TV APK has the settings the sticks need: the armeabi-v7a libmain.so, minSdk 25,
+# Fails unless a Fire TV APK has the settings the sticks need: the armeabi-v7a libmain.so and FFmpeg, minSdk 25,
 # targetSdk 28, extractNativeLibs and allowBackup as the manifest sets them, a Leanback launcher
 # entry, the expected package, version and debuggable flag, and exactly one signer with CERT_SHA256.
 # Every check runs and reports, so one failure does not hide the next.
@@ -33,6 +33,14 @@ one_signer() {
 check "package $package, versionCode $code, versionName $name" \
   has "$badging" "^package: name='$package' versionCode='$code' versionName='$name' "
 check "armeabi-v7a libmain.so" has "$files" '^lib/armeabi-v7a/libmain\.so$'
+# The three the engine requires; libswscale is optional in ff.rs.
+for lib in avutil avcodec avformat; do
+  check "armeabi-v7a lib$lib-plx.so" has "$files" "^lib/armeabi-v7a/lib$lib-plx\\.so\$"
+done
+# The notice and the licence texts it names, which the CI step copies into the assets.
+for asset in THIRD-PARTY-NOTICES-FIRETV.md licenses/LGPL-2.1.txt licenses/Zlib.txt licenses/FreeType.txt licenses/OFL.txt; do
+  check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
+done
 check "minSdk 25" has "$badging" "^(min)?[sS]dkVersion:'25'$"
 check "targetSdk 28" has "$badging" "^targetSdkVersion:'28'$"
 # aapt2 prints a boolean attribute as true/false, older builds as its raw (type 0x12) value.

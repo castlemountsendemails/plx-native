@@ -17,5 +17,13 @@ crate-type = ["cdylib"]
 [package.metadata.plx]
 mount = "android"
 
+[target.'cfg(target_os = "android")'.dependencies]
+plx_base = { path = "../base" }
+plx_platform = { path = "../platform" }
+plx_data = { path = "../data" }
+plx_media = { path = "../media" }
+jni = "0.21.1"
+libc = "0.2"
+
 [lints]
 workspace = true

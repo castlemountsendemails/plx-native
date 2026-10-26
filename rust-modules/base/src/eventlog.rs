@@ -260,7 +260,27 @@ pub fn log(m: &str) {
     // Compiled out without the `lab-diagnostics` feature — see `lab`.
     #[cfg(feature = "lab-diagnostics")]
     crate::eventlog::ring::record(&line);
+    // An Android app has no `/tmp` to append to; its log is read with logcat.
+    #[cfg(target_os = "android")]
+    logcat::write(&line);
     let _ = append_record(&p, &line);
+}
+
+/// `__android_log_write` comes from `liblog`, which the Android `libmain.so` links.
+#[cfg(target_os = "android")]
+mod logcat {
+    use std::ffi::{c_char, c_int, CString};
+
+    const INFO: c_int = 4;
+
+    extern "C" {
+        fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    }
+
+    pub fn write(line: &str) {
+        let text = CString::new(line.replace('\0', " ")).unwrap_or_default();
+        unsafe { __android_log_write(INFO, c"PlxNative".as_ptr(), text.as_ptr()) };
+    }
 }
 
 /// The log's credential backstop. These run on the pure function, so they need no filesystem.

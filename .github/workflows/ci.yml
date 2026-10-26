@@ -249,6 +249,12 @@ jobs:
         # dependabot-notices.yml; this is its backstop.)
         run: python3 ci/gen-third-party-notices.py --check --verify-graph
 
+      - name: Fire TV notices vs the Android graph
+        # THIRD-PARTY-NOTICES-FIRETV.md's Rust tables are generated from `cargo tree` for plx_android on
+        # armv7-linux-androideabi (it resolves and compiles nothing); a crate the APK links with no row
+        # in ci/third-party-crates.json fails here with the name to classify.
+        run: python3 ci/gen-firetv-notices.py --check
+
       - name: Type-check the simulator feature set
         # The host simulator is a real build configuration with real users (the `ui-sim` skill, and
         # `make macapp`, which ships `--release --no-default-features --features hostsim` to
@@ -660,8 +666,8 @@ jobs:
           echo '::error::the armv7 cross-build did not succeed (see the results above)'
           exit 1
 
-  # The Fire TV APK (armeabi-v7a, minSdk 25): SDL2 and SDL2_ttf built with the NDK and cached,
-  # libmain.so from rust-modules/android through cargo-ndk, and the Gradle project in android/.
+  # The Fire TV APK (armeabi-v7a, minSdk 25): SDL2, SDL2_ttf and FFmpeg built with the NDK and
+  # cached, libmain.so from rust-modules/android through cargo-ndk, and the Gradle project in android/.
   firetv:
     name: firetv
     needs: changes
@@ -717,6 +723,24 @@ jobs:
           ci/build-android-sdl2.sh "$SDL_PREFIX"
           ci/build-android-sdl2-ttf.sh "$SDL_PREFIX"
 
+      - name: Cache the NDK build of FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/ffmpeg-prefix-android
+          key: android-ffmpeg-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('ci/build-ffmpeg.sh', 'ci/deps.py', 'ci/dependencies.json') }}
+
+      - name: Build FFmpeg with the NDK
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        env:
+          ANDROID: "1"
+        run: ci/build-ffmpeg.sh
+
+      - name: Check ff.rs's FFmpeg ABI table against the Android headers
+        run: |
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi25-clang" \
+            -I vendor/ffmpeg-prefix-android/include -std=c11 -c ci/ffabi-assert.c -o /dev/null
+
       - name: Install cargo-ndk
         # A no-op when rust-cache restored this version into ~/.cargo/bin.
         run: cargo "+$RUST_TOOLCHAIN" install cargo-ndk --version 4.1.2 --locked
@@ -729,10 +753,19 @@ jobs:
           libs="$RUNNER_TEMP/jniLibs"
           (cd rust-modules && cargo "+$RUST_TOOLCHAIN" ndk -t armeabi-v7a -P 25 -o "$libs" build --release -p plx_android)
           cp "$SDL_PREFIX/lib/libSDL2.so" "$SDL_PREFIX/lib/libSDL2_ttf.so" "$libs/armeabi-v7a/"
+          cp vendor/ffmpeg-prefix-android/lib/lib*-plx.so "$libs/armeabi-v7a/"
           ls -l "$libs/armeabi-v7a"
           readelf -d "$libs/armeabi-v7a/libmain.so" | grep -E 'NEEDED|SONAME'
-          mkdir -p "$RUNNER_TEMP/assets"
-          cp pkg/appfont.ttf "$RUNNER_TEMP/assets/"
+          # Android loads libraries RTLD_NOW, so a webOS-only symbol left undefined fails the app at start.
+          und=$(readelf --dyn-syms -W "$libs/armeabi-v7a/libmain.so" | awk '$7 == "UND" {print $8}' | sort -u)
+          echo "$und"
+          if grep -E '^(sf_|vp_|acb_|LS|g_main_|glBind)' <<<"$und"; then
+            echo "::error::libmain.so needs a webOS symbol no Android library provides"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/assets/licenses"
+          cp pkg/appfont.ttf LICENSE TRADEMARKS.md THIRD-PARTY-NOTICES-FIRETV.md "$RUNNER_TEMP/assets/"
+          cp licenses/*.txt pkg/OFL.txt "$RUNNER_TEMP/assets/licenses/"
 
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
@@ -787,10 +820,21 @@ jobs:
           mv build/outputs/apk/release/*.apk "$apk"
           ../ci/check-apk.sh "$apk" com.beb.plxnative "$RELEASE_VERSION_CODE" "$FIRETV_VERSION_NAME" "$FIRETV_RELEASE_CERT_SHA256" false
 
+      # The LGPL corresponding source of the FFmpeg inside the APK: the pinned tarball and the script.
+      - name: Stage the FFmpeg source beside the APK
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/apk/lgpl-source"
+          mkdir -p "$src"
+          cp "$(python3 ci/deps.py fetch ffmpeg)" ci/build-ffmpeg.sh "$src/"
+          ls -l "$src"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: firetv-${{ github.sha }}
-          path: ${{ runner.temp }}/apk/*.apk
+          path: |
+            ${{ runner.temp }}/apk/*.apk
+            ${{ runner.temp }}/apk/lgpl-source/
           if-no-files-found: error
 
   # The production webOS package (`com.beb.plxnative`): stable flavour, production telemetry

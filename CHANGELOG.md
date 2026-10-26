@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.2.6] - 2026-10-25
+
+### Added
+- The Fire TV APK now carries its own third-party notice, `THIRD-PARTY-NOTICES-FIRETV.md`, and the licence texts it names, in the app's assets. It covers FFmpeg, SDL2, SDL2_ttf with FreeType, the Inter font, and the Rust crates the APK links. CI generates the crate tables from the Android build and fails a build whose APK is missing the notice or a licence text it names.
+
+## [0.2.5] - 2026-10-25
+
+### Updated
+- The Fire TV clip harness takes the clip's own size (`--es size 1920x804`) and tells the player engine, as a real Plex item's size does, so a 1080p H.264 clip is declared at 1080p and not at the widest raster the engine knows.
+
+## [0.2.4] - 2026-10-25
+
+### Updated
+- The Fire TV clip decoder now caps the size it opens to what the stick's H.264 decoder reports it supports, instead of always asking for the clip's largest raster (3840x2160). Aimed at the HD and 3rd gen sticks, where the decoder refused to open; not yet confirmed on either stick.
+
+## [0.2.3] - 2026-10-25
+
+### Added
+- The Fire TV test clip is now decoded and shown: the stick's own hardware decoder plays the clip's video under the on-screen label, which now names the decoder and counts the frames fed, shown and dropped as late. There is still no sound, and BACK stops it as before.
+
+## [0.2.2] - 2026-10-24
+
+### Added
+- The Fire TV APK can be started on a test clip over adb (`am start -S ... --es clip <url>`): the app's own player engine streams it from a plain-http server and shows the clip, its resolution, the position and how much it has read on screen; BACK stops it and returns to the skeleton screen. Nothing is decoded or shown yet; the engine's log goes to logcat. Started without a clip, the app is the skeleton as before.
+
+## [0.2.1] - 2026-10-24
+
+### Added
+- The Fire TV APK now carries its own FFmpeg, built for the sticks by CI, and CI fails a build whose APK is missing it. The FFmpeg source and its build script come in the same download as the APK. Nothing in the app uses FFmpeg yet.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
