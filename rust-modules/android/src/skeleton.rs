@@ -7,7 +7,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
 
 use crate::clip;
-use crate::harness::Harness;
+use crate::harness::{self, Harness};
 use crate::jni;
 
 #[allow(dead_code)] // read by SDL only
@@ -191,7 +191,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                 Some(_) if !label_due && !redraw => shown.clone(),
                 Some(harness) => {
                     labelled_at = SDL_GetTicks();
-                    harness.label()
+                    harness::LABEL.time(|| harness.label())
                 }
                 None => {
                     let readout = jni::readout();
@@ -204,7 +204,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                 redraw = true;
             }
             if redraw {
-                draw(renderer, font, w, &shown, playing);
+                harness::DRAW.time(|| draw(renderer, font, w, &shown, playing));
                 redraw = false;
             }
             // Short, so a held BACK turns into Exit on time; shorter while playing, because the

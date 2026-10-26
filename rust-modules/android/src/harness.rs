@@ -2,11 +2,13 @@
 //! SDL thread, the same calls the app makes for a URL-fed playback, with no Plex involved.
 //! Play/Pause pauses and resumes it and D-pad left/right seek it by a fixed step.
 
+use std::sync::atomic::{AtomicI64, Ordering::Relaxed};
+
 use plx_base::task::MainThread;
 use plx_media::player::{self, adapter::PlayerAdapter, lifecycle};
 use plx_media::route::{self, PlaybackSession};
 
-use crate::amediacodec;
+use crate::amediacodec::{self, now_ns};
 use crate::audiotrack;
 use crate::clip::Clip;
 use crate::jni;
@@ -24,6 +26,42 @@ pub struct Harness {
 
 const PUMP_LOG_MS: u32 = 10_000;
 const SEEK_STEP_NS: i64 = 10_000_000_000;
+
+/// Time spent in one place between pump reports, from any thread.
+pub(crate) struct Span {
+    count: AtomicI64,
+    total_ns: AtomicI64,
+    max_ns: AtomicI64,
+}
+
+impl Span {
+    pub(crate) const fn new() -> Self {
+        Self { count: AtomicI64::new(0), total_ns: AtomicI64::new(0), max_ns: AtomicI64::new(0) }
+    }
+
+    pub(crate) fn note(&self, ns: i64) {
+        self.count.fetch_add(1, Relaxed);
+        self.total_ns.fetch_add(ns, Relaxed);
+        self.max_ns.fetch_max(ns, Relaxed);
+    }
+
+    pub(crate) fn time<T>(&self, f: impl FnOnce() -> T) -> T {
+        let start = now_ns();
+        let value = f();
+        self.note(now_ns() - start);
+        value
+    }
+
+    /// `<count>x <total>/<longest> ms`, and starts over.
+    fn take(&self) -> String {
+        let (count, total, max) = (self.count.swap(0, Relaxed), self.total_ns.swap(0, Relaxed), self.max_ns.swap(0, Relaxed));
+        format!("{count}x {}/{} ms", total / 1_000_000, max / 1_000_000)
+    }
+}
+
+pub(crate) static PUMP: Span = Span::new();
+pub(crate) static LABEL: Span = Span::new();
+pub(crate) static DRAW: Span = Span::new();
 
 impl Harness {
     /// Once per process, on the SDL thread: it mints the engine's main-thread token there.
@@ -86,7 +124,7 @@ impl Harness {
     pub fn frame(&mut self, now_ms: u32) {
         self.pa.poll_release();
         if self.active && player::is_started() {
-            player::pump(&mut self.ps, &mut self.pa, now_ms);
+            PUMP.time(|| player::pump(&mut self.ps, &mut self.pa, now_ms));
             self.note_pump(now_ms);
         }
     }
@@ -101,7 +139,18 @@ impl Harness {
         let elapsed = now_ms.wrapping_sub(self.pumps_since);
         if elapsed >= PUMP_LOG_MS {
             let pumps = self.pumps;
-            log(LOG_INFO, &format!("harness: {pumps} pumps in {elapsed} ms ({} ms each)", elapsed / pumps));
+            log(
+                LOG_INFO,
+                &format!(
+                    "harness: {pumps} pumps in {elapsed} ms ({} ms each); pump {}, label {}, draw {}, audio feed waited {}, writer held {}",
+                    elapsed / pumps,
+                    PUMP.take(),
+                    LABEL.take(),
+                    DRAW.take(),
+                    audiotrack::FEED_WAIT.take(),
+                    audiotrack::HELD.take()
+                ),
+            );
             self.pumps = 0;
             self.pumps_since = now_ms;
         }

@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use crate::amediacodec::{now_ns, FEED_FULL, FEED_OK};
 use crate::audio::{self, Plan, Position, Source, Timeline, AC3_FRAMES, ENCODING_AC3, ENCODING_DTS, ENCODING_E_AC3, ENCODING_PCM_FLOAT};
+use crate::harness::Span;
 use crate::jni::{self, Codec, Input, Output, Track};
 use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
 use crate::video::Audio;
@@ -37,6 +38,9 @@ static STATUS: Mutex<String> = Mutex::new(String::new());
 static FED: AtomicU64 = AtomicU64::new(0);
 static WRITTEN: AtomicU64 = AtomicU64::new(0);
 static DROPPED: AtomicU64 = AtomicU64::new(0);
+/// How long `feed` waits for `OUT`, and how long the writer holds it per pass.
+pub(crate) static FEED_WAIT: Span = Span::new();
+pub(crate) static HELD: Span = Span::new();
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -309,7 +313,13 @@ impl Out {
 
 fn run() {
     while RUNNING.load(Relaxed) {
-        let busy = lock(&OUT).as_mut().is_some_and(|out| out.step(now_ns()));
+        let busy = {
+            let mut out = lock(&OUT);
+            let start = now_ns();
+            let busy = out.as_mut().is_some_and(|out| out.step(start));
+            HELD.note(now_ns() - start);
+            busy
+        };
         if !busy {
             std::thread::sleep(IDLE);
         }
@@ -375,7 +385,7 @@ pub fn load(payload: &str) {
 }
 
 pub fn feed(data: &[u8], pts: i64) -> c_char {
-    let mut out = lock(&OUT);
+    let mut out = FEED_WAIT.time(|| lock(&OUT));
     let Some(out) = out.as_mut().filter(|out| out.playable()) else {
         DROPPED.fetch_add(1, Relaxed);
         return FEED_OK;
