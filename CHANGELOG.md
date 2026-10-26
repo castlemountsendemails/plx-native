@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.8] - 2026-10-26
+
+### Fixed
+- The Fire TV test clip no longer plays with a frozen picture and stuttering sound. The on-screen label takes about a third of a second to draw and the player is not fed meanwhile, so it is now redrawn once a second instead of four times. Not yet tried on any stick.
+- When the clip's sound has all played, the audio clock stops at its end instead of running on past it.
+
+### Added
+- Every 10 s the clip harness logs how long the player, drawing the label and handing audio to the track took.
+
 ## [0.2.7] - 2026-10-26
 
 ### Added
