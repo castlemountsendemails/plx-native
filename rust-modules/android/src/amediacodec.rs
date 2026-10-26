@@ -1,5 +1,6 @@
 //! The Fire TV video sink: the engine's video access units decoded by a `MediaCodec` that renders to
-//! the video `SurfaceView`. The engine thread feeds input buffers; a drain thread shows each decoded
+//! the video `SurfaceView`. The engine thread queues AUs, which it and the drain thread move into
+//! free input buffers; the drain thread shows each decoded
 //! frame at its time against the audio track's clock (or, with no audio played, on a clock that runs
 //! from the first frame after play), and reports it to the engine as the position. Audio AUs go to
 //! `audiotrack`, and the transport verbs reach it too. Lifecycle answers follow
@@ -18,7 +19,7 @@ use plx_platform::tv::sink::{UnloadTicket, VideoSink, VP_EXPORTED};
 use crate::audiotrack;
 use crate::jni::{Codec, Input, Output};
 use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
-use crate::video::{self, Action, Clock};
+use crate::video::{self, Action, Au, Clock, Inputs};
 
 pub(crate) const FEED_OK: c_char = b'O' as c_char;
 pub(crate) const FEED_FULL: c_char = b'B' as c_char;
@@ -69,6 +70,7 @@ fn event(ty: c_int, num: i64, text: Option<&CStr>) {
 
 struct Decoder {
     codec: Codec,
+    inputs: Inputs,
     /// A decoded frame waiting for its time: its output buffer index and PTS.
     pending: Option<(i32, i64)>,
     playing: bool,
@@ -86,11 +88,28 @@ enum Step {
 impl Decoder {
     /// Forgets what the decoder held: after a flush its output buffer indices are stale.
     fn restart(&mut self) {
+        self.inputs.clear();
         self.pending = None;
         self.clock.reset();
     }
 
+    /// Moves queued AUs into free input buffers; `None` if the decoder failed.
+    fn put_inputs(&mut self) -> Option<usize> {
+        let codec = &self.codec;
+        self.inputs.drain(|au| match codec.queue(&au.data, au.pts_us, au.end)? {
+            Input::Queued => Some(true),
+            Input::Full => Some(false),
+            Input::TooBig(capacity) => {
+                log(LOG_ERROR, &format!("amc: a {}-byte AU is over the {capacity}-byte input buffer; skipped", au.data.len()));
+                Some(true)
+            }
+        })
+    }
+
     fn step(&mut self) -> Step {
+        if self.put_inputs().is_none() {
+            return Step::Failed;
+        }
         if self.pending.is_none() {
             match self.codec.dequeue() {
                 None => return Step::Failed,
@@ -133,7 +152,7 @@ impl Decoder {
         if n <= 3 || n.is_multiple_of(LOG_EVERY) {
             let what = if render.is_some() { "shown" } else { "late, dropped" };
             let drift = drift.map_or("-".into(), |drift| format!("{}ms", drift / 1_000_000));
-            log(LOG_INFO, &format!("amc: frame {what} #{n} pts={}ms drift={drift}", pts / 1_000_000));
+            log(LOG_INFO, &format!("amc: frame {what} #{n} pts={}ms drift={drift} queued={}", pts / 1_000_000, self.inputs.queued()));
         }
         Step::Presented(pts)
     }
@@ -209,7 +228,7 @@ impl VideoSink for AmcSink {
         };
         log(LOG_INFO, &format!("amc: {} started for {format:?}", codec.name));
         lock(&NAME).clone_from(&codec.name);
-        *lock(&DECODER) = Some(Decoder { codec, pending: None, playing: false, clock: Clock::default(), last_fed_us: 0 });
+        *lock(&DECODER) = Some(Decoder { codec, inputs: Inputs::default(), pending: None, playing: false, clock: Clock::default(), last_fed_us: 0 });
         for count in [&FED, &SHOWN, &LATE, &FEED_MAX_US] {
             count.store(0, Relaxed);
         }
@@ -268,15 +287,16 @@ impl VideoSink for AmcSink {
         c_int::from(flushed.flatten().is_some())
     }
     unsafe fn push_eos(&self, _: &MainThread) -> c_int {
-        match with_decoder(|d| d.codec.queue(&[], d.last_fed_us, true)).flatten() {
-            Some(Input::Queued) => {
-                log(LOG_INFO, "amc: end of stream queued");
-                1
-            }
-            _ => {
-                log(LOG_ERROR, "amc: end of stream not queued: no free input buffer");
-                0
-            }
+        let queued = with_decoder(|d| {
+            d.inputs.push(Au { data: Vec::new(), pts_us: d.last_fed_us, end: true });
+            d.put_inputs()
+        });
+        if queued.flatten().is_some() {
+            log(LOG_INFO, "amc: end of stream queued");
+            1
+        } else {
+            log(LOG_ERROR, "amc: end of stream not queued: the decoder failed");
+            0
         }
     }
     unsafe fn set_time_to_decode(&self, _: &MainThread, _position_ns: i64) -> c_int {
@@ -305,31 +325,30 @@ impl VideoSink for AmcSink {
         let pts_us = pts / 1_000;
         let started = now_ns();
         let queued = with_decoder(|d| {
-            let input = d.codec.queue(data, pts_us, false);
-            if matches!(input, Some(Input::Queued)) {
-                d.last_fed_us = pts_us;
+            if d.inputs.is_full() && d.put_inputs()? == 0 {
+                return Some((false, d.playing));
             }
-            (input, d.playing)
-        });
+            d.inputs.push(Au { data: data.to_vec(), pts_us, end: false });
+            d.last_fed_us = pts_us;
+            d.put_inputs()?;
+            Some((true, d.playing))
+        })
+        .flatten();
         let took_us = ((now_ns() - started) / 1_000).max(0) as u64;
         FEED_MAX_US.fetch_max(took_us, Relaxed);
         match queued {
-            Some((Some(Input::Queued), _)) => {
+            Some((true, _)) => {
                 note_feed(size, pts, took_us);
                 FEED_OK
             }
-            Some((Some(Input::Full), playing)) => {
+            Some((false, playing)) => {
                 if !FULL_LOGGED.swap(true, Relaxed) {
                     let fed = FED.load(Relaxed);
-                    log(LOG_INFO, &format!("amc: decoder input full after {fed} video AUs (playing={playing})"));
+                    log(LOG_INFO, &format!("amc: decoder and its queue full after {fed} video AUs (playing={playing})"));
                 }
                 FEED_FULL
             }
-            Some((Some(Input::TooBig(capacity)), _)) => {
-                log(LOG_ERROR, &format!("amc: a {size}-byte AU is over the {capacity}-byte input buffer"));
-                FEED_ERROR
-            }
-            Some((None, _)) | None => FEED_ERROR,
+            None => FEED_ERROR,
         }
     }
     unsafe fn unload(&self, _owner: &UnloadTicket) {

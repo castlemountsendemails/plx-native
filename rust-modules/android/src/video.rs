@@ -1,5 +1,8 @@
 //! What the decoder sink decides without JNI: the decoder to open from the engine's Load payload,
-//! and when each decoded frame is shown. No JNI or SDL in here, so the host unit suite tests it.
+//! the access units queued ahead of it, and when each decoded frame is shown. No JNI or SDL in
+//! here, so the host unit suite tests it.
+
+use std::collections::VecDeque;
 
 /// The decoder `PlxActivity.openVideoDecoder` opens: a MIME type and the largest raster it must take.
 #[derive(Debug, PartialEq)]
@@ -33,6 +36,55 @@ fn number_after(text: &str, key: &str) -> Option<i32> {
     let rest = &text[text.find(key)? + key.len()..];
     let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
     rest[..end].parse().ok().filter(|n| *n > 0)
+}
+
+/// AUs accepted past the decoder's input buffers, about 2 s at 24 fps. Paused, a 4K HEVC decoder
+/// takes only about 0.55 s, short of the 0.7 s the engine waits for before it plays again.
+const QUEUE: usize = 48;
+
+/// An access unit waiting for a decoder input buffer; `end` marks end of stream.
+pub struct Au {
+    pub data: Vec<u8>,
+    pub pts_us: i64,
+    pub end: bool,
+}
+
+#[derive(Default)]
+pub struct Inputs {
+    queue: VecDeque<Au>,
+}
+
+impl Inputs {
+    pub fn is_full(&self) -> bool {
+        self.queue.len() >= QUEUE
+    }
+
+    pub fn queued(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Unbounded: the caller checks `is_full`, so end of stream can always be queued.
+    pub fn push(&mut self, au: Au) {
+        self.queue.push_back(au);
+    }
+
+    /// Hands queued AUs to `put` in order until it answers `Some(false)` (no free input buffer) or
+    /// `None` (the decoder failed, which keeps that AU). Returns how many it took.
+    pub fn drain(&mut self, mut put: impl FnMut(&Au) -> Option<bool>) -> Option<usize> {
+        let mut taken = 0;
+        while let Some(au) = self.queue.front() {
+            if !put(au)? {
+                break;
+            }
+            self.queue.pop_front();
+            taken += 1;
+        }
+        Some(taken)
+    }
+
+    pub fn clear(&mut self) {
+        self.queue.clear();
+    }
 }
 
 /// How far ahead of now the first frame after a start, resume or seek is shown.
@@ -204,6 +256,72 @@ mod tests {
         assert_eq!(clock.action(0, AUDIO_WAIT_NS, Audio::Pending), Action::Show(AUDIO_WAIT_NS + LEAD_NS));
         clock.reset();
         assert_eq!(clock.action(0, 5 * AUDIO_WAIT_NS, Audio::Pending), Action::Wait);
+    }
+
+    fn au(pts_us: i64) -> Au {
+        Au { data: vec![0; 8], pts_us, end: false }
+    }
+
+    #[test]
+    fn a_full_decoder_still_leaves_the_engine_room_to_prime() {
+        // The engine plays again only once 0.7 s past the shown frame is accepted.
+        let mut inputs = Inputs::default();
+        let frame_us = 41_708;
+        let mut n = 0;
+        while !inputs.is_full() {
+            inputs.push(au(n * frame_us));
+            n += 1;
+        }
+        assert!((n - 1) * frame_us >= 700_000, "only {n} AUs of 24 fps video fit");
+        assert_eq!(inputs.drain(|_| Some(false)), Some(0));
+        assert_eq!(inputs.queued() as i64, n);
+    }
+
+    #[test]
+    fn queued_aus_reach_the_decoder_in_order_as_it_frees_buffers() {
+        let mut inputs = Inputs::default();
+        for pts in [0, 83_000, 41_000] {
+            inputs.push(au(pts));
+        }
+        let mut taken = Vec::new();
+        let mut room = 1;
+        assert_eq!(
+            inputs.drain(|au| {
+                if room == 0 {
+                    return Some(false);
+                }
+                room -= 1;
+                taken.push(au.pts_us);
+                Some(true)
+            }),
+            Some(1)
+        );
+        assert_eq!(inputs.drain(|au| Some(taken.push(au.pts_us) == ())), Some(2));
+        assert_eq!(taken, [0, 83_000, 41_000]);
+    }
+
+    #[test]
+    fn end_of_stream_is_taken_when_full_and_reaches_the_decoder_last() {
+        let mut inputs = Inputs::default();
+        while !inputs.is_full() {
+            inputs.push(au(0));
+        }
+        inputs.push(Au { data: Vec::new(), pts_us: 0, end: true });
+        let mut ends = Vec::new();
+        inputs.drain(|au| Some(ends.push(au.end) == ()));
+        assert_eq!(ends.last(), Some(&true));
+        assert_eq!(ends.iter().filter(|end| **end).count(), 1);
+    }
+
+    #[test]
+    fn a_failed_decoder_keeps_the_au_and_a_flush_drops_them_all() {
+        let mut inputs = Inputs::default();
+        inputs.push(au(0));
+        inputs.push(au(41_000));
+        assert_eq!(inputs.drain(|_| None), None);
+        assert_eq!(inputs.queued(), 2);
+        inputs.clear();
+        assert_eq!(inputs.queued(), 0);
     }
 
     #[test]
