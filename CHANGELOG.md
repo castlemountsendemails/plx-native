@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.9] - 2026-10-26
+
+### Fixed
+- On the Fire TV 4K HEVC test clip, the picture and sound start again after a pause or a jump. The stick's 4K decoder holds only about half a second of video, less than the player waits for before playing again, so the video side now keeps up to about 2 s of video queued in front of the decoder. Not yet tried on any stick.
+
 ## [0.2.8] - 2026-10-26
 
 ### Fixed
