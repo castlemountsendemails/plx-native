@@ -1,12 +1,12 @@
 //! Every JNI call. The static natives `PlxActivity` calls run on the Activity's UI thread and the SDL
-//! thread reads what they leave, so that state sits behind one mutex. `VideoCodec` drives the
-//! `MediaCodec` that `PlxActivity.openVideoDecoder` starts, from any thread.
+//! thread reads what they leave, so that state sits behind one mutex. `Codec` drives a `MediaCodec`
+//! that `PlxActivity` starts, and `Track` an `AudioTrack`, from any thread.
 
 use std::ffi::c_void;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
-use ::jni::objects::{GlobalRef, JByteBuffer, JClass, JString, JValue};
+use ::jni::objects::{GlobalRef, JByteBuffer, JClass, JIntArray, JObject, JString, JValue};
 use ::jni::sys::{jint, JNI_VERSION_1_6};
 use ::jni::{JNIEnv, JavaVM};
 
@@ -17,12 +17,14 @@ struct Bridge {
     keys: Keys,
     readout: String,
     back: bool,
+    presses: Vec<Press>,
 }
 
 static BRIDGE: Mutex<Bridge> = Mutex::new(Bridge {
     keys: Keys::new(),
     readout: String::new(),
     back: false,
+    presses: Vec::new(),
 });
 
 fn bridge() -> MutexGuard<'static, Bridge> {
@@ -38,6 +40,7 @@ impl Bridge {
     fn record(&mut self, presses: Vec<Press>) {
         for Press { key, edge, code } in presses {
             self.back |= key == Key::Back && edge == Edge::Down;
+            self.presses.push(Press { key, edge, code });
             self.readout = format!("keycode {code} -> {key:?} ({edge:?})");
             log(LOG_INFO, &self.readout);
         }
@@ -74,6 +77,11 @@ pub fn readout() -> String {
 /// Whether BACK was pressed since the last call.
 pub fn take_back() -> bool {
     std::mem::take(&mut bridge().back)
+}
+
+/// Every press since the last call.
+pub fn take_presses() -> Vec<Press> {
+    std::mem::take(&mut bridge().presses)
 }
 
 static VM: OnceLock<JavaVM> = OnceLock::new();
@@ -124,10 +132,11 @@ fn activity() -> Option<&'static JClass<'static>> {
 const BUFFER_FLAG_END_OF_STREAM: i32 = 4;
 const INFO_OUTPUT_FORMAT_CHANGED: i32 = -2;
 
-pub struct VideoCodec {
+pub struct Codec {
     codec: GlobalRef,
     info: GlobalRef,
     pub name: String,
+    video: bool,
 }
 
 pub enum Input {
@@ -143,8 +152,8 @@ pub enum Output {
     Frame { index: i32, pts_us: i64, end: bool },
 }
 
-impl VideoCodec {
-    pub fn open(mime: &str, width: i32, height: i32) -> Option<Self> {
+impl Codec {
+    pub fn open_video(mime: &str, width: i32, height: i32) -> Option<Self> {
         let class = activity()?;
         with_env("open the video decoder", |env| {
             let mime = env.new_string(mime)?;
@@ -156,15 +165,37 @@ impl VideoCodec {
                     &[JValue::Object(&mime), JValue::Int(width), JValue::Int(height)],
                 )?
                 .l()?;
-            if codec.is_null() {
-                return Ok(None);
-            }
-            let name = JString::from(env.call_method(&codec, "getName", "()Ljava/lang/String;", &[])?.l()?);
-            let name = env.get_string(&name)?.into();
-            let info = env.new_object("android/media/MediaCodec$BufferInfo", "()V", &[])?;
-            Ok(Some(Self { codec: env.new_global_ref(codec)?, info: env.new_global_ref(info)?, name }))
+            Self::wrap(env, codec, true)
         })
         .flatten()
+    }
+
+    /// An AAC decoder for raw frames, configured by the AudioSpecificConfig `csd`.
+    pub fn open_aac(rate: i32, channels: i32, csd: &[u8]) -> Option<Self> {
+        let class = activity()?;
+        with_env("open the audio decoder", |env| {
+            let csd = env.byte_array_from_slice(csd)?;
+            let codec = env
+                .call_static_method(
+                    class,
+                    "openAudioDecoder",
+                    "(II[B)Landroid/media/MediaCodec;",
+                    &[JValue::Int(rate), JValue::Int(channels), JValue::Object(&csd)],
+                )?
+                .l()?;
+            Self::wrap(env, codec, false)
+        })
+        .flatten()
+    }
+
+    fn wrap(env: &mut JNIEnv, codec: JObject, video: bool) -> ::jni::errors::Result<Option<Self>> {
+        if codec.is_null() {
+            return Ok(None);
+        }
+        let name = JString::from(env.call_method(&codec, "getName", "()Ljava/lang/String;", &[])?.l()?);
+        let name = env.get_string(&name)?.into();
+        let info = env.new_object("android/media/MediaCodec$BufferInfo", "()V", &[])?;
+        Ok(Some(Self { codec: env.new_global_ref(codec)?, info: env.new_global_ref(info)?, name, video }))
     }
 
     /// Copies `data` into a free input buffer and queues it; `end` queues end of stream instead.
@@ -194,7 +225,7 @@ impl VideoCodec {
         })
     }
 
-    /// The next decoded frame, if one is ready. A format change resizes the video view first.
+    /// The next decoded frame, if one is ready. A video format change resizes the video view first.
     pub fn dequeue(&self) -> Option<Output> {
         let class = activity()?;
         with_env("dequeue an output buffer", |env| {
@@ -206,6 +237,9 @@ impl VideoCodec {
                     &[JValue::Object(self.info.as_obj()), JValue::Long(0)],
                 )?
                 .i()?;
+            if index == INFO_OUTPUT_FORMAT_CHANGED && !self.video {
+                return Ok(Output::FormatChanged);
+            }
             if index == INFO_OUTPUT_FORMAT_CHANGED {
                 env.call_static_method(
                     class,
@@ -235,6 +269,42 @@ impl VideoCodec {
         })
     }
 
+    /// A copy of the bytes in the output buffer `dequeue` last returned.
+    pub fn output(&self, index: i32) -> Option<Vec<u8>> {
+        with_env("read an output buffer", |env| {
+            let offset = env.get_field(&self.info, "offset", "I")?.i()?.max(0) as usize;
+            let size = env.get_field(&self.info, "size", "I")?.i()?.max(0) as usize;
+            let buffer = JByteBuffer::from(
+                env.call_method(&self.codec, "getOutputBuffer", "(I)Ljava/nio/ByteBuffer;", &[JValue::Int(index)])?
+                    .l()?,
+            );
+            let capacity = env.get_direct_buffer_capacity(&buffer)?;
+            let address = env.get_direct_buffer_address(&buffer)?;
+            let end = (offset + size).min(capacity);
+            let start = offset.min(end);
+            Ok(unsafe { std::slice::from_raw_parts(address.add(start), end - start) }.to_vec())
+        })
+    }
+
+    /// The decoded audio's sample rate, channel count and PCM encoding, after a format change.
+    pub fn audio_format(&self) -> Option<(i32, i32, i32)> {
+        let class = activity()?;
+        with_env("read the audio output format", |env| {
+            let array = JIntArray::from(
+                env.call_static_method(
+                    class,
+                    "audioOutputFormat",
+                    "(Landroid/media/MediaCodec;)[I",
+                    &[JValue::Object(self.codec.as_obj())],
+                )?
+                .l()?,
+            );
+            let mut format = [0; 3];
+            env.get_int_array_region(&array, 0, &mut format)?;
+            Ok((format[0], format[1], format[2]))
+        })
+    }
+
     pub fn flush(&self) -> Option<()> {
         with_env("flush the decoder", |env| env.call_method(&self.codec, "flush", "()V", &[]).map(drop))
     }
@@ -243,5 +313,113 @@ impl VideoCodec {
     pub fn close(self) {
         with_env("stop the decoder", |env| env.call_method(&self.codec, "stop", "()V", &[]).map(drop));
         with_env("release the decoder", |env| env.call_method(&self.codec, "release", "()V", &[]).map(drop));
+    }
+}
+
+const WRITE_NON_BLOCKING: i32 = 1;
+
+/// A streaming `AudioTrack` that `PlxActivity.openAudioTrack` built.
+pub struct Track {
+    track: GlobalRef,
+    stamp: GlobalRef,
+}
+
+impl Track {
+    pub fn open(encoding: i32, rate: i32, channels: i32) -> Option<Self> {
+        let class = activity()?;
+        with_env("open the audio track", |env| {
+            let track = env
+                .call_static_method(
+                    class,
+                    "openAudioTrack",
+                    "(III)Landroid/media/AudioTrack;",
+                    &[JValue::Int(encoding), JValue::Int(rate), JValue::Int(channels)],
+                )?
+                .l()?;
+            if track.is_null() {
+                return Ok(None);
+            }
+            let stamp = env.new_object("android/media/AudioTimestamp", "()V", &[])?;
+            Ok(Some(Self { track: env.new_global_ref(track)?, stamp: env.new_global_ref(stamp)? }))
+        })
+        .flatten()
+    }
+
+    /// Writes what fits without waiting and returns how many bytes that was.
+    pub fn write(&self, data: &[u8]) -> Option<usize> {
+        with_env("write to the audio track", |env| {
+            // AudioTrack only reads the buffer, and drops it before this call returns.
+            let buffer = unsafe { env.new_direct_byte_buffer(data.as_ptr().cast_mut(), data.len())? };
+            let written = env
+                .call_method(
+                    &self.track,
+                    "write",
+                    "(Ljava/nio/ByteBuffer;II)I",
+                    &[JValue::Object(&buffer), JValue::Int(data.len() as i32), JValue::Int(WRITE_NON_BLOCKING)],
+                )?
+                .i()?;
+            Ok(usize::try_from(written).ok())
+        })
+        .flatten()
+    }
+
+    fn call(&self, what: &str, method: &str) -> Option<()> {
+        with_env(what, |env| env.call_method(&self.track, method, "()V", &[]).map(drop))
+    }
+
+    pub fn play(&self) -> Option<()> {
+        self.call("play the audio track", "play")
+    }
+
+    pub fn pause(&self) -> Option<()> {
+        self.call("pause the audio track", "pause")
+    }
+
+    /// `getTimestamp`'s frame and the `CLOCK_MONOTONIC` time it was heard, or `Some(None)` while
+    /// the track has none.
+    pub fn timestamp(&self) -> Option<Option<(i64, i64)>> {
+        with_env("read the audio timestamp", |env| {
+            let stamp = JValue::Object(self.stamp.as_obj());
+            if !env.call_method(&self.track, "getTimestamp", "(Landroid/media/AudioTimestamp;)Z", &[stamp])?.z()? {
+                return Ok(None);
+            }
+            let frame = env.get_field(&self.stamp, "framePosition", "J")?.j()?;
+            let at = env.get_field(&self.stamp, "nanoTime", "J")?.j()?;
+            Ok(Some((frame, at)))
+        })
+    }
+
+    /// Frames played since the track was built; Android keeps the count as an unsigned 32 bits.
+    pub fn head(&self) -> Option<i64> {
+        with_env("read the audio head position", |env| {
+            let head = env.call_method(&self.track, "getPlaybackHeadPosition", "()I", &[])?.i()?;
+            Ok(i64::from(head as u32))
+        })
+    }
+
+    pub fn underruns(&self) -> Option<i32> {
+        with_env("read the audio underruns", |env| env.call_method(&self.track, "getUnderrunCount", "()I", &[])?.i())
+    }
+
+    /// Separate calls, so one that fails (its exception cleared) still lets the track be released.
+    pub fn close(self) {
+        self.call("pause the audio track", "pause");
+        self.call("flush the audio track", "flush");
+        self.call("release the audio track", "release");
+    }
+}
+
+/// Whether an HDMI output lists `encoding`: 1 yes, 0 no, -1 when none lists any encodings.
+pub fn sink_takes(encoding: i32) -> i32 {
+    let Some(class) = activity() else { return -1 };
+    with_env("ask HDMI for an encoding", |env| env.call_static_method(class, "sinkTakes", "(I)I", &[JValue::Int(encoding)])?.i())
+        .unwrap_or(-1)
+}
+
+/// Logs what the outputs, the HDMI plug broadcast and Fire OS's audio settings report, and the
+/// stick's AAC decoders.
+pub fn audio_report() {
+    if let Some(class) = activity() {
+        with_env("report the audio outputs", |env| env.call_static_method(class, "reportAudio", "()V", &[]).map(drop));
     }
 }

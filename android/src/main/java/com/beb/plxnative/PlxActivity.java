@@ -2,13 +2,20 @@ package com.beb.plxnative;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.PixelFormat;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioTrack;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Surface;
@@ -17,7 +24,9 @@ import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.widget.RelativeLayout;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.libsdl.app.SDLActivity;
@@ -28,6 +37,7 @@ public class PlxActivity extends SDLActivity {
     private static final Object sVideoLock = new Object();
     private static Surface sVideoSurface;
     private static SurfaceView sVideoView;
+    private static Context sContext;
 
     // SDLActivity loads these in order and enters SDL_main in the last one.
     @Override
@@ -55,6 +65,7 @@ public class PlxActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sContext = getApplicationContext();
         if (mBrokenLibraries || mLayout == null) {
             return;
         }
@@ -209,5 +220,151 @@ public class PlxActivity extends SDLActivity {
         params.addRule(RelativeLayout.CENTER_IN_PARENT);
         video.setLayoutParams(params);
         Log.i(TAG, "video: view " + w + "x" + h + " for a " + width + "x" + height + " picture");
+    }
+
+    private static final String AAC = "audio/mp4a-latm";
+    // The decoder downmixes 7.1 to 5.1, the most PCM channels the sticks list for HDMI.
+    private static final int AAC_MAX_CHANNELS = 6;
+
+    // Called by the native audio sink: a streaming track, or null (logged). AC-3 goes out as it is
+    // (HDMI passthrough), as 5.1 or else stereo; PCM is what the AAC decoder produced.
+    static AudioTrack openAudioTrack(int encoding, int sampleRate, int channels) {
+        boolean pcm = encoding == AudioFormat.ENCODING_PCM_16BIT || encoding == AudioFormat.ENCODING_PCM_FLOAT;
+        int[] masks = pcm ? new int[] {channelMask(channels)}
+                : new int[] {AudioFormat.CHANNEL_OUT_5POINT1, AudioFormat.CHANNEL_OUT_STEREO};
+        for (int mask : masks) {
+            int min = AudioTrack.getMinBufferSize(sampleRate, mask, encoding);
+            // PCM: four times the minimum. AC-3: about half a second at 640 kbit/s.
+            int size = pcm ? Math.max(min, 1) * 4 : Math.max(min, 40000);
+            try {
+                AudioTrack track = new AudioTrack(
+                        new AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                                .build(),
+                        new AudioFormat.Builder()
+                                .setEncoding(encoding)
+                                .setSampleRate(sampleRate)
+                                .setChannelMask(mask)
+                                .build(),
+                        size, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE);
+                if (track.getState() == AudioTrack.STATE_INITIALIZED) {
+                    Log.i(TAG, "audio: track encoding " + encoding + " " + sampleRate + " Hz mask 0x"
+                            + Integer.toHexString(mask) + " buffer " + size + " (min " + min + ") routed to "
+                            + routedTo(track));
+                    return track;
+                }
+                track.release();
+                Log.w(TAG, "audio: track encoding " + encoding + " mask 0x" + Integer.toHexString(mask) + " did not initialize");
+            } catch (Exception e) {
+                Log.w(TAG, "audio: track encoding " + encoding + " mask 0x" + Integer.toHexString(mask) + " refused", e);
+            }
+        }
+        return null;
+    }
+
+    private static int channelMask(int channels) {
+        switch (channels) {
+            case 1: return AudioFormat.CHANNEL_OUT_MONO;
+            case 6: return AudioFormat.CHANNEL_OUT_5POINT1;
+            case 8: return AudioFormat.CHANNEL_OUT_7POINT1_SURROUND;
+            default: return AudioFormat.CHANNEL_OUT_STEREO;
+        }
+    }
+
+    private static String routedTo(AudioTrack track) {
+        AudioDeviceInfo device = track.getRoutedDevice();
+        return device == null ? "nothing yet" : "type " + device.getType() + " " + device.getProductName();
+    }
+
+    // Called by the native audio sink: a started AAC decoder for raw frames configured by csd (an
+    // AudioSpecificConfig), or null (logged).
+    static MediaCodec openAudioDecoder(int sampleRate, int channels, byte[] csd) {
+        MediaCodec codec = null;
+        try {
+            codec = MediaCodec.createDecoderByType(AAC);
+            MediaFormat format = MediaFormat.createAudioFormat(AAC, sampleRate, channels);
+            format.setByteBuffer("csd-0", ByteBuffer.wrap(csd));
+            format.setInteger(MediaFormat.KEY_AAC_MAX_OUTPUT_CHANNEL_COUNT, AAC_MAX_CHANNELS);
+            codec.configure(format, null, null, 0);
+            codec.start();
+            Log.i(TAG, "audio: " + codec.getName() + " configured with " + format);
+            return codec;
+        } catch (Exception e) {
+            Log.e(TAG, "audio: no AAC decoder started", e);
+            if (codec != null) {
+                codec.release();
+            }
+            return null;
+        }
+    }
+
+    // {sample rate, channel count, PCM encoding} of the decoder's output; 16-bit unless it says otherwise.
+    static int[] audioOutputFormat(MediaCodec codec) {
+        MediaFormat format = codec.getOutputFormat();
+        Log.i(TAG, "audio: output format " + format);
+        int encoding = format.containsKey("pcm-encoding") ? format.getInteger("pcm-encoding") : AudioFormat.ENCODING_PCM_16BIT;
+        return new int[] {
+                format.getInteger(MediaFormat.KEY_SAMPLE_RATE), format.getInteger(MediaFormat.KEY_CHANNEL_COUNT), encoding};
+    }
+
+    private static List<AudioDeviceInfo> hdmiOutputs() {
+        List<AudioDeviceInfo> hdmi = new ArrayList<>();
+        AudioManager audio = (AudioManager) sContext.getSystemService(Context.AUDIO_SERVICE);
+        for (AudioDeviceInfo device : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            if (device.getType() == AudioDeviceInfo.TYPE_HDMI || device.getType() == AudioDeviceInfo.TYPE_HDMI_ARC) {
+                hdmi.add(device);
+            }
+        }
+        return hdmi;
+    }
+
+    // 1 if an HDMI output lists the encoding, 0 if they list others but not it, -1 if none lists any
+    // (an empty list means the output takes any encoding).
+    static int sinkTakes(int encoding) {
+        int takes = -1;
+        for (AudioDeviceInfo device : hdmiOutputs()) {
+            int[] encodings = device.getEncodings();
+            for (int e : encodings) {
+                if (e == encoding) {
+                    return 1;
+                }
+            }
+            if (encodings.length > 0) {
+                takes = 0;
+            }
+        }
+        return takes;
+    }
+
+    // Logs what each source reports about the audio outputs, so each stick's HDMI formats are on record.
+    static void reportAudio() {
+        AudioManager audio = (AudioManager) sContext.getSystemService(Context.AUDIO_SERVICE);
+        for (AudioDeviceInfo device : audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            Log.i(TAG, "audio: output type " + device.getType() + " '" + device.getProductName() + "' encodings "
+                    + Arrays.toString(device.getEncodings()) + " channel counts " + Arrays.toString(device.getChannelCounts())
+                    + " rates " + Arrays.toString(device.getSampleRates()));
+        }
+        Intent plug = sContext.registerReceiver(null, new IntentFilter(AudioManager.ACTION_HDMI_AUDIO_PLUG));
+        if (plug == null) {
+            Log.i(TAG, "audio: no HDMI plug broadcast");
+        } else {
+            Log.i(TAG, "audio: HDMI plug state " + plug.getIntExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, -1)
+                    + " max channels " + plug.getIntExtra(AudioManager.EXTRA_MAX_CHANNEL_COUNT, -1)
+                    + " encodings " + Arrays.toString(plug.getIntArrayExtra(AudioManager.EXTRA_ENCODINGS)));
+        }
+        Log.i(TAG, "audio: audio_platform_capabilities "
+                + Settings.Global.getString(sContext.getContentResolver(), "audio_platform_capabilities"));
+        for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
+            if (info.isEncoder()) {
+                continue;
+            }
+            for (String type : info.getSupportedTypes()) {
+                if (type.equalsIgnoreCase(AAC)) {
+                    Log.i(TAG, "audio: AAC decoder " + info.getName() + " max channels "
+                            + info.getCapabilitiesForType(AAC).getAudioCapabilities().getMaxInputChannelCount());
+                }
+            }
+        }
     }
 }

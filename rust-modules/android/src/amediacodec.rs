@@ -1,11 +1,12 @@
 //! The Fire TV video sink: the engine's video access units decoded by a `MediaCodec` that renders to
 //! the video `SurfaceView`. The engine thread feeds input buffers; a drain thread shows each decoded
-//! frame at its time on a clock that runs from the first frame after play, and reports it to the
-//! engine as the position. Audio AUs are accepted and dropped. Lifecycle answers follow
+//! frame at its time against the audio track's clock (or, with no audio played, on a clock that runs
+//! from the first frame after play), and reports it to the engine as the position. Audio AUs go to
+//! `audiotrack`, and the transport verbs reach it too. Lifecycle answers follow
 //! `plx_media::player::ffi_host`'s clock sink, which only a `hostsim` build has.
 
 use std::ffi::{c_char, c_int, c_long, c_uint, CStr};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -14,12 +15,13 @@ use plx_base::task::MainThread;
 use plx_media::player::sf_on_event;
 use plx_platform::tv::sink::{UnloadTicket, VideoSink, VP_EXPORTED};
 
-use crate::jni::{Input, Output, VideoCodec};
+use crate::audiotrack;
+use crate::jni::{Codec, Input, Output};
 use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
 use crate::video::{self, Action, Clock};
 
-const FEED_OK: c_char = b'O' as c_char;
-const FEED_FULL: c_char = b'B' as c_char;
+pub(crate) const FEED_OK: c_char = b'O' as c_char;
+pub(crate) const FEED_FULL: c_char = b'B' as c_char;
 const FEED_ERROR: c_char = b'e' as c_char;
 const ES_VIDEO: c_int = 1;
 /// The drain thread's pause when there was nothing to show.
@@ -38,8 +40,10 @@ static FULL_LOGGED: AtomicBool = AtomicBool::new(false);
 static FED: AtomicU64 = AtomicU64::new(0);
 static SHOWN: AtomicU64 = AtomicU64::new(0);
 static LATE: AtomicU64 = AtomicU64::new(0);
-static AUDIO_DROPPED: AtomicU64 = AtomicU64::new(0);
 static FEED_MAX_US: AtomicU64 = AtomicU64::new(0);
+/// Audio stream time minus the PTS of the last frame shown against it, and the largest size of that.
+static DRIFT_US: AtomicI64 = AtomicI64::new(0);
+static DRIFT_MAX_US: AtomicI64 = AtomicI64::new(-1);
 
 static DECODER: Mutex<Option<Decoder>> = Mutex::new(None);
 static DRAIN: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -49,7 +53,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn now_ns() -> i64 {
+pub(crate) fn now_ns() -> i64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
     i64::from(ts.tv_sec) * 1_000_000_000 + i64::from(ts.tv_nsec)
@@ -64,7 +68,7 @@ fn event(ty: c_int, num: i64, text: Option<&CStr>) {
 }
 
 struct Decoder {
-    codec: VideoCodec,
+    codec: Codec,
     /// A decoded frame waiting for its time: its output buffer index and PTS.
     pending: Option<(i32, i64)>,
     playing: bool,
@@ -105,7 +109,9 @@ impl Decoder {
         let Some((index, pts)) = self.pending.filter(|_| self.playing) else {
             return Step::Idle;
         };
-        let render = match self.clock.action(pts, now_ns()) {
+        let audio = audiotrack::clock();
+        let now = now_ns();
+        let render = match self.clock.action(pts, now, audio) {
             Action::Wait => return Step::Idle,
             Action::Show(at) => Some(at),
             Action::Restart(at) => {
@@ -118,10 +124,16 @@ impl Decoder {
         if self.codec.release(index, render).is_none() {
             return Step::Failed;
         }
+        let drift = render.and_then(|at| audio.drift(pts, at.max(now)));
+        if let Some(drift) = drift {
+            DRIFT_US.store(drift / 1_000, Relaxed);
+            DRIFT_MAX_US.fetch_max((drift / 1_000).abs(), Relaxed);
+        }
         let n = if render.is_some() { SHOWN.fetch_add(1, Relaxed) + 1 } else { LATE.fetch_add(1, Relaxed) + 1 };
         if n <= 3 || n.is_multiple_of(LOG_EVERY) {
             let what = if render.is_some() { "shown" } else { "late, dropped" };
-            log(LOG_INFO, &format!("amc: frame {what} #{n} pts={}ms", pts / 1_000_000));
+            let drift = drift.map_or("-".into(), |drift| format!("{}ms", drift / 1_000_000));
+            log(LOG_INFO, &format!("amc: frame {what} #{n} pts={}ms drift={drift}", pts / 1_000_000));
         }
         Step::Presented(pts)
     }
@@ -158,14 +170,15 @@ fn teardown() {
     if let Some(decoder) = lock(&DECODER).take() {
         decoder.codec.close();
     }
+    audiotrack::unload();
     log(
         LOG_INFO,
         &format!(
-            "amc: closed after fed={} shown={} late={} audio dropped={} slowest feed={}us",
+            "amc: closed after fed={} shown={} late={} drift max={}us slowest feed={}us",
             FED.load(Relaxed),
             SHOWN.load(Relaxed),
             LATE.load(Relaxed),
-            AUDIO_DROPPED.load(Relaxed),
+            DRIFT_MAX_US.load(Relaxed),
             FEED_MAX_US.load(Relaxed)
         ),
     );
@@ -190,16 +203,19 @@ impl VideoSink for AmcSink {
             log(LOG_ERROR, &format!("amc: no decoder for the load payload {payload}"));
             return 0;
         };
-        let Some(codec) = VideoCodec::open(format.mime, format.width, format.height) else {
+        let Some(codec) = Codec::open_video(format.mime, format.width, format.height) else {
             log(LOG_ERROR, &format!("amc: {format:?} did not open"));
             return 0;
         };
         log(LOG_INFO, &format!("amc: {} started for {format:?}", codec.name));
         lock(&NAME).clone_from(&codec.name);
         *lock(&DECODER) = Some(Decoder { codec, pending: None, playing: false, clock: Clock::default(), last_fed_us: 0 });
-        for count in [&FED, &SHOWN, &LATE, &AUDIO_DROPPED, &FEED_MAX_US] {
+        for count in [&FED, &SHOWN, &LATE, &FEED_MAX_US] {
             count.store(0, Relaxed);
         }
+        DRIFT_US.store(0, Relaxed);
+        DRIFT_MAX_US.store(-1, Relaxed);
+        audiotrack::load(&payload);
         FULL_LOGGED.store(false, Relaxed);
         EPOCH.store(epoch, Relaxed);
         INTERCEPTS.store(0, Relaxed);
@@ -229,6 +245,7 @@ impl VideoSink for AmcSink {
                 d.clock.reset();
             }
         });
+        audiotrack::play();
         c_int::from(resumed.is_some())
     }
     unsafe fn pause(&self, _: &MainThread) -> c_int {
@@ -236,6 +253,7 @@ impl VideoSink for AmcSink {
             d.playing = false;
             d.clock.reset();
         });
+        audiotrack::pause();
         c_int::from(held.is_some())
     }
     unsafe fn set_volume(&self, _: &MainThread, _volume: c_int) -> c_int {
@@ -246,6 +264,7 @@ impl VideoSink for AmcSink {
             d.restart();
             d.codec.flush()
         });
+        audiotrack::flush();
         c_int::from(flushed.flatten().is_some())
     }
     unsafe fn push_eos(&self, _: &MainThread) -> c_int {
@@ -279,11 +298,10 @@ impl VideoSink for AmcSink {
         false
     }
     unsafe fn feed(&self, _: &MainThread, p: *const u8, size: c_uint, pts: i64, es_data: c_int) -> c_char {
-        if es_data != ES_VIDEO {
-            AUDIO_DROPPED.fetch_add(1, Relaxed);
-            return FEED_OK;
-        }
         let data = if p.is_null() { &[][..] } else { std::slice::from_raw_parts(p, size as usize) };
+        if es_data != ES_VIDEO {
+            return audiotrack::feed(data, pts);
+        }
         let pts_us = pts / 1_000;
         let started = now_ns();
         let queued = with_decoder(|d| {
@@ -378,4 +396,11 @@ impl VideoSink for AmcSink {
 /// since the last Load.
 pub fn stats() -> (String, u64, u64, u64) {
     (lock(&NAME).clone(), FED.load(Relaxed), SHOWN.load(Relaxed), LATE.load(Relaxed))
+}
+
+/// For the label: the last frame's drift from the audio and the largest since the last Load, in
+/// microseconds, or `None` before a frame was shown against audio.
+pub fn drift() -> Option<(i64, i64)> {
+    let max = DRIFT_MAX_US.load(Relaxed);
+    (max >= 0).then(|| (DRIFT_US.load(Relaxed), max))
 }

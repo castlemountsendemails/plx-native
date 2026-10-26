@@ -1,12 +1,16 @@
 //! The video harness: the clip from the intent played through the real engine (`plx_media`) on the
 //! SDL thread, the same calls the app makes for a URL-fed playback, with no Plex involved.
+//! Play/Pause pauses and resumes it and D-pad left/right seek it by a fixed step.
 
 use plx_base::task::MainThread;
-use plx_media::player::{self, adapter::PlayerAdapter};
+use plx_media::player::{self, adapter::PlayerAdapter, lifecycle};
 use plx_media::route::{self, PlaybackSession};
 
 use crate::amediacodec;
+use crate::audiotrack;
 use crate::clip::Clip;
+use crate::jni;
+use crate::keys::{Edge, Key, Press};
 use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
 
 pub struct Harness {
@@ -19,12 +23,14 @@ pub struct Harness {
 }
 
 const PUMP_LOG_MS: u32 = 10_000;
+const SEEK_STEP_NS: i64 = 10_000_000_000;
 
 impl Harness {
     /// Once per process, on the SDL thread: it mints the engine's main-thread token there.
     pub fn start(clip: Clip) -> Self {
         // The engine's socket sends without MSG_NOSIGNAL; a reset peer must not kill the process.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+        jni::audio_report();
         log(
             LOG_INFO,
             &format!(
@@ -101,6 +107,42 @@ impl Harness {
         }
     }
 
+    /// Play/Pause, Play and Pause set the transport the way the app's player does; a D-pad
+    /// left/right press seeks from the current position. Repeats and other keys do nothing.
+    pub fn keys(&mut self, presses: &[Press]) {
+        if !self.active || !player::is_started() {
+            return;
+        }
+        for press in presses.iter().filter(|press| press.edge == Edge::Down) {
+            match press.key {
+                Key::PlayPause => self.transport(None),
+                Key::Play => self.transport(Some(true)),
+                Key::Pause => self.transport(Some(false)),
+                Key::Left { alt: false } => self.seek(-SEEK_STEP_NS),
+                Key::Right { alt: false } => self.seek(SEEK_STEP_NS),
+                _ => {}
+            }
+        }
+    }
+
+    fn transport(&mut self, play: Option<bool>) {
+        let paused = lifecycle::transport_target(play, lifecycle::viewer_paused());
+        let accepted = lifecycle::set_transport_paused(&mut self.pa, paused);
+        let what = if paused { "pause" } else { "resume" };
+        log(LOG_INFO, &format!("harness: {what} at {}ms, accepted={accepted}", player::playpos_ns() / 1_000_000));
+    }
+
+    fn seek(&mut self, by_ns: i64) {
+        let from = player::playpos_ns();
+        let mut to = (from + by_ns).max(0);
+        let duration = player::duration_ns();
+        if duration > SEEK_STEP_NS {
+            to = to.min(duration - SEEK_STEP_NS);
+        }
+        player::request_seek(to);
+        log(LOG_INFO, &format!("harness: seek from {}ms to {}ms", from / 1_000_000, to / 1_000_000));
+    }
+
     pub fn stop(&mut self) {
         if self.active {
             player::stop_bufferfeed(&mut self.ps, &mut self.pa);
@@ -124,6 +166,10 @@ impl Harness {
                 player::state(&self.ps)
             ),
             format!("fed {fed}, shown {shown}, late {late}"),
+            match amediacodec::drift() {
+                Some((drift, max)) => format!("audio {}   drift {}ms, max {}ms", audiotrack::status(), drift / 1_000, max / 1_000),
+                None => format!("audio {}", audiotrack::status()),
+            },
         ]
     }
 }

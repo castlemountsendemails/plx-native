@@ -1,6 +1,6 @@
 //! The Fire TV skeleton: SDLActivity enters `SDL_main` on its SDL thread, and this draws three lines
 //! of text with SDL2_ttf, the last one the latest key press, until SDL quits, logging to logcat
-//! under the tag `PlxNative`. With a `clip=` argument the video harness plays it first and its label
+//! under the tag `PlxNative`. With a `clip=` argument the harness plays it first and its label
 //! replaces those lines until BACK stops it.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -168,10 +168,12 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
         loop {
             jni::tick();
             let back = jni::take_back();
+            let presses = jni::take_presses();
             if let Some(harness) = harness.as_mut() {
                 if back {
                     harness.stop();
                 }
+                harness.keys(&presses);
                 harness.frame(SDL_GetTicks());
             }
             let playing = harness.as_ref().is_some_and(Harness::active);
