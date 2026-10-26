@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7] - 2026-10-26
+
+### Added
+- The Fire TV test clip now plays with sound: AC-3 goes to the TV or receiver as it is (HDMI passthrough) and AAC is decoded on the stick, and the picture is timed against the audio so they stay in step. E-AC-3 and DTS are recognised but still play silent, as does AC-3 on a sink that reports it can't take it. Not yet tried on any stick.
+- In the clip harness, Play/Pause pauses and resumes, and D-pad left/right jump 10 s back or forward. A new label line shows how the audio is played and how far the picture is from it (last and largest).
+- At each clip start the app logs the audio formats each HDMI output reports, plus the stick's AAC decoders.
+
 ## [0.2.6] - 2026-10-25
 
 ### Added
