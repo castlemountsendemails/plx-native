@@ -133,11 +133,14 @@ impl Position {
     }
 
     /// A frame and the `CLOCK_MONOTONIC` time it is heard, or `None` while neither source has moved.
-    pub fn sample(&mut self, stamp: Option<(i64, i64)>, head: i64, now_ns: i64) -> Option<(i64, i64, Source)> {
+    /// A track that has played all `written` frames keeps advancing its timestamp, so the clock
+    /// is held at the last written frame, heard now.
+    pub fn sample(&mut self, stamp: Option<(i64, i64)>, head: i64, written: i64, now_ns: i64) -> Option<(i64, i64, Source)> {
         match stamp {
             Some((frame, at_ns)) => {
                 let from = *self.stamp_from.get_or_insert(frame);
-                (frame > from).then_some((frame, at_ns, Source::Stamp))
+                let heard = if frame > written { (written, now_ns) } else { (frame, at_ns) };
+                (frame > from).then_some((heard.0, heard.1, Source::Stamp))
             }
             None => {
                 let from = *self.head_from.get_or_insert(head);
@@ -226,17 +229,27 @@ mod tests {
     fn a_reading_counts_only_once_it_moves() {
         let mut position = Position::default();
         // The reading held over from before a pause.
-        assert_eq!(position.sample(Some((9600, 100)), 0, 1_000), None);
-        assert_eq!(position.sample(Some((9600, 100)), 0, 2_000), None);
-        assert_eq!(position.sample(Some((10_080, 3_000)), 0, 3_500), Some((10_080, 3_000, Source::Stamp)));
+        assert_eq!(position.sample(Some((9600, 100)), 0, 48_000, 1_000), None);
+        assert_eq!(position.sample(Some((9600, 100)), 0, 48_000, 2_000), None);
+        assert_eq!(position.sample(Some((10_080, 3_000)), 0, 48_000, 3_500), Some((10_080, 3_000, Source::Stamp)));
         position.reset();
-        assert_eq!(position.sample(Some((10_080, 3_000)), 0, 4_000), None);
+        assert_eq!(position.sample(Some((10_080, 3_000)), 0, 48_000, 4_000), None);
     }
 
     #[test]
     fn with_no_timestamp_the_head_position_is_read_now() {
         let mut position = Position::default();
-        assert_eq!(position.sample(None, 0, 1_000), None);
-        assert_eq!(position.sample(None, 480, 2_000), Some((480, 2_000, Source::Head)));
+        assert_eq!(position.sample(None, 0, 9600, 1_000), None);
+        assert_eq!(position.sample(None, 480, 9600, 2_000), Some((480, 2_000, Source::Head)));
+    }
+
+    #[test]
+    fn a_track_run_dry_holds_the_clock_at_the_last_frame_written() {
+        let mut position = Position::default();
+        position.sample(Some((0, 0)), 0, 9600, 0);
+        assert_eq!(position.sample(Some((4800, 100_000)), 4800, 9600, 120_000), Some((4800, 100_000, Source::Stamp)));
+        // The timestamp keeps rising after the last written frame was played.
+        assert_eq!(position.sample(Some((12_000, 250_000)), 9600, 9600, 260_000), Some((9600, 260_000, Source::Stamp)));
+        assert_eq!(position.sample(Some((14_400, 300_000)), 9600, 9600, 310_000), Some((9600, 310_000, Source::Stamp)));
     }
 }

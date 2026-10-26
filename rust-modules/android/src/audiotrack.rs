@@ -284,7 +284,7 @@ impl Out {
         };
         let stamp = track.timestamp().flatten();
         let head = track.head().unwrap_or(0);
-        if let Some((frame, at, source)) = self.position.sample(stamp, head, now) {
+        if let Some((frame, at, source)) = self.position.sample(stamp, head, self.frames, now) {
             if let Some(pts) = self.timeline.pts_at(frame) {
                 publish(Some((pts, at)));
                 if self.source != Some(source) {

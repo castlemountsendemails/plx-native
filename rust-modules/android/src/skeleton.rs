@@ -43,7 +43,10 @@ const SDL_WINDOW_FULLSCREEN: u32 = 0x1;
 const SDL_RENDERER_ACCELERATED: u32 = 0x2;
 const SDL_QUIT: u32 = 0x100;
 const SDL_GL_ALPHA_SIZE: c_int = 3;
-const LABEL_EVERY_MS: u32 = 250;
+/// A label draw takes about 350 ms on the Stick 4K, and the engine is not pumped meanwhile.
+/// ponytail: each draw still stalls the pump once a second, which the ~1.5 s buffered ahead
+/// covers. Upgrade: keep each line's texture and re-render only the lines that changed.
+const LABEL_EVERY_MS: u32 = 1_000;
 pub const LOG_INFO: c_int = 4;
 pub const LOG_ERROR: c_int = 6;
 
