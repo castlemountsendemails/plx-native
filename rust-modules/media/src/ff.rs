@@ -3745,16 +3745,21 @@ unsafe fn adts_params(acp: *const AVCodecParameters) -> Option<(u8, u8)> {
         let freq_idx = (((b0 & 0x07) << 1) | (b1 >> 7)) as u8;
         if aot != 31 && freq_idx <= 12 {
             let chan = ((b1 >> 3) & 0x0F) as u8;
-            let ch = if (1..=7).contains(&chan) {
-                chan
-            } else {
-                chan_fallback
-            };
-            return Some((freq_idx, ch));
+            return Some((freq_idx, adts_chan_cfg(chan, chan_fallback)));
         }
         // escape-coded AOT / explicit 24-bit rate — exotic; fall through to codecpar
     }
     adts_freq_index((*acp).sample_rate).map(|fi| (fi, chan_fallback))
+}
+
+/// ADTS channel field for an ASC channelConfiguration. Configuration 12 (7.1) carries the same
+/// elements as 7 (one SCE, three CPEs, one LFE), so ADTS writes it as 7.
+fn adts_chan_cfg(asc_chan: u8, fallback: u8) -> u8 {
+    match asc_chan {
+        1..=7 => asc_chan,
+        12 => 7,
+        _ => fallback,
+    }
 }
 
 /// 7-byte ADTS header for a raw AAC frame of `payload_len` bytes. LG's Starfish decodes
