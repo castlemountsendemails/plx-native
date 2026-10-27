@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12] - 2026-10-27
+
+### Added
+- The Fire TV app carries its own libcurl 8.23.0 with OpenSSL 3.5.9, and checks server certificates against the Mozilla CA list it ships with (plus the Let's Encrypt roots it already used as a fallback for `*.plex.direct` servers). The first time the app starts after each install or update, it copies both certificate files into its own storage. The LG app is unchanged.
+- A Fire TV test run of the network (`--es net check --es server <your server's plex.direct address>`) fetches plex.tv, your server's `/identity` and a site with an expired certificate. It shows a pass or fail line for each on screen and in logcat. It's the only use so far, since sign-in isn't wired up yet, and it hasn't been tried on any stick.
+- The Fire TV licence notice now covers libcurl, OpenSSL and the CA list. The curl and MPL-2.0 licence texts are added; they also ship in the LG package, unused there.
+
 ## [0.2.11] - 2026-10-27
 
 ### Added
