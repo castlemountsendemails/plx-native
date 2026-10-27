@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.10] - 2026-10-27
+
+### Fixed
+- AAC audio with 7.1 channel configuration 12 (as written by newer ffmpeg) plays with sound instead of silently. The stream's header is now written as the equivalent 8-channel configuration 7. Not yet tried on any stick.
+
+## [0.2.9] - 2026-10-26
+
+### Fixed
+- On the Fire TV 4K HEVC test clip, the picture and sound start again after a pause or a jump. The stick's 4K decoder holds only about half a second of video, less than the player waits for before playing again, so the video side now keeps up to about 2 s of video queued in front of the decoder. Not yet tried on any stick.
+
+## [0.2.8] - 2026-10-26
+
+### Fixed
+- The Fire TV test clip no longer plays with a frozen picture and stuttering sound. The on-screen label takes about a third of a second to draw and the player is not fed meanwhile, so it is now redrawn once a second instead of four times. Not yet tried on any stick.
+- When the clip's sound has all played, the audio clock stops at its end instead of running on past it.
+
+### Added
+- Every 10 s the clip harness logs how long the player, drawing the label and handing audio to the track took.
+
+## [0.2.7] - 2026-10-26
+
+### Added
+- The Fire TV test clip now plays with sound: AC-3 goes to the TV or receiver as it is (HDMI passthrough) and AAC is decoded on the stick, and the picture is timed against the audio so they stay in step. E-AC-3 and DTS are recognised but still play silent, as does AC-3 on a sink that reports it can't take it. Not yet tried on any stick.
+- In the clip harness, Play/Pause pauses and resumes, and D-pad left/right jump 10 s back or forward. A new label line shows how the audio is played and how far the picture is from it (last and largest).
+- At each clip start the app logs the audio formats each HDMI output reports, plus the stick's AAC decoders.
+
 ## [0.2.6] - 2026-10-25
 
 ### Added

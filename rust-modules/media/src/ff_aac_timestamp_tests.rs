@@ -123,3 +123,13 @@ fn adts_detection_accepts_a_real_header_but_not_arbitrary_ff_bytes() {
     assert_eq!(adts_duration_ns(&frame), Some(21_333_333));
     assert_eq!(adts_duration_ns(&[0xff, 0x00, 0, 0, 0, 0, 0]), None);
 }
+
+#[test]
+fn adts_channel_field_maps_configuration_12_to_7_and_keeps_1_to_7() {
+    assert_eq!(adts_chan_cfg(12, 2), 7);
+    for c in 1..=7 {
+        assert_eq!(adts_chan_cfg(c, 2), c);
+    }
+    assert_eq!(adts_chan_cfg(0, 2), 2);
+    assert_eq!(adts_chan_cfg(11, 6), 6);
+}

@@ -1,13 +1,13 @@
 //! The Fire TV skeleton: SDLActivity enters `SDL_main` on its SDL thread, and this draws three lines
 //! of text with SDL2_ttf, the last one the latest key press, until SDL quits, logging to logcat
-//! under the tag `PlxNative`. With a `clip=` argument the video harness plays it first and its label
+//! under the tag `PlxNative`. With a `clip=` argument the harness plays it first and its label
 //! replaces those lines until BACK stops it.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
 
 use crate::clip;
-use crate::harness::Harness;
+use crate::harness::{self, Harness};
 use crate::jni;
 
 #[allow(dead_code)] // read by SDL only
@@ -43,7 +43,10 @@ const SDL_WINDOW_FULLSCREEN: u32 = 0x1;
 const SDL_RENDERER_ACCELERATED: u32 = 0x2;
 const SDL_QUIT: u32 = 0x100;
 const SDL_GL_ALPHA_SIZE: c_int = 3;
-const LABEL_EVERY_MS: u32 = 250;
+/// A label draw takes about 350 ms on the Stick 4K, and the engine is not pumped meanwhile.
+/// ponytail: each draw still stalls the pump once a second, which the ~1.5 s buffered ahead
+/// covers. Upgrade: keep each line's texture and re-render only the lines that changed.
+const LABEL_EVERY_MS: u32 = 1_000;
 pub const LOG_INFO: c_int = 4;
 pub const LOG_ERROR: c_int = 6;
 
@@ -168,10 +171,12 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
         loop {
             jni::tick();
             let back = jni::take_back();
+            let presses = jni::take_presses();
             if let Some(harness) = harness.as_mut() {
                 if back {
                     harness.stop();
                 }
+                harness.keys(&presses);
                 harness.frame(SDL_GetTicks());
             }
             let playing = harness.as_ref().is_some_and(Harness::active);
@@ -189,7 +194,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                 Some(_) if !label_due && !redraw => shown.clone(),
                 Some(harness) => {
                     labelled_at = SDL_GetTicks();
-                    harness.label()
+                    harness::LABEL.time(|| harness.label())
                 }
                 None => {
                     let readout = jni::readout();
@@ -202,7 +207,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                 redraw = true;
             }
             if redraw {
-                draw(renderer, font, w, &shown, playing);
+                harness::DRAW.time(|| draw(renderer, font, w, &shown, playing));
                 redraw = false;
             }
             // Short, so a held BACK turns into Exit on time; shorter while playing, because the
