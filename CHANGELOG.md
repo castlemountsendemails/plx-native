@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.10] - 2026-10-27
+
+### Fixed
+- AAC audio with 7.1 channel configuration 12 (as written by newer ffmpeg) plays with sound instead of silently. The stream's header is now written as the equivalent 8-channel configuration 7. Not yet tried on any stick.
+
 ## [0.2.9] - 2026-10-26
 
 ### Fixed
