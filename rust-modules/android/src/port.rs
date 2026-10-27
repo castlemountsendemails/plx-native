@@ -1,9 +1,11 @@
 //! The Fire TV port table. The engine path reads only the sink, the sandbox verdict and the device
-//! info, so every entry but the sink answers as a television with no platform services.
+//! info, so every entry but the sink and the sealed-secret trio answers as a television with
+//! no platform services.
 
 use plx_platform::tv::{sandbox, toast, LocaleReply, Port};
 
 use crate::amediacodec::AmcSink;
+use crate::secure;
 
 fn nothing() {}
 
@@ -11,9 +13,9 @@ pub static PORT: Port = Port {
     probe_device: nothing,
     start_capability_probe: nothing,
     repair_sandbox: || Err(sandbox::Failure::Unsupported),
-    seal: |_| None,
-    open: |_| None,
-    remove: |_, _| {},
+    seal: secure::seal,
+    open: secure::open,
+    remove: secure::remove,
     system_locale: || LocaleReply::NoPlatform,
     go_home: nothing,
     poll_home: || false,

@@ -16,6 +16,8 @@ import android.media.MediaFormat;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Surface;
@@ -25,9 +27,16 @@ import android.view.ViewGroup;
 import android.widget.RelativeLayout;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
@@ -51,7 +60,7 @@ public class PlxActivity extends SDLActivity {
     protected String[] getArguments() {
         List<String> args = new ArrayList<>();
         Intent intent = getIntent();
-        for (String key : new String[] {"clip", "vc", "ac", "fps", "size"}) {
+        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure"}) {
             String value = intent == null ? null : intent.getStringExtra(key);
             if (value != null) {
                 args.add(key + "=" + value);
@@ -365,6 +374,73 @@ public class PlxActivity extends SDLActivity {
                             + info.getCapabilitiesForType(AAC).getAudioCapabilities().getMaxInputChannelCount());
                 }
             }
+        }
+    }
+
+    // The Keystore sealing behind tv::secure: an AES-256-GCM key under the alias, made on the first
+    // seal. Every failure (missing key, tampered blob, Keystore error) is caught here and comes back
+    // as null or false, so no exception reaches JNI.
+    private static final int GCM_TAG_BITS = 128;
+
+    // The IV (12 bytes) followed by ciphertext + tag, or null.
+    static byte[] sealSecret(byte[] alias, byte[] plain) {
+        try {
+            String name = new String(alias, StandardCharsets.UTF_8);
+            KeyStore store = KeyStore.getInstance("AndroidKeyStore");
+            store.load(null);
+            SecretKey key = (SecretKey) store.getKey(name, null);
+            if (key == null) {
+                KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+                generator.init(new KeyGenParameterSpec.Builder(name, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                        .setKeySize(256)
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .build());
+                key = generator.generateKey();
+            }
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, key);
+            byte[] iv = cipher.getIV();
+            byte[] data = cipher.doFinal(plain);
+            byte[] out = new byte[iv.length + data.length];
+            System.arraycopy(iv, 0, out, 0, iv.length);
+            System.arraycopy(data, 0, out, iv.length, data.length);
+            return out;
+        } catch (Exception e) {
+            Log.e(TAG, "secure: seal failed: " + e);
+            return null;
+        }
+    }
+
+    // The plaintext, or null for a missing key, a tampered blob or any Keystore error.
+    static byte[] openSecret(byte[] alias, byte[] iv, byte[] data) {
+        try {
+            KeyStore store = KeyStore.getInstance("AndroidKeyStore");
+            store.load(null);
+            SecretKey key = (SecretKey) store.getKey(new String(alias, StandardCharsets.UTF_8), null);
+            if (key == null) {
+                Log.i(TAG, "secure: open: no key");
+                return null;
+            }
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+            return cipher.doFinal(data);
+        } catch (Exception e) {
+            Log.e(TAG, "secure: open failed: " + e);
+            return null;
+        }
+    }
+
+    // Whether the key is gone afterwards; a key that was never there counts.
+    static boolean removeSecret(byte[] alias) {
+        try {
+            KeyStore store = KeyStore.getInstance("AndroidKeyStore");
+            store.load(null);
+            store.deleteEntry(new String(alias, StandardCharsets.UTF_8));
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "secure: remove failed: " + e);
+            return false;
         }
     }
 }

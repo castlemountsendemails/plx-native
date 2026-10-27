@@ -9,6 +9,7 @@ use std::ptr::{null, null_mut};
 use crate::clip;
 use crate::harness::{self, Harness};
 use crate::jni;
+use crate::secure;
 
 #[allow(dead_code)] // read by SDL only
 #[repr(C)]
@@ -115,7 +116,8 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         .filter(|arg| !arg.is_null())
         .map(|arg| unsafe { CStr::from_ptr(arg) }.to_string_lossy().into_owned())
         .collect();
-    match run(clip::parse(args.iter().map(String::as_str))) {
+    let secure = args.iter().find_map(|arg| arg.strip_prefix("secure=")).map(secure::harness);
+    match run(clip::parse(args.iter().map(String::as_str)), secure) {
         Ok(()) => 0,
         Err(message) => {
             log(LOG_ERROR, &message);
@@ -124,7 +126,7 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 }
 
-fn run(clip: Option<clip::Clip>) -> Result<(), String> {
+fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), String> {
     unsafe {
         if SDL_Init(SDL_INIT_VIDEO) != 0 {
             return Err(sdl_error("SDL_Init"));
@@ -196,6 +198,7 @@ fn run(clip: Option<clip::Clip>) -> Result<(), String> {
                     labelled_at = SDL_GetTicks();
                     harness::LABEL.time(|| harness.label())
                 }
+                None if secure.is_some() => secure.clone().unwrap_or_default(),
                 None => {
                     let readout = jni::readout();
                     let key = if readout.is_empty() { "press a key".into() } else { readout };

@@ -19,4 +19,6 @@ mod jni;
 #[cfg(target_os = "android")]
 mod port;
 #[cfg(target_os = "android")]
+mod secure;
+#[cfg(target_os = "android")]
 mod skeleton;

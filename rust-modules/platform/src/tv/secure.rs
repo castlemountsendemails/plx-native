@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub enum Backend {
     Keymanager3,
     PalmKeymanager,
+    AndroidKeystore,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -54,4 +55,28 @@ pub fn remove(backend: &Backend, key: &str) {
         return (store.remove)(backend, key);
     }
     (super::port().remove)(backend, key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_android_keystore_backend_serialises_as_android_keystore_and_round_trips() {
+        let sealed = Sealed {
+            backend: Backend::AndroidKeystore,
+            key: "plxnative.session.v1".into(),
+            iv: "AAAAAAAAAAAAAAAA".into(),
+            data: "AAAA".into(),
+        };
+        let json = serde_json::to_string(&sealed).unwrap();
+        assert!(json.contains(r#""backend":"android_keystore""#), "{json}");
+        assert_eq!(serde_json::from_str::<Sealed>(&json).unwrap(), sealed);
+    }
+
+    #[test]
+    fn a_webos_envelope_still_deserialises() {
+        let json = r#"{"backend":"keymanager3","key":"k","iv":"i","data":"d"}"#;
+        assert_eq!(serde_json::from_str::<Sealed>(json).unwrap().backend, Backend::Keymanager3);
+    }
 }
