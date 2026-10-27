@@ -762,6 +762,7 @@ dependencies = [
  "plx_base",
  "plx_data",
  "plx_media",
+ "plx_net",
  "plx_platform",
 ]
 

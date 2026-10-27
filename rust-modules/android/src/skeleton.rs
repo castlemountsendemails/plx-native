@@ -5,10 +5,12 @@
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
+use std::path::PathBuf;
 
 use crate::clip;
 use crate::harness::{self, Harness};
 use crate::jni;
+use crate::netcheck;
 use crate::secure;
 
 #[allow(dead_code)] // read by SDL only
@@ -96,6 +98,7 @@ extern "C" {
     fn TTF_CloseFont(font: Handle);
     fn TTF_RenderUTF8_Blended(font: Handle, text: *const c_char, fg: Color) -> Handle;
     fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    fn SDL_AndroidGetInternalStoragePath() -> *const c_char;
 }
 
 pub fn log(prio: c_int, message: &str) {
@@ -116,8 +119,18 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         .filter(|arg| !arg.is_null())
         .map(|arg| unsafe { CStr::from_ptr(arg) }.to_string_lossy().into_owned())
         .collect();
-    let secure = args.iter().find_map(|arg| arg.strip_prefix("secure=")).map(secure::harness);
-    match run(clip::parse(args.iter().map(String::as_str)), secure) {
+    if let Some(files) = files_dir() {
+        plx_base::paths::set_android_files_dir(files);
+    } else {
+        log(LOG_ERROR, "SDL_AndroidGetInternalStoragePath failed; app files are looked for nowhere");
+    }
+    let arg = |key: &str| args.iter().find_map(|arg| arg.strip_prefix(key)?.strip_prefix('='));
+    let lines = match (arg("secure"), arg("net")) {
+        (Some(mode), _) => Some(secure::harness(mode)),
+        (None, Some(_)) => Some(netcheck::harness(arg("server"))),
+        (None, None) => None,
+    };
+    match run(clip::parse(args.iter().map(String::as_str)), lines) {
         Ok(()) => 0,
         Err(message) => {
             log(LOG_ERROR, &message);
@@ -126,7 +139,13 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 }
 
-fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), String> {
+fn files_dir() -> Option<PathBuf> {
+    let dir = unsafe { SDL_AndroidGetInternalStoragePath() };
+    (!dir.is_null()).then(|| PathBuf::from(unsafe { CStr::from_ptr(dir) }.to_string_lossy().into_owned()))
+}
+
+/// `harness_lines`, when a `secure=` or `net=` harness ran, replaces the skeleton's own lines.
+fn run(clip: Option<clip::Clip>, harness_lines: Option<Vec<String>>) -> Result<(), String> {
     unsafe {
         if SDL_Init(SDL_INIT_VIDEO) != 0 {
             return Err(sdl_error("SDL_Init"));
@@ -198,7 +217,7 @@ fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), Stri
                     labelled_at = SDL_GetTicks();
                     harness::LABEL.time(|| harness.label())
                 }
-                None if secure.is_some() => secure.clone().unwrap_or_default(),
+                None if harness_lines.is_some() => harness_lines.clone().unwrap_or_default(),
                 None => {
                     let readout = jni::readout();
                     let key = if readout.is_empty() { "press a key".into() } else { readout };

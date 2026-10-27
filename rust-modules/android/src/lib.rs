@@ -17,6 +17,8 @@ mod harness;
 #[cfg(target_os = "android")]
 mod jni;
 #[cfg(target_os = "android")]
+mod netcheck;
+#[cfg(target_os = "android")]
 mod port;
 #[cfg(target_os = "android")]
 mod secure;

@@ -84,8 +84,12 @@ pub struct CurlVersionInfo {
 // It is LAST deliberately — a television never reaches it, so this costs the device nothing but
 // one extra failed `dlopen` in the already-fatal no-curl case, and the candidate list stays
 // ordered by "what the fleet actually answers to" first.
+//
+// The fourth is the Fire TV APK's own build (`ci/build-android-curl.sh`), found in the app's
+// native library folder. No LG firmware has a file by that name, and it comes after the webOS
+// names, so a television binds exactly what it did before.
 plx_base::dynlib! {
-    pub curl: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib"] {
+    pub curl: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib", "libcurl-plx.so"] {
     fn curl_global_init(flags: c_long) -> c_int;
     fn curl_version() -> *const c_char;
     fn curl_version_info(age: c_int) -> *const CurlVersionInfo;
@@ -169,7 +173,8 @@ const CURLOPT_PINNEDPUBLICKEY: c_int = 10230;
 /// `CURLOPT_CAINFO` (OBJECTPOINT + 65) — a path to a PEM bundle to verify the peer against,
 /// INSTEAD of whatever trust store this firmware shipped with in 2019. Production sets it in two
 /// places only: [`Tls::CaBundle`] (the telemetry bundle) and [`keypin::apply_roots`] (the
-/// `*.plex.direct` fallback, after the device store has already said no).
+/// `*.plex.direct` fallback, after the device store has already said no). The Fire TV build also
+/// sets it on every CA-verified request ([`apply_android_ca`]), having no device store at all.
 ///
 /// **It is not pinning and must not be read as pinning**, which is the confusion
 /// [`CURLOPT_PINNEDPUBLICKEY`]'s own doc exists to prevent from the other side: this selects which
@@ -177,6 +182,21 @@ const CURLOPT_PINNEDPUBLICKEY: c_int = 10230;
 /// independence from a store nobody can update on a television, on a path whose far end is not a
 /// Plex service and whose CA may rotate.
 pub const CURLOPT_CAINFO: c_int = 10065;
+
+/// The Fire TV libcurl is built with no CA file, so a CA-verified request names the Mozilla bundle
+/// the APK copies to the files folder. A missing file fails the handshake (curl 77), never opens
+/// it. Returns the setopt result; a path libcurl cannot take is -1, which callers also refuse.
+///
+/// # Safety
+/// `easy` is a live easy handle of the bound libcurl.
+#[cfg(target_os = "android")]
+pub unsafe fn apply_android_ca(easy: *mut CURL) -> c_int {
+    let path = plx_base::paths::in_app_dir("cacert.pem");
+    match path.to_str().and_then(|p| CString::new(p).ok()) {
+        Some(c) => curl_easy_setopt_ptr(easy, CURLOPT_CAINFO, c.as_ptr() as *const c_void),
+        None => -1,
+    }
+}
 /// `CURLOPTTYPE_SLISTPOINT + 203`: a `curl_slist` of `host:port:address` entries that pre-populate
 /// the DNS cache, so the named host is never resolved. Present since 7.21.3; the entry syntax the
 /// television's 7.53.1 parses is documented on [`origin::ResolvePin::entry`]. See [`resolve`].
@@ -569,7 +589,7 @@ fn global_init_once() -> bool {
         }
         plx_base::dynlib::Loaded::NoLibrary => {
             plx_base::eventlog::log(
-                "net: no libcurl on this device (tried .so.4, .so.5 and .4.dylib) — \
+                "net: no libcurl on this device (tried .so.4, .so.5, .4.dylib and libcurl-plx.so) — \
                  account calls and HTTPS PMS control unavailable",
             );
             false
@@ -2264,7 +2284,16 @@ fn request_tls_sink(
                 // "CA-verified and unpinned" being the DEFAULT is the fact a plan written against this
                 // module got wrong — it called for a new request mode to obtain what `request` had
                 // been doing since it was written.
-                TlsCfg::Ca => {}
+                TlsCfg::Ca => {
+                    #[cfg(target_os = "android")]
+                    {
+                        let rc = apply_android_ca(easy.0);
+                        if rc != 0 {
+                            plx_base::eventlog::log(&format!("net: this libcurl refuses CURLOPT_CAINFO (rc={rc}) — refusing to send against an unknown trust store"));
+                            return Err(RequestError::Transport.into());
+                        }
+                    }
+                }
                 // A bundle we ship. The return code is checked for the same reason the pin's is, but
                 // the failure it guards is milder and worth stating so nobody "simplifies" the pinned
                 // check to match: a REJECTED `CURLOPT_CAINFO` leaves the device's own store in force,

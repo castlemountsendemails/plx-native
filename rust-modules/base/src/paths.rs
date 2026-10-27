@@ -104,17 +104,40 @@ const LEGACY_APP_DIR: &str = "/media/developer/apps/usr/palm/applications/com.be
 pub fn app_id() -> &'static str {
     static ID: OnceLock<String> = OnceLock::new();
     ID.get_or_init(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| installed_app_id(&exe))
-            .unwrap_or_else(|| STABLE_APP_ID.to_string())
+        #[cfg(target_os = "android")]
+        let id = ANDROID_FILES_DIR.get().and_then(|files| android_app_id(files));
+        #[cfg(not(target_os = "android"))]
+        let id = std::env::current_exe().ok().and_then(|exe| installed_app_id(&exe));
+        id.unwrap_or_else(|| STABLE_APP_ID.to_string())
     })
+}
+
+/// The Android files folder (`/data/user/0/<package>/files`). An APK's executable is the system's
+/// `app_process`, so on Android this folder, not `current_exe`, is where [`app_dir`] and
+/// [`app_id`] come from; the Fire TV entry hands it over before anything reads either.
+#[cfg(target_os = "android")]
+static ANDROID_FILES_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Once, before the first read of [`app_dir`] or [`app_id`]. `false` if it was already set.
+#[cfg(target_os = "android")]
+pub fn set_android_files_dir(dir: PathBuf) -> bool {
+    ANDROID_FILES_DIR.set(dir).is_ok()
+}
+
+/// The package that owns an Android files folder, or `None` when the folder is not named `files`.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn android_app_id(files: &Path) -> Option<String> {
+    if files.file_name()? != "files" {
+        return None;
+    }
+    Some(files.parent()?.file_name()?.to_str()?.to_owned())
 }
 
 /// The webOS app id implied by an executable path, or `None` when that path is not a webOS install.
 ///
 /// Split out from [`app_id`] purely so it is testable — `app_id` memoises into a process-wide
 /// `OnceLock` and reads the real `current_exe`, neither of which a test can pin.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn installed_app_id(exe: &Path) -> Option<String> {
     let dir = exe.parent()?;
     if dir.parent()?.file_name()? != "applications" {
@@ -156,6 +179,8 @@ pub fn install_kind() -> &'static str {
 /// reasoning above is about — it just also answers on a host build, where the simulator's fonts sit
 /// next to the simulator binary rather than under a webOS install prefix.
 pub fn app_dir() -> &'static Path {
+    #[cfg(target_os = "android")]
+    debug_assert!(ANDROID_FILES_DIR.get().is_some(), "paths::app_dir read before set_android_files_dir");
     &app_dir_resolved().0
 }
 
@@ -164,6 +189,8 @@ pub fn app_dir() -> &'static Path {
 enum AppDirSource {
     Env,
     MacosBundle,
+    #[cfg(target_os = "android")]
+    AndroidFiles,
     CurrentExe,
     Fallback,
 }
@@ -178,6 +205,8 @@ pub fn app_dir_line() -> String {
     match source {
         AppDirSource::Env => format!("appdir: {} (PLXNATIVE_APP_DIR)", dir.display()),
         AppDirSource::MacosBundle => format!("appdir: {} (macOS bundle)", dir.display()),
+        #[cfg(target_os = "android")]
+        AppDirSource::AndroidFiles => format!("appdir: {} (Android files folder)", dir.display()),
         AppDirSource::CurrentExe => format!("appdir: {} (from current_exe)", dir.display()),
         // Not expected on device — worth a line in the log if it ever happens, because everything
         // that reads the payload from here on is reading a guess.
@@ -199,6 +228,10 @@ fn app_dir_resolved() -> &'static (PathBuf, AppDirSource) {
                     return (p, AppDirSource::Env);
                 }
             }
+        }
+        #[cfg(target_os = "android")]
+        if let Some(files) = ANDROID_FILES_DIR.get() {
+            return (files.clone(), AppDirSource::AndroidFiles);
         }
         if let Ok(exe) = std::env::current_exe() {
             // A macOS **application bundle** puts the executable in `Contents/MacOS/` and its
@@ -872,6 +905,17 @@ mod tests {
         .is_none());
         // …and the real process resolves to SOMETHING, on either platform, without panicking.
         assert!(!super::app_id().is_empty());
+    }
+
+    #[test]
+    fn the_android_app_id_is_the_files_folders_package() {
+        use std::path::Path;
+        let id = |p: &str| super::android_app_id(Path::new(p));
+        assert_eq!(id("/data/user/0/com.beb.plxnative.debug/files").as_deref(), Some("com.beb.plxnative.debug"));
+        assert_eq!(id("/data/data/com.beb.plxnative/files").as_deref(), Some("com.beb.plxnative"));
+        // Not a files folder: `app_id` falls back to the stable id.
+        assert!(id("/data/user/0/com.beb.plxnative.debug/cache").is_none());
+        assert!(id("/files").is_none());
     }
 
     /// A flavour is a dotted SUFFIX of the stable id, and the app users get has none. The whole

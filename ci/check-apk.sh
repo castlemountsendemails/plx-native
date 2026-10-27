@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fails unless a Fire TV APK has the settings the sticks need: the armeabi-v7a libmain.so and FFmpeg, minSdk 25,
+# Fails unless a Fire TV APK has the settings the sticks need: the armeabi-v7a libmain.so, FFmpeg and libcurl, minSdk 25,
 # targetSdk 28, extractNativeLibs and allowBackup as the manifest sets them, a Leanback launcher
 # entry, the expected package, version and debuggable flag, and exactly one signer with CERT_SHA256.
 # Every check runs and reports, so one failure does not hide the next.
@@ -37,8 +37,14 @@ check "armeabi-v7a libmain.so" has "$files" '^lib/armeabi-v7a/libmain\.so$'
 for lib in avutil avcodec avformat; do
   check "armeabi-v7a lib$lib-plx.so" has "$files" "^lib/armeabi-v7a/lib$lib-plx\\.so\$"
 done
+check "armeabi-v7a libcurl-plx.so" has "$files" '^lib/armeabi-v7a/libcurl-plx\.so$'
+# The CA files PlxActivity copies to the files folder, where `net` reads them.
+for asset in cacert.pem le-roots.pem; do
+  check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
+done
 # The notice and the licence texts it names, which the CI step copies into the assets.
-for asset in THIRD-PARTY-NOTICES-FIRETV.md licenses/LGPL-2.1.txt licenses/Zlib.txt licenses/FreeType.txt licenses/OFL.txt; do
+for asset in THIRD-PARTY-NOTICES-FIRETV.md licenses/LGPL-2.1.txt licenses/Zlib.txt licenses/FreeType.txt licenses/OFL.txt \
+  licenses/Apache-2.0.txt licenses/curl.txt licenses/MPL-2.0.txt; do
   check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
 done
 check "minSdk 25" has "$badging" "^(min)?[sS]dkVersion:'25'$"

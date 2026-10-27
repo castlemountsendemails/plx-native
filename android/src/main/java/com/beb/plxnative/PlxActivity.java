@@ -3,6 +3,7 @@ package com.beb.plxnative;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.graphics.PixelFormat;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
@@ -26,6 +27,12 @@ import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.widget.RelativeLayout;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
@@ -60,7 +67,7 @@ public class PlxActivity extends SDLActivity {
     protected String[] getArguments() {
         List<String> args = new ArrayList<>();
         Intent intent = getIntent();
-        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure"}) {
+        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure", "net", "server"}) {
             String value = intent == null ? null : intent.getStringExtra(key);
             if (value != null) {
                 args.add(key + "=" + value);
@@ -73,6 +80,7 @@ public class PlxActivity extends SDLActivity {
     // one, and it is translucent, so the video shows wherever the UI draws nothing.
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        copyAssetsToFiles();
         super.onCreate(savedInstanceState);
         sContext = getApplicationContext();
         if (mBrokenLibraries || mLayout == null) {
@@ -96,6 +104,67 @@ public class PlxActivity extends SDLActivity {
         mLayout.addView(video, 0, new RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         sVideoView = video;
+    }
+
+    // The native side reads these from the files folder (paths::app_dir), not the APK. They are copied
+    // again whenever the package's lastUpdateTime differs from the marker's, which every install and
+    // update changes; a failed copy writes no marker, so the next start tries again.
+    private static final String[] FILES_FROM_ASSETS = {"cacert.pem", "le-roots.pem"};
+    private static final String ASSETS_MARKER = "assets.installed";
+
+    private void copyAssetsToFiles() {
+        File dir = getFilesDir();
+        File marker = new File(dir, ASSETS_MARKER);
+        String stamp;
+        try {
+            stamp = Long.toString(getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime);
+        } catch (PackageManager.NameNotFoundException e) {
+            stamp = "unknown";
+        }
+        if (stamp.equals(readText(marker))) {
+            return;
+        }
+        byte[] buffer = new byte[64 * 1024];
+        for (String name : FILES_FROM_ASSETS) {
+            File part = new File(dir, name + ".part");
+            try (InputStream in = getAssets().open(name); OutputStream out = new FileOutputStream(part)) {
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                }
+            } catch (IOException e) {
+                Log.e(TAG, "assets: could not copy " + name, e);
+                return;
+            }
+            if (!part.renameTo(new File(dir, name))) {
+                Log.e(TAG, "assets: could not move " + name + " into place");
+                return;
+            }
+        }
+        try (OutputStream out = new FileOutputStream(marker)) {
+            out.write(stamp.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            Log.e(TAG, "assets: could not write the marker", e);
+            return;
+        }
+        Log.i(TAG, "assets: copied " + Arrays.toString(FILES_FROM_ASSETS) + " to " + dir);
+    }
+
+    private static String readText(File file) {
+        try (InputStream in = new FileInputStream(file)) {
+            byte[] bytes = new byte[(int) file.length()];
+            int read = 0;
+            while (read < bytes.length) {
+                int n = in.read(bytes, read, bytes.length - read);
+                if (n < 0) {
+                    break;
+                }
+                read += n;
+            }
+            return new String(bytes, 0, read, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     // The UI is drawn at 1920x1080 on every stick; the display hardware scales it to the panel.

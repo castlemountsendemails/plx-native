@@ -22,6 +22,7 @@ plx_base = { path = "../base" }
 plx_platform = { path = "../platform" }
 plx_data = { path = "../data" }
 plx_media = { path = "../media" }
+plx_net = { path = "../net" }
 jni = "0.21.1"
 libc = "0.2"
 

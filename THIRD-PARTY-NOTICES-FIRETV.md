@@ -14,11 +14,14 @@ are in `assets/licenses/`. The APK contains exactly these third-party components
 | `lib/armeabi-v7a/libavutil-plx.so`, `libavcodec-plx.so`, `libavformat-plx.so`, `libswscale-plx.so` | FFmpeg 9.0.2 | 1 |
 | `lib/armeabi-v7a/libSDL2.so` and the SDL Java classes in `classes*.dex` | SDL 2.32.10 | 2 |
 | `lib/armeabi-v7a/libSDL2_ttf.so` | SDL2_ttf 2.24.0 with FreeType 2.13.2 | 3 |
-| `lib/armeabi-v7a/libmain.so` | PlxNative, the Rust crates of section 5, the Rust standard library | 5 |
-| `assets/appfont.ttf` | Inter | 4 |
+| `lib/armeabi-v7a/libcurl-plx.so` | libcurl 8.23.0 with OpenSSL 3.5.9 | 4 |
+| `assets/cacert.pem` | The Mozilla CA certificate store | 5 |
+| `assets/le-roots.pem` | Four Let's Encrypt root certificates | 5 |
+| `lib/armeabi-v7a/libmain.so` | PlxNative, the Rust crates of section 7, the Rust standard library | 7 |
+| `assets/appfont.ttf` | Inter | 6 |
 
 Full licence texts are in `assets/licenses/` and are not repeated inline, except where a licence has
-no file there (sections 2 and 4).
+no file there (sections 2, 4 and 6).
 
 ---
 
@@ -139,7 +142,53 @@ the **FreeType License** (`licenses/FreeType.txt`).
 *Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights
 reserved.*
 
-## 4. Font
+## 4. libcurl 8.23.0 and OpenSSL 3.5.9
+
+`libcurl-plx.so` is libcurl **8.23.0**, unmodified, from <https://curl.se/>, with **OpenSSL 3.5.9**,
+unmodified, from <https://openssl-library.org/>, linked into it statically; no other OpenSSL file is
+in the APK. The `-plx` name keeps it apart from any other libcurl on the device. It is built by
+`ci/build-android-curl.sh` with the Android NDK 27.3.13750724.
+
+libcurl: Copyright (c) 1996 - 2026, Daniel Stenberg, <daniel@haxx.se>, and many contributors.
+Licence: **curl** (`licenses/curl.txt`). Two of its files, `lib/curlx/inet_pton.c` and
+`lib/curlx/inet_ntop.c`, are from BIND and are used under the **ISC** licence, reproduced here as
+that licence requires:
+
+    Copyright (C) 1996-2022  Internet Software Consortium.
+
+    Permission to use, copy, modify, and distribute this software for any
+    purpose with or without fee is hereby granted, provided that the above
+    copyright notice and this permission notice appear in all copies.
+
+    THE SOFTWARE IS PROVIDED "AS IS" AND INTERNET SOFTWARE CONSORTIUM
+    DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL
+    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL
+    INTERNET SOFTWARE CONSORTIUM BE LIABLE FOR ANY SPECIAL, DIRECT,
+    INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING
+    FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+    NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION
+    WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+OpenSSL: Copyright (c) 1998-2026 The OpenSSL Project Authors; Copyright (c) 1995-1998 Eric A.
+Young, Tim J. Hudson. Licence: **Apache-2.0**
+(`licenses/Apache-2.0.txt`).
+
+## 5. CA certificates
+
+**The Mozilla CA certificate store** — `assets/cacert.pem`, the bundle curl publishes at
+<https://curl.se/docs/caextract.html> ("Certificate data from Mozilla as of: Tue Oct 20 13:32:40
+2026 GMT", sha256 `796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe`), unmodified.
+It is the trust store every verified connection of the app uses on Fire TV. Licence: **MPL-2.0**, the
+licence of the Mozilla source file it is extracted from (`licenses/MPL-2.0.txt`). Its source form is
+`certdata.txt` in Mozilla's NSS, linked from the bundle's own header.
+
+**ISRG Root X1, ISRG Root X2, ISRG Root YR and ISRG Root YE** — `assets/le-roots.pem`, the same file
+the webOS package ships (`THIRD-PARTY-NOTICES.md` §2.7): public root certificates of the operator of
+Let's Encrypt, copied unmodified from <https://letsencrypt.org/certificates/>, with no copyright
+licence of their own. A `*.plex.direct` certificate the Mozilla store cannot verify is retried once
+against them, with the chain, its dates and the host name all still checked.
+
+## 6. Font
 
 **Inter** — `assets/appfont.ttf`. Copyright 2016 The Inter Project Authors
 (https://github.com/rsms/inter). Licence: **SIL Open Font License 1.1**, shipped as
@@ -147,7 +196,7 @@ reserved.*
 ships (see `THIRD-PARTY-NOTICES.md` §2.3 for how it was cut). Inter's copyright statement declares
 no Reserved Font Name.
 
-## 5. Rust code statically linked into `libmain.so`
+## 7. Rust code statically linked into `libmain.so`
 
 `libmain.so` is Rust: the crates below and the Rust standard library (the pinned stable
 toolchain's prebuilt `std` for the target, the same release as the webOS package's) are linked in
@@ -295,9 +344,9 @@ licence and copyright columns from `ci/third-party-crates.json`, and CI fails wh
 disagrees with the Android graph. Build-time machinery (proc-macro crates, build and dev
 dependencies) is not linked and has no row.
 
-## 6. Not in the APK
+## 8. Not in the APK
 
 The APK carries no AndroidX or Android Support libraries, no Sentry or other crash-reporting
 code, no libass, and none of the webOS package's other fonts. The Android system libraries it
-loads at run time (`libc`, `libm`, `libz`, `liblog`, OpenGL ES, OpenSL ES, AAudio) belong to the
+loads at run time (`libc`, `libm`, `libdl`, `libz`, `liblog`, OpenGL ES, OpenSL ES, AAudio) belong to the
 device and are not redistributed here.
