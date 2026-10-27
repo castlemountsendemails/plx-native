@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
-use ::jni::objects::{GlobalRef, JByteBuffer, JClass, JIntArray, JObject, JString, JValue};
+use ::jni::objects::{GlobalRef, JByteArray, JByteBuffer, JClass, JIntArray, JObject, JString, JValue};
 use ::jni::sys::{jint, JNI_VERSION_1_6};
 use ::jni::{JNIEnv, JavaVM};
 
@@ -422,4 +422,58 @@ pub fn audio_report() {
     if let Some(class) = activity() {
         with_env("report the audio outputs", |env| env.call_static_method(class, "reportAudio", "()V", &[]).map(drop));
     }
+}
+
+/// `PlxActivity.sealSecret`: the Keystore IV (12 bytes) followed by ciphertext + tag.
+pub fn seal_secret(alias: &str, plain: &[u8]) -> Option<Vec<u8>> {
+    let class = activity()?;
+    with_env("seal a secret", |env| {
+        let alias = env.byte_array_from_slice(alias.as_bytes())?;
+        let plain = env.byte_array_from_slice(plain)?;
+        let sealed = env.call_static_method(
+            class,
+            "sealSecret",
+            "([B[B)[B",
+            &[JValue::Object(&alias), JValue::Object(&plain)],
+        )?
+        .l()?;
+        bytes(env, sealed)
+    })
+    .flatten()
+}
+
+/// `PlxActivity.openSecret`; `None` for a missing key, a tampered blob or a Keystore error.
+pub fn open_secret(alias: &str, iv: &[u8], data: &[u8]) -> Option<Vec<u8>> {
+    let class = activity()?;
+    with_env("open a secret", |env| {
+        let alias = env.byte_array_from_slice(alias.as_bytes())?;
+        let iv = env.byte_array_from_slice(iv)?;
+        let data = env.byte_array_from_slice(data)?;
+        let plain = env.call_static_method(
+            class,
+            "openSecret",
+            "([B[B[B)[B",
+            &[JValue::Object(&alias), JValue::Object(&iv), JValue::Object(&data)],
+        )?
+        .l()?;
+        bytes(env, plain)
+    })
+    .flatten()
+}
+
+/// `PlxActivity.removeSecret`: whether the key is gone.
+pub fn remove_secret(alias: &str) -> bool {
+    let Some(class) = activity() else { return false };
+    with_env("remove a secret", |env| {
+        let alias = env.byte_array_from_slice(alias.as_bytes())?;
+        env.call_static_method(class, "removeSecret", "([B)Z", &[JValue::Object(&alias)])?.z()
+    })
+    .unwrap_or(false)
+}
+
+fn bytes(env: &mut JNIEnv, array: JObject) -> ::jni::errors::Result<Option<Vec<u8>>> {
+    if array.is_null() {
+        return Ok(None);
+    }
+    env.convert_byte_array(JByteArray::from(array)).map(Some)
 }

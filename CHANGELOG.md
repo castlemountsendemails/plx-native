@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.11] - 2026-10-27
+
+### Added
+- The Fire TV app can now seal a secret with a key held in the Android Keystore, open it again and delete the key. It is not yet reachable from sign-in: only a test run of the app can use it (`--es secure test`, then `open`, then `remove`), which shows a pass or fail line for each step on screen and in logcat. Not yet tried on any stick.
+- A saved session can now be marked as sealed by the Android Keystore. The LG app doesn't use this and still opens its own sessions as before.
+
 ## [0.2.10] - 2026-10-27
 
 ### Fixed
