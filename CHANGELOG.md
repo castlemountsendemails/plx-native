@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.14] - 2026-10-28
+
+### Added
+- The Fire TV remote now drives the app: D-pad, OK, BACK, play/pause, rewind and fast-forward, and MENU or holding BACK for about a second for Exit. Search can be typed with the Fire keyboard, and its delete key edits the search. BACK closes the keyboard. Not yet tried on any stick.
+
+### Changed
+- Shared code, for the LG check: on Fire TV only, key events and typed text are read where stock SDL puts them, the Fire keyboard's per-letter key events are ignored (its text is used), and a keyboard closed by Fire OS ends editing. The LG app reads keys and text as before.
+
 ## [0.2.13] - 2026-10-27
 
 ### Added
