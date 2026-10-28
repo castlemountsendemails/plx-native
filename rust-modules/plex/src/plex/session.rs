@@ -4483,6 +4483,11 @@ fn save_legacy_fallback_locked(
     protected_before: bool,
     protected_after: bool,
 ) -> Option<bool> {
+    // On Android the sealed record is the only session store, so a failed write leaves no copy.
+    if cfg!(target_os = "android") {
+        plx_base::eventlog::log("session: the sealed record was not written; Android keeps no fallback file");
+        return None;
+    }
     // Only our marked fallback envelopes may be resealed here. Unmarked legacy secure files
     // still refuse the entire fallback write, as before; the plaintext arm never downgrades either.
     if protected_before || protected_after || has_unmarked_secure_locked() {
@@ -5549,6 +5554,8 @@ pub fn reset_reads_for_test() {
 
 #[allow(dead_code)]
 pub mod persistence;
+#[cfg(any(target_os = "android", test))]
+mod sealed_file;
 
 #[cfg(test)]
 mod migration_tests;

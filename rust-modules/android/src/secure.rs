@@ -80,13 +80,12 @@ pub fn harness(mode: &str) -> Vec<String> {
             Some(sealed) => lines.push(verdict("stored blob opens", open(&sealed).as_deref() == Some(DUMMY))),
             None => lines.push(verdict("stored blob read", false)),
         },
-        "remove" => match stored() {
-            Some(sealed) => {
-                remove(&Backend::AndroidKeystore, KEY);
+        "remove" => {
+            lines.push(verdict("key removed", jni::remove_secret(KEY)));
+            if let Some(sealed) = stored() {
                 lines.push(verdict("open after remove is None", open(&sealed).is_none()));
             }
-            None => lines.push(verdict("stored blob read", false)),
-        },
+        }
         _ => lines.push(verdict("mode known (test, open, remove)", false)),
     }
     lines

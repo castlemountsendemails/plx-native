@@ -186,6 +186,9 @@ pub fn load() -> CanonicalRead {
         match store.load(RecordKey::Session) {
             Ok(None) => CanonicalRead::Missing,
             Ok(Some(record)) => match record.state {
+                #[cfg(target_os = "android")]
+                RecordState::Data { payload } => super::sealed_file::read(record.revision, payload),
+                #[cfg(not(target_os = "android"))]
                 RecordState::Data { payload } => CanonicalRead::Data {
                     revision: record.revision,
                     payload,
@@ -197,6 +200,40 @@ pub fn load() -> CanonicalRead {
             },
             Err(error) => CanonicalRead::Blocked(error),
         }
+    }
+}
+
+/// The Android write: the stored payload is read raw, so the seal is opened once, by `encode`.
+#[cfg(target_os = "android")]
+fn write_sealed(session: &super::Session, authority: super::SaveAuthority) -> CanonicalCommit {
+    let store = match store() {
+        Ok(store) => store,
+        Err(error) => return CanonicalCommit::Failed(error),
+    };
+    let (revision, current) = match store.load(RecordKey::Session) {
+        Ok(None) => (Some(1), None),
+        Ok(Some(record)) => (
+            record.revision.checked_add(1),
+            match record.state {
+                RecordState::Data { payload } => Some(payload),
+                RecordState::Cleared => None,
+            },
+        ),
+        Err(error) => return CanonicalCommit::Failed(error),
+    };
+    let Some(revision) = revision else {
+        return CanonicalCommit::Failed(StoreError::InvalidSchema);
+    };
+    match super::sealed_file::encode(session, authority, current.as_deref()) {
+        Ok(payload) => match commit(Record::data(revision, payload)) {
+            CanonicalCommit::Durable { revision, verified, .. } => CanonicalCommit::Durable {
+                revision,
+                verified,
+                protection: Some(super::sealed_file::protection()),
+            },
+            other => other,
+        },
+        Err(error) => CanonicalCommit::Failed(error),
     }
 }
 
@@ -299,11 +336,21 @@ pub fn commit_data(payload: String) -> CanonicalCommit {
         };
         return commit_session(&session, false, super::SaveAuthority::Routine);
     }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(any(test, feature = "test-support"))
+    #[cfg(target_os = "android")]
+    {
+        match serde_json::from_str::<super::Session>(&payload) {
+            Ok(session) => write_sealed(&session, super::SaveAuthority::Routine),
+            Err(_) => CanonicalCommit::Failed(StoreError::InvalidSchema),
+        }
+    }
+    #[cfg(not(any(
+        all(
+            target_os = "linux",
+            target_arch = "arm",
+            not(feature = "hostsim"),
+            not(any(test, feature = "test-support"))
+        ),
+        target_os = "android"
     )))]
     {
         let revision = match load() {
@@ -1396,6 +1443,19 @@ pub fn write_session(
         target_arch = "arm",
         not(feature = "hostsim"),
         not(any(test, feature = "test-support"))
+    )))]
+    #[cfg(target_os = "android")]
+    {
+        write_sealed(session, authority)
+    }
+    #[cfg(not(any(
+        all(
+            target_os = "linux",
+            target_arch = "arm",
+            not(feature = "hostsim"),
+            not(any(test, feature = "test-support"))
+        ),
+        target_os = "android"
     )))]
     {
         let _ = authority;
