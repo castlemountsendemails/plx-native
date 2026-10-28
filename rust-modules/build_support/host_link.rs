@@ -55,7 +55,7 @@ pub fn emit(repo: &Path) {
         }
     }
 
-    compile_svg(repo, &std::env::var("CC").unwrap_or_else(|_| "cc".into()));
+    compile_svg(repo, &std::env::var("CC").unwrap_or_else(|_| "cc".into()), &[]);
 }
 
 /// Put the pinned nanosvg headers in `vendor/nanosvg` (gitignored): they are not in the repository.
@@ -84,8 +84,8 @@ fn stage_nanosvg(repo: &Path) {
     );
 }
 
-/// Build `src/svg.c` (the nanosvg rasterizer) with the C compiler `cc`, for the host or for the
-/// Fire TV `libmain.so`.
+/// Build `src/svg.c` (the nanosvg rasterizer) with the C compiler `cc` and its extra `flags`, for
+/// the host or for the Fire TV `libmain.so`.
 ///
 /// On the television the Makefile compiles this alongside `main.c` and `starfish.c` and links all
 /// three with the staticlib. The simulator has no Makefile step, so it does the one piece it still
@@ -95,13 +95,14 @@ fn stage_nanosvg(repo: &Path) {
 /// Shelling out to the C compiler rather than taking the `cc` crate as a build-dependency: this is
 /// one translation unit with two include paths, and the crate's dependency list is deliberately
 /// short — a build-dep would be fetched for the ARM build too, which never runs this function.
-pub fn compile_svg(repo: &Path, cc: &str) {
+pub fn compile_svg(repo: &Path, cc: &str, flags: &[&str]) {
     stage_nanosvg(repo);
     let src = repo.join("src/svg.c");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("svg.o");
     println!("cargo:rerun-if-changed={}", src.display());
 
     let st = Command::new(cc)
+        .args(flags)
         .arg("-c")
         .arg(&src)
         .arg("-o")
