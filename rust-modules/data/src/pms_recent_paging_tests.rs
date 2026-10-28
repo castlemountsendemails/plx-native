@@ -533,9 +533,7 @@ fn a_failed_window_reload_keeps_the_first_page_instead_of_failing_the_refresh() 
     let result = request.fetch();
     server.join().unwrap();
     let build = result.expect("a failed window reload must not fail the source refresh");
-    assert_eq!(build.shelves[0].items[0].title, "Fresh movie");
-    assert_eq!(build.shelves[0].offset, 0);
-    assert_eq!(build.shelves[0].items.len(), 12);
+    assert!(build.shelves.is_empty(), "Home keeps no row but Continue Watching");
     reset(&mut owner.state,&owner.adapter);
     plx_plex::plex::reset_servers_for_test();
 }
