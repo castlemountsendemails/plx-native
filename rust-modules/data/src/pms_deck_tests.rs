@@ -245,12 +245,14 @@ fn a_card_marked_watched_while_a_deck_page_is_in_flight_stays_watched_when_it_la
     plx_plex::plex::reset_servers_for_test();
 }
 
-/// A plain-HTTP server on a loopback port that answers `/hubs/continueWatching/items` from a
-/// listing, one page per request, and refuses everything else. Stops when dropped.
+/// A plain-HTTP server on a loopback port that answers Continue Watching (the hub and its listing)
+/// from a listing, and `/hubs` with one Recently Added row of three movies. Stops when dropped.
 struct Loopback {
     port: i32,
-    /// Pages served.
+    /// Continue Watching listing pages served.
     hits: Arc<std::sync::atomic::AtomicUsize>,
+    /// Reads of the Recently Added row's own listing.
+    rows: Arc<std::sync::atomic::AtomicUsize>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -267,6 +269,8 @@ impl Loopback {
         let quit = Arc::clone(&stop);
         let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let served = Arc::clone(&hits);
+        let rows = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let row_reads = Arc::clone(&rows);
         let thread = std::thread::spawn(move || {
             while !quit.load(Ordering::Acquire) {
                 let Ok((mut stream, _)) = listener.accept() else {
@@ -275,6 +279,7 @@ impl Loopback {
                 };
                 let items = items.clone();
                 let served = Arc::clone(&served);
+                let row_reads = Arc::clone(&row_reads);
                 std::thread::spawn(move || {
                     let _ = stream.set_nonblocking(false);
                     let mut head = Vec::new();
@@ -287,22 +292,42 @@ impl Loopback {
                     let (path, query) = target.split_once('?').unwrap_or((target, ""));
                     let param = |name: &str| query.split('&').find_map(|part| part.strip_prefix(name)?.strip_prefix('='))
                         .and_then(|value| value.parse::<usize>().ok());
-                    let reply = if path == "/hubs/continueWatching/items" {
-                        served.fetch_add(1, Ordering::AcqRel);
-                        let (start, size) = (param("X-Plex-Container-Start").unwrap_or(0), param("X-Plex-Container-Size").unwrap_or(items.len()));
-                        let metadata: Vec<_> = items.iter().skip(start).take(size).map(|(key, viewed)| serde_json::json!({
-                            "ratingKey": key, "type": "movie", "title": "Movie", "thumb": "/poster", "lastViewedAt": viewed})).collect();
-                        let body = serde_json::json!({"MediaContainer": {"offset": start, "size": metadata.len(),
-                            "totalSize": items.len(), "Metadata": metadata}}).to_string();
-                        format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
-                    } else {
-                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned()
+                    let movies = |keys: &[(String, i64)], start: usize, size: usize| -> Vec<serde_json::Value> {
+                        keys.iter().skip(start).take(size).map(|(key, viewed)| serde_json::json!({
+                            "ratingKey": key, "type": "movie", "title": "Movie", "thumb": "/poster", "lastViewedAt": viewed})).collect()
+                    };
+                    let recent: Vec<(String, i64)> = (0..3).map(|i| (format!("new-{i}"), 0)).collect();
+                    let (start, size) = (param("X-Plex-Container-Start").unwrap_or(0), param("X-Plex-Container-Size").unwrap_or(usize::MAX));
+                    let body = match path {
+                        "/hubs/continueWatching/items" => {
+                            served.fetch_add(1, Ordering::AcqRel);
+                            let metadata = movies(&items, start, size);
+                            Some(serde_json::json!({"offset": start, "size": metadata.len(), "totalSize": items.len(), "Metadata": metadata}))
+                        }
+                        "/hubs/continueWatching" => Some(serde_json::json!({"Hub": [{"hubIdentifier": "continueWatching",
+                            "more": items.len() > 12, "totalSize": items.len(), "Metadata": movies(&items, 0, 12)}]})),
+                        "/hubs" => Some(serde_json::json!({"offset": 0, "size": 1, "totalSize": 1, "Hub": [{
+                            "hubIdentifier": "home.movies.recent", "type": "movie", "key": "/hubs/home/recentlyAdded?type=1",
+                            "title": "Recently Added Movies", "more": false, "Metadata": movies(&recent, 0, 3)}]})),
+                        "/hubs/home/recentlyAdded" => {
+                            row_reads.fetch_add(1, Ordering::AcqRel);
+                            let metadata = movies(&recent, start, size);
+                            Some(serde_json::json!({"offset": start, "size": metadata.len(), "totalSize": recent.len(), "Metadata": metadata}))
+                        }
+                        _ => None,
+                    };
+                    let reply = match body {
+                        Some(body) => {
+                            let body = serde_json::json!({"MediaContainer": body}).to_string();
+                            format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+                        }
+                        None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
                     };
                     let _ = stream.write_all(reply.as_bytes());
                 });
             }
         });
-        Some(Loopback { port, hits, stop, thread: Some(thread) })
+        Some(Loopback { port, hits, rows, stop, thread: Some(thread) })
     }
 }
 
@@ -327,6 +352,46 @@ fn move_deck_over_the_wire(owner: &mut Owner, before: bool) {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     for landing in landings { let _ = super::land(&mut owner.state, &adapter, &landing); }
+}
+
+/// Waits for every worker and lands what it left, round after round, while landings start new
+/// reads. Bounded, so a store that reads forever still returns.
+fn settle_over_the_wire(owner: &mut Owner) {
+    let adapter = Arc::clone(&owner.adapter);
+    let started = std::time::Instant::now();
+    for _ in 0..8 {
+        let mut landings = Vec::new();
+        while owed_count_for_test(&adapter) > 0 {
+            assert!(started.elapsed() < std::time::Duration::from_secs(20), "a worker never answered");
+            landings.extend(take_landings(&adapter));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        landings.extend(take_landings(&adapter));
+        if landings.is_empty() { return; }
+        for landing in landings { let _ = super::land(&mut owner.state, &adapter, &landing); }
+    }
+}
+
+/// Home publishes Continue Watching only, so the store keeps no other row: one it kept would sit
+/// outside the band Home holds, and the ring would give it up and read it again on every landing.
+#[test]
+fn a_refresh_keeps_no_row_but_continue_watching_and_reads_no_other_row() {
+    use crate::stores::hubs::HubsCmd;
+    let _guard = plx_base::testlock::serial();
+    if !plx_net::net::global_init() { return; }
+    let listing = Listing::new(0, (0..5).map(|i| 9000 - i * 20));
+    let Some(server) = Loopback::serve(&listing) else { return };
+    let mut owner = deck_owner_at(&[&listing], &[server.port]);
+    let _ = run(&mut owner.state, &owner.adapter, HubsCmd::RefetchHubs);
+    settle_over_the_wire(&mut owner);
+    assert_eq!(owner.state.srcs[0].state, HubState::Ready, "the refresh landed");
+    let _ = run(&mut owner.state, &owner.adapter, HubsCmd::Hold { lo: 0, hi: 0 });
+    settle_over_the_wire(&mut owner);
+    assert!(owner.state.srcs[0].last.as_ref().is_some_and(|build| build.shelves.is_empty()),
+        "the store keeps a row Home does not show");
+    assert_eq!(server.rows.load(std::sync::atomic::Ordering::Acquire), 0, "the Recently Added row was read");
+    assert_eq!(owed_count_for_test(&owner.adapter), 0, "a read is still out");
+    plx_plex::plex::reset_servers_for_test();
 }
 
 #[test]
