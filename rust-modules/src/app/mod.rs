@@ -581,6 +581,11 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
     Ok(app)
 }
 
+/// The Fire TV entry's work for each frame, run before SDL's queue is polled; it pushes the
+/// remote's presses, which Java consumes before SDL can see them.
+#[cfg(target_os = "android")]
+pub(crate) static ANDROID_FRAME: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
 /// The ten-line public skeleton: preflight/construction, then the ordinary loop and teardown.
 pub(crate) fn run_application(pms_host: *const c_char, pms_port: c_int) -> c_int {
     let mut app = match enter_application(pms_host,pms_port) { Ok(app) => app, Err(code) => return code };

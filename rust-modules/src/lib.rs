@@ -77,8 +77,32 @@ pub use app::synthetic_home_initial;
 
 /// The Fire TV entry, which installs its own port first. The PMS address is the C shim's
 /// placeholder: the boot reads it unconditionally, and only a dev-token boot uses it.
+/// `frame` runs on the SDL thread at the start of every frame's input.
 #[cfg(target_os = "android")]
-pub fn run_android() -> std::os::raw::c_int {
+pub fn run_android(frame: fn()) -> std::os::raw::c_int {
+    let _ = app::ANDROID_FRAME.set(frame);
     app::run_application(c"YOUR_PMS_HOST".as_ptr(), 32400)
+}
+
+#[cfg(target_os = "android")]
+pub enum KeyEdge {
+    Down,
+    Repeat,
+    Up,
+}
+
+/// Pushes one edge of the remote key `token` names in the remote-token vocabulary (`up`, `ok`,
+/// `chup`, ...) onto SDL's queue; false for a token it does not know.
+#[cfg(target_os = "android")]
+pub fn push_remote_key(token: &str, edge: KeyEdge) -> bool {
+    let Some((sym, wcode)) = app::events::remote_token_key(token) else {
+        return false;
+    };
+    match edge {
+        KeyEdge::Down => app::events::remote_synth_key_edge(sym, wcode, true),
+        KeyEdge::Repeat => app::events::remote_synth_key_repeat(sym, wcode),
+        KeyEdge::Up => app::events::remote_synth_key_edge(sym, wcode, false),
+    }
+    true
 }
 

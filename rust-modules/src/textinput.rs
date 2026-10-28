@@ -135,7 +135,8 @@ const TEXT_CAP: usize = 32;
 ///
 /// `cfg!` and not `#[cfg]`, matching `app::decode_key`: both arms stay compiled on both platforms,
 /// so the one nobody is building cannot rot into a compile error nobody sees for a month.
-const TEXT_OFF: usize = if cfg!(feature = "hostsim") { 12 } else { 16 };
+/// Android's SDL is stock too.
+const TEXT_OFF: usize = if cfg!(feature = "hostsim") || cfg!(target_os = "android") { 12 } else { 16 };
 
 /// How many un-drained commits to hold before dropping the oldest.
 ///
@@ -283,6 +284,21 @@ pub(crate) fn stop() {
         // is not it. With both transitions logged, one log answers which of the two you have.
         log("keyboard: stop");
         SDL_StopTextInput();
+    }
+}
+
+/// True once when SDL has turned text input off under a keyboard we started, and forgets that we
+/// started it. On Android, BACK hides the system keyboard through SDL's `onNativeKeyboardFocusLost`,
+/// and that BACK never reaches the app. webOS does not call this.
+#[cfg(target_os = "android")]
+pub(crate) fn take_sdl_dismissal() -> bool {
+    unsafe {
+        if !*addr_of!(STARTED) || crate::app::SDL_IsTextInputActive() != 0 {
+            return false;
+        }
+        *addr_of_mut!(STARTED) = false;
+        log("keyboard: dismissed by the system (SDL stopped text input)");
+        true
     }
 }
 

@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use crate::clip;
 use crate::harness::{self, Harness};
 use crate::jni;
+use crate::keys::{self, Edge};
 use crate::netcheck;
+use plxnative_modules::KeyEdge;
 use crate::secure;
 
 #[allow(dead_code)] // read by SDL only
@@ -137,13 +139,27 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         if plx_platform::tv::install(&crate::port::PORT).is_err() {
             log(LOG_ERROR, "a port was already installed");
         }
-        return plxnative_modules::run_android();
+        return plxnative_modules::run_android(push_presses);
     }
     match run(clip, lines) {
         Ok(()) => 0,
         Err(message) => {
             log(LOG_ERROR, &message);
             1
+        }
+    }
+}
+
+fn push_presses() {
+    jni::tick();
+    for press in jni::take_presses() {
+        let edge = match press.edge {
+            Edge::Down => KeyEdge::Down,
+            Edge::Repeat => KeyEdge::Repeat,
+            Edge::Up => KeyEdge::Up,
+        };
+        if !plxnative_modules::push_remote_key(keys::token(press.key), edge) {
+            log(LOG_ERROR, &format!("no app key for {:?}", press.key));
         }
     }
 }
