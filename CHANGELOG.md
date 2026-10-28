@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.13] - 2026-10-27
+
+### Added
+- The Fire TV app now starts the real PlxNative app when it's opened from the Fire TV home screen, or with `am start` and no extras. The test runs (`clip`, `secure`, `net`) still start from their extras. The remote doesn't reach the app yet, so you can't get past the screen after sign-in, and saved sign-ins aren't sealed by the Keystore yet. Not yet tried on any stick.
+- On Fire TV the app keeps its sign-in and settings in a `state` folder inside its own storage, and ships all four of the LG app's fonts (Inter regular and bold, Noto Sans CJK, Noto Emoji), copied into storage after each install or update.
+- The Fire TV app shows up on plex.tv and on your server as `PlxNative (Fire TV)` (`PlxNative debug (Fire TV)` for the debug build), on platform Android with the stick's Android version and device `Amazon Fire TV`. The LG app's name and details are unchanged.
+- The Fire TV licence notice now covers the three extra fonts, nanosvg and the Rust libraries the app brings in.
+
 ## [0.2.12] - 2026-10-27
 
 ### Added
