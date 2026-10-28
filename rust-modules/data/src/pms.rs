@@ -1695,6 +1695,11 @@ fn fetch_source(c: &plx_plex::plex::Client, sid: ServerId, held: &[(String, Stri
         Some(req) => c.home_hubs_page(HUB_FETCH_COUNT, req),
         None => c.home_hubs(HUB_FETCH_COUNT),
     })?;
+    // Home publishes Continue Watching only, so no other row is kept: a kept row sits outside the
+    // band Home holds and the ring would give it up and read it again on every landing.
+    // ponytail: `/hubs` is still read only to be dropped; skipping the read orphans the hub-list
+    // projection and its paging, which go together.
+    build.shelves.clear();
     // The Continue Watching shelf comes from the DEDICATED hub (see `project`). Its failure fails
     // THIS SOURCE (`?`) — nothing of it commits and it retries on its own backoff. Losing the most
     // important shelf to a transient error would be worse than briefly showing the previous one.
