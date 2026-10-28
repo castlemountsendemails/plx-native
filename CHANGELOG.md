@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.15] - 2026-10-28
+
+### Added
+- On Fire TV the saved sign-in is now sealed by the Keystore: the account token, server, profiles and their tokens are encrypted, and the language, settings, Home pins, recent searches and client id are kept as plain JSON beside them. A sign-in saved by an earlier Fire TV build is sealed the first time the app starts. Not yet tried on any stick.
+- If the Keystore can't open the sealed part (its key is gone, or it fails for the moment), the Fire TV app starts signed out, with no error, and keeps the language and screen resolution, as the LG app does. Signing in again replaces the sealed part. Anything else saved meanwhile leaves the sealed part untouched, so a Keystore failure that passes doesn't cost the sign-in.
+- The Fire TV `--es secure remove` test run now deletes the session's Keystore key even when no earlier `--es secure test` blob exists.
+
+### Changed
+- Shared code, for the LG check: on Fire TV only, the session file is read and written through the sealed record, and a failed session write is not followed by the fallback `auth.json` copy. The LG app reads and writes its session as before.
+
 ## [0.2.14] - 2026-10-28
 
 ### Added
