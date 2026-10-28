@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.16] - 2026-10-28
+
+### Fixed
+- Home no longer asks your server for a row it doesn't show, several times a second, for as long as the app is open. The loop slowed the app and loaded the server on both the LG (about 3 requests a second) and Fire TV (about 9). Home still shows only Continue Watching.
+
+### Changed
+- Shared code, for the LG check: Home's refresh now keeps only the Continue Watching row and drops the server's other Home rows as soon as they arrive. The LG app gets this change too.
+
 ## [0.2.15] - 2026-10-28
 
 ### Added
