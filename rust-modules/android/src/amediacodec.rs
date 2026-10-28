@@ -18,7 +18,7 @@ use plx_platform::tv::sink::{UnloadTicket, VideoSink, VP_EXPORTED};
 
 use crate::audiotrack;
 use crate::jni::{Codec, Input, Output};
-use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
+use crate::entry::{log, LOG_ERROR, LOG_INFO};
 use crate::video::{self, Action, Au, Clock, Inputs};
 
 pub(crate) const FEED_OK: c_char = b'O' as c_char;

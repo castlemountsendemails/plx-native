@@ -109,7 +109,9 @@ public class PlxActivity extends SDLActivity {
     // The native side reads these from the files folder (paths::app_dir), not the APK. They are copied
     // again whenever the package's lastUpdateTime differs from the marker's, which every install and
     // update changes; a failed copy writes no marker, so the next start tries again.
-    private static final String[] FILES_FROM_ASSETS = {"cacert.pem", "le-roots.pem"};
+    private static final String[] FILES_FROM_ASSETS = {
+        "cacert.pem", "le-roots.pem", "appfont.ttf", "appfont-bold.ttf", "appfont-emoji.ttf", "appfont-cjk.ttf",
+    };
     private static final String ASSETS_MARKER = "assets.installed";
 
     private void copyAssetsToFiles() {

@@ -5,7 +5,7 @@
 
 use plx_net::net::{self, RequestFailure};
 
-use crate::skeleton::{log, LOG_INFO};
+use crate::entry::{log, LOG_INFO};
 
 const PLEX_TV: &str = "https://plex.tv/api/v2/ping";
 const BAD_CERT: &str = "https://expired.badssl.com/";

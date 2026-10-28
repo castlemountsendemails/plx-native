@@ -13,7 +13,7 @@ use crate::audiotrack;
 use crate::clip::Clip;
 use crate::jni;
 use crate::keys::{Edge, Key, Press};
-use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
+use crate::entry::{log, LOG_ERROR, LOG_INFO};
 
 pub struct Harness {
     clip: Clip,
@@ -66,8 +66,6 @@ pub(crate) static DRAW: Span = Span::new();
 impl Harness {
     /// Once per process, on the SDL thread: it mints the engine's main-thread token there.
     pub fn start(clip: Clip) -> Self {
-        // The engine's socket sends without MSG_NOSIGNAL; a reset peer must not kill the process.
-        unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
         jni::audio_report();
         log(
             LOG_INFO,

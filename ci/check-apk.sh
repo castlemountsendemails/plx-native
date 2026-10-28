@@ -38,8 +38,8 @@ for lib in avutil avcodec avformat; do
   check "armeabi-v7a lib$lib-plx.so" has "$files" "^lib/armeabi-v7a/lib$lib-plx\\.so\$"
 done
 check "armeabi-v7a libcurl-plx.so" has "$files" '^lib/armeabi-v7a/libcurl-plx\.so$'
-# The CA files PlxActivity copies to the files folder, where `net` reads them.
-for asset in cacert.pem le-roots.pem; do
+# What PlxActivity copies to the files folder, where `net` reads the CA files and `text` the fonts.
+for asset in cacert.pem le-roots.pem appfont.ttf appfont-bold.ttf appfont-emoji.ttf appfont-cjk.ttf; do
   check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
 done
 # The notice and the licence texts it names, which the CI step copies into the assets.

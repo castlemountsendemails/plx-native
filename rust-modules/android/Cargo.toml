@@ -18,6 +18,7 @@ crate-type = ["cdylib"]
 mount = "android"
 
 [target.'cfg(target_os = "android")'.dependencies]
+plxnative-modules = { path = ".." }
 plx_base = { path = "../base" }
 plx_platform = { path = "../platform" }
 plx_data = { path = "../data" }

@@ -83,7 +83,10 @@ pub fn version() -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 pub const PLATFORM: &str = "webOS";
+#[cfg(target_os = "android")]
+pub const PLATFORM: &str = "Android";
 
 /// The OS version — the REAL one, read off the set at boot ([`plx_platform::tv::device`]), because the
 /// app runs on webOS 4 through 11 now and a literal is wrong on every set but one. This was
@@ -95,6 +98,7 @@ pub const PLATFORM: &str = "webOS";
 /// this replaces — the exact claim every release so far has made — rather than inventing an
 /// empty-string case no server has ever been shown. Safe by boot order: `tv::probe_device()` runs
 /// before any PMS request, so none can precede the read.
+#[cfg(not(target_os = "android"))]
 pub fn platform_version() -> &'static str {
     let r = &plx_platform::tv::device::info().release;
     if r.is_empty() {
@@ -104,6 +108,20 @@ pub fn platform_version() -> &'static str {
     }
 }
 
+/// The Android release (`ro.build.version.release`, e.g. `7.1.2`). Never the webOS fallback: an
+/// unreadable property leaves the buffer empty, which is the honest answer on a Fire TV.
+#[cfg(target_os = "android")]
+pub fn platform_version() -> &'static str {
+    static RELEASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    RELEASE.get_or_init(|| {
+        let mut value = [0 as std::os::raw::c_char; 92]; // PROP_VALUE_MAX
+        unsafe {
+            libc::__system_property_get(c"ro.build.version.release".as_ptr(), value.as_mut_ptr());
+            std::ffi::CStr::from_ptr(value.as_ptr()).to_string_lossy().into_owned()
+        }
+    })
+}
+
 /// The resolved UI language for this launch, also requested from Plex metadata endpoints.
 pub fn language() -> Option<&'static str> {
     Some(plx_platform::i18n::current().language().tag())
@@ -111,8 +129,15 @@ pub fn language() -> Option<&'static str> {
 
 /// Device CLASS — what kind of thing this is. Generic on purpose: this app runs on any rooted
 /// webOS 4.x panel, not on the model it was developed against.
+#[cfg(not(target_os = "android"))]
 pub const DEVICE: &str = "LG webOS TV";
+#[cfg(not(target_os = "android"))]
 pub const MODEL: &str = "LG webOS TV";
+/// Generic for the same reason: any Fire TV, not the stick it was developed against.
+#[cfg(target_os = "android")]
+pub const DEVICE: &str = "Amazon Fire TV";
+#[cfg(target_os = "android")]
+pub const MODEL: &str = "Amazon Fire TV";
 
 /// Who MADE the hardware. The one field in this file that is a fact about the panel rather than a
 /// claim about this app, and it is safe to state because it is not a choice: the binary is
@@ -122,7 +147,10 @@ pub const MODEL: &str = "LG webOS TV";
 /// where a user picks their television out of a column of them and revokes it — the place the
 /// vendor is worth reading. PMS is told what it acts on instead (`Client::playback_identity`), and
 /// it acts on the codec profile, not on who built the set. See that method's doc for the split.
+#[cfg(not(target_os = "android"))]
 pub const VENDOR: &str = "LG";
+#[cfg(target_os = "android")]
+pub const VENDOR: &str = "Amazon";
 
 /// The FRIENDLY name, which is what a user actually reads in plex.tv's device list and in the
 /// server's Now Playing. Names the app rather than a room, so it is true on every install and
@@ -136,9 +164,10 @@ pub const VENDOR: &str = "LG";
 /// existing user's device list — a rename there would read as a new, unknown device.
 pub fn device_name() -> &'static str {
     static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    const TV: &str = if cfg!(target_os = "android") { "Fire TV" } else { "LG TV" };
     NAME.get_or_init(|| match plx_base::paths::flavour() {
-        None => "PlxNative (LG TV)".to_string(),
-        Some(f) => format!("PlxNative {f} (LG TV)"),
+        None => format!("PlxNative ({TV})"),
+        Some(f) => format!("PlxNative {f} ({TV})"),
     })
 }
 

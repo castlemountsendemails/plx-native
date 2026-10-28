@@ -17,8 +17,10 @@ are in `assets/licenses/`. The APK contains exactly these third-party components
 | `lib/armeabi-v7a/libcurl-plx.so` | libcurl 8.23.0 with OpenSSL 3.5.9 | 4 |
 | `assets/cacert.pem` | The Mozilla CA certificate store | 5 |
 | `assets/le-roots.pem` | Four Let's Encrypt root certificates | 5 |
-| `lib/armeabi-v7a/libmain.so` | PlxNative, the Rust crates of section 7, the Rust standard library | 7 |
-| `assets/appfont.ttf` | Inter | 6 |
+| `lib/armeabi-v7a/libmain.so` | PlxNative, the Rust crates of section 7, the Rust standard library, nanosvg | 7 |
+| `assets/appfont.ttf`, `assets/appfont-bold.ttf` | Inter | 6 |
+| `assets/appfont-cjk.ttf` | Noto Sans CJK KR | 6 |
+| `assets/appfont-emoji.ttf` | Noto Emoji | 6 |
 
 Full licence texts are in `assets/licenses/` and are not repeated inline, except where a licence has
 no file there (sections 2, 4 and 6).
@@ -188,17 +190,32 @@ Let's Encrypt, copied unmodified from <https://letsencrypt.org/certificates/>, w
 licence of their own. A `*.plex.direct` certificate the Mozilla store cannot verify is retried once
 against them, with the chain, its dates and the host name all still checked.
 
-## 6. Font
+## 6. Fonts
 
-**Inter** — `assets/appfont.ttf`. Copyright 2016 The Inter Project Authors
-(https://github.com/rsms/inter). Licence: **SIL Open Font License 1.1**, shipped as
-`licenses/OFL.txt` in the APK assets. This is the same static Regular instance the webOS package
-ships (see `THIRD-PARTY-NOTICES.md` §2.3 for how it was cut). Inter's copyright statement declares
-no Reserved Font Name.
+All four are the same files the webOS package ships, and `THIRD-PARTY-NOTICES.md` §2.3 says how
+each was cut from its upstream. Licence: **SIL Open Font License 1.1**, shipped as
+`licenses/OFL.txt` in the APK assets; each font's copyright statement is also in its own name table.
 
-## 7. Rust code statically linked into `libmain.so`
+**Inter** — `assets/appfont.ttf` and `assets/appfont-bold.ttf`, static Regular and Bold
+instances. Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter). No Reserved
+Font Name is declared.
 
-`libmain.so` is Rust: the crates below and the Rust standard library (the pinned stable
+**Noto Sans CJK KR** — `assets/appfont-cjk.ttf`, a static weight-400 instance with its layout
+tables removed. Copyright © 2014-2021 Adobe (https://www.adobe.com/). The Reserved Font Name is
+"Source", which this package does not use. "Source is a trademark of Adobe in the United States
+and/or other countries."
+
+**Noto Emoji** — `assets/appfont-emoji.ttf`, the monochrome Noto Emoji converted to TrueType.
+Copyright 2013-2026 Google LLC. No Reserved Font Name is declared.
+
+## 7. Code statically linked into `libmain.so`
+
+**nanosvg** and **nanosvgrast**, compiled from `src/svg.c` — Copyright (c) 2013-14 Mikko Mononen
+<memon@inside.org>. Licence: **Zlib** (`licenses/Zlib.txt`). The same pinned, unaltered headers as
+the webOS package, with the same credited derivations (`THIRD-PARTY-NOTICES.md` §2.1).
+
+
+The rest of `libmain.so` is Rust: the crates below and the Rust standard library (the pinned stable
 toolchain's prebuilt `std` for the target, the same release as the webOS package's) are linked in
 and redistributed in the file. Where a package offers a choice of licences, our election is stated;
 election does not alter your rights under the other arms. Most crates are the ones the webOS
@@ -218,7 +235,10 @@ to the Java video decoder and what it pulls in).
 | addr2line | 0.27.1 | Apache-2.0 OR MIT | The `addr2line` authors |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | Jonas Schievink, oyvindln |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 | David Tolnay |
+| bitflags | 2.13.0 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
 | bitstream-io | 4.10.0 | MIT/Apache-2.0 | 2017 Brian Langenberger |
+| bytemuck | 1.25.0 | Zlib OR Apache-2.0 OR MIT | 2019 Daniel "Lokathor" Gee |
+| byteorder-lite | 0.1.0 | Unlicense OR MIT | 2015 Andrew Gallant |
 | bytes | 1.12.1 | MIT | 2018 Carl Lerche |
 | cesu8 | 1.1.0 | Apache-2.0/MIT | Eric Kidd (the published crate carries no licence file) |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | 2014 Alex Crichton |
@@ -226,19 +246,25 @@ to the Java video decoder and what it pulls in).
 | combine | 4.6.9 | MIT | 2015 Markus Westerlind |
 | crc | 3.4.0 | MIT OR Apache-2.0 | 2017 crc-rs Developers |
 | crc-catalog | 2.5.0 | MIT OR Apache-2.0 | Akhil Velagapudi |
+| crc32fast | 1.5.0 | MIT OR Apache-2.0 | 2018 Sam Rijs, Alex Crichton and contributors |
 | either | 1.18.0 | MIT OR Apache-2.0 | Copyright (c) 2015 (the upstream notice names no holder) |
 | encoding_rs | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause | Mozilla Foundation. Its encoding tables derive from the WHATWG Encoding Standard, whose data files are BSD-3-Clause (`licenses/WHATWG-BSD-3-Clause.txt`) |
+| fdeflate | 0.3.7 | MIT OR Apache-2.0 | The image-rs Developers |
+| flate2 | 1.1.9 | MIT OR Apache-2.0 | 2014-2026 Alex Crichton |
 | gimli | 0.34.0 | MIT OR Apache-2.0 | The `gimli` authors |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | Amanieu d'Antras |
+| image | 0.25.10 | MIT OR Apache-2.0 | The image-rs Developers |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | David Tolnay |
 | jni | 0.21.1 | MIT/Apache-2.0 | 2016 Prevoty, Inc. and jni-rs contributors |
 | jni-sys | 0.4.1 and 0.3.1 | MIT OR Apache-2.0 | 2015 The rust-jni-sys Developers |
 | libc | 0.2.190 and 0.2.189 | MIT OR Apache-2.0 | The Rust Project Developers |
 | log | 0.4.34 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
 | memchr | 2.8.3 and 2.8.2 | Unlicense OR MIT | 2015 Andrew Gallant |
-| miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | 2013-2014 RAD Game Tools and Valve Software; 2010-2014 Rich Geldreich and Tenacious Software LLC; (c) 2017 Frommi; (c) 2017-2024 oyvindln |
+| miniz_oxide | 0.9.1 and 0.8.9 | MIT OR Zlib OR Apache-2.0 | 2013-2014 RAD Game Tools and Valve Software; 2010-2014 Rich Geldreich and Tenacious Software LLC; (c) 2017 Frommi; (c) 2017-2024 oyvindln |
 | no_std_io2 | 0.9.4 | Apache-2.0 OR MIT | 2020-2021 Brendan Molloy |
+| num-traits | 0.2.19 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
 | object | 0.39.1 | Apache-2.0 OR MIT | The `object` authors |
+| png | 0.18.1 | MIT OR Apache-2.0 | 2015 nwin |
 | rustc-demangle | 0.1.28 | MIT/Apache-2.0 | Alex Crichton |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | 2016-2019 Ulrik Sverdrup "bluss" and scopeguard developers |
 | serde | 1.0.229 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
@@ -248,6 +274,8 @@ to the Java video decoder and what it pulls in).
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | Copyright (c) 2017 Robert Grosse |
 | thiserror | 1.0.69 | MIT OR Apache-2.0 | David Tolnay (the licence file names no holder) |
 | tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT | 2019 Daniel "Lokathor" Gee |
+| zune-core | 0.5.1 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
+| zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
 
 <!-- END GENERATED firetv:elected-mit -->
 
@@ -263,7 +291,9 @@ to the Java video decoder and what it pulls in).
 | dolby_vision | 3.4.0 | Copyright (c) 2026 quietvoid. Parses and rewrites Dolby Vision RPUs for the Profile 7 to 8.1 conversion (`plx_media`'s `ff.rs`); used unmodified, with no optional features |
 | funty | 2.0.0 | Copyright (c) 2020 myrrlyn (Alexander Payne) |
 | libm | 0.2.16 | Copyright (c) 2018 Jorge Aparicio and the third-party copyright notices preserved verbatim in `licenses/libm.txt` |
+| qrcodegen | 1.8.0 | Copyright (c) Project Nayuki. The complete upstream MIT notice is preserved in `licenses/qrcodegen.txt` |
 | radium | 0.7.0 | Copyright (c) 2019 kneecaw (Nika Layzell) |
+| simd-adler32 | 0.3.9 | (c) 2021 Marvin Countryman |
 | tap | 1.0.1 | Copyright (c) 2017 Elliot Linder |
 | wyz | 0.5.1 | Copyright (c) 2018 myrrlyn (Alexander Payne) |
 | zmij | 1.0.21 | David Tolnay (a Rust port of Victor Zverovich's C++ `zmij`) |
@@ -278,6 +308,8 @@ to the Java video decoder and what it pulls in).
 | Package | Version | Declared licence | Copyright |
 |---|---|---|---|
 | calendrical_calculations | 0.2.4 | Apache-2.0 | Copyright 2023 The Unicode Consortium |
+| moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
+| pxfm | 0.1.29 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
 
 <!-- END GENERATED firetv:apache -->
 
@@ -347,6 +379,6 @@ dependencies) is not linked and has no row.
 ## 8. Not in the APK
 
 The APK carries no AndroidX or Android Support libraries, no Sentry or other crash-reporting
-code, no libass, and none of the webOS package's other fonts. The Android system libraries it
+code, no libass, and none of the webOS package's subtitle fonts (`fonts/subs/`). The Android system libraries it
 loads at run time (`libc`, `libm`, `libdl`, `libz`, `liblog`, OpenGL ES, OpenSL ES, AAudio) belong to the
 device and are not redistributed here.

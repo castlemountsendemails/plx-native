@@ -764,6 +764,7 @@ dependencies = [
  "plx_media",
  "plx_net",
  "plx_platform",
+ "plxnative-modules",
 ]
 
 [[package]]

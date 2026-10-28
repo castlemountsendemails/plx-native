@@ -9,7 +9,7 @@ use plx_base::b64;
 use plx_platform::tv::secure::{Backend, Sealed};
 
 use crate::jni;
-use crate::skeleton::{log, LOG_INFO};
+use crate::entry::{log, LOG_INFO};
 
 const KEY: &str = "plxnative.session.v1";
 const IV_LEN: usize = 12;

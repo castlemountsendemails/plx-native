@@ -14,7 +14,7 @@ use crate::amediacodec::{now_ns, FEED_FULL, FEED_OK};
 use crate::audio::{self, Plan, Position, Source, Timeline, AC3_FRAMES, ENCODING_AC3, ENCODING_DTS, ENCODING_E_AC3, ENCODING_PCM_FLOAT};
 use crate::harness::Span;
 use crate::jni::{self, Codec, Input, Output, Track};
-use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
+use crate::entry::{log, LOG_ERROR, LOG_INFO};
 use crate::video::Audio;
 
 /// AUs queued ahead of the track: over a second of AC-3 or AAC, on top of the track's own buffer.

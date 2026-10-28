@@ -26,6 +26,7 @@ mod release_line;
 mod remote; // dev/testing remote-control channel: a FIFO the loop drains into synthetic SDL keys
 #[cfg(feature = "hostsim")]
 mod shot; // simulator screenshots: read the frame back and write a PNG (see the module doc)
+#[cfg(not(target_os = "android"))]
 mod system;
 
 mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput (see the module doc)
@@ -69,8 +70,15 @@ pub fn sim_events_log() -> std::path::PathBuf {
 /// the crate root into the port.
 #[cfg(feature = "hostsim")]
 pub mod port;
-#[cfg(not(feature = "hostsim"))]
+#[cfg(all(not(feature = "hostsim"), not(target_os = "android")))]
 mod port;
 #[cfg(feature = "hostsim")]
 pub use app::synthetic_home_initial;
+
+/// The Fire TV entry, which installs its own port first. The PMS address is the C shim's
+/// placeholder: the boot reads it unconditionally, and only a dev-token boot uses it.
+#[cfg(target_os = "android")]
+pub fn run_android() -> std::os::raw::c_int {
+    app::run_application(c"YOUR_PMS_HOST".as_ptr(), 32400)
+}
 

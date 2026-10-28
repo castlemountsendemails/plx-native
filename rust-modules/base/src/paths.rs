@@ -1292,11 +1292,12 @@ pub fn redirect_persistent_state_root_for_test(root: Option<PathBuf>) {
         .unwrap_or_else(|e| e.into_inner()) = root;
 }
 
-/// Prepare the hostsim-only state root without following a pre-existing symlink. Television code
-/// may inspect an existing directory as a migration source but never creates it as an authority.
+/// Prepare the state root without following a pre-existing symlink, on hostsim and on Android,
+/// where it is the canonical store in the files folder. webOS code may inspect an existing
+/// directory as a migration source but never creates it as an authority.
 #[allow(dead_code)] // Stage A storage root; connected by Session/Consent integration.
 pub fn ensure_persistent_state_root() -> std::io::Result<()> {
-    if !ENV_STEERABLE {
+    if !ENV_STEERABLE && !cfg!(target_os = "android") {
         return Ok(());
     }
     let root = persistent_state_root();
