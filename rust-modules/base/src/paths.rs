@@ -136,7 +136,7 @@ fn android_app_id(files: &Path) -> Option<String> {
 /// The runtime root of an APK: a folder in its own files folder, since an app cannot create `/tmp`.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 fn android_runtime_dir(files: &Path) -> PathBuf {
-    files.to_path_buf()
+    files.join("run")
 }
 
 /// The webOS app id implied by an executable path, or `None` when that path is not a webOS install.
@@ -332,6 +332,8 @@ fn macos_app_support() -> Option<PathBuf> {
 /// system `/tmp`, and every tool, skill and harness recipe addresses those files by absolute path
 /// — which is why `make -s print-rundir` exists rather than a second copy of the rule.
 ///
+/// On Android it is `run` inside the files folder ([`android_runtime_dir`]), the only place an app can write.
+///
 /// `PLXNATIVE_RUNTIME_DIR` overrides it for exactly one reason: the television serializes the whole
 /// dev loop. There is one set, one app instance, and `tests/run.py` jobs kill each other's app if
 /// two run at once — so the single global `/tmp/plxnative-*` namespace has never cost anything. A
@@ -355,6 +357,12 @@ fn macos_app_support() -> Option<PathBuf> {
 pub fn runtime_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
+        #[cfg(target_os = "android")]
+        if let Some(files) = ANDROID_FILES_DIR.get() {
+            let d = android_runtime_dir(files);
+            let _ = std::fs::create_dir_all(&d);
+            return d;
+        }
         let d = resolve_runtime_dir(
             std::env::var_os("PLXNATIVE_RUNTIME_DIR"),
             macos_app_support(),

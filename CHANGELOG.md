@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.19] - 2026-10-29
+
+### Changed
+- Fire TV: the app's runtime folder is now `run` inside its files folder, because a stick has no `/tmp`. Dev switches such as the Watchlist live switch can now be set on a stick, so the debug build's Watchlist add and remove can be tested there. The LG app is unchanged.
+
 ## [0.2.18] - 2026-10-29
 
 ### Fixed
