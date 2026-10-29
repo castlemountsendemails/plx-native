@@ -767,6 +767,11 @@ jobs:
           cp vendor/ffmpeg-prefix-android/lib/lib*-plx.so "$libs/armeabi-v7a/"
           cp vendor/curl-prefix-android/lib/libcurl-plx.so "$libs/armeabi-v7a/"
           ls -l "$libs/armeabi-v7a"
+          # Gradle strips the libraries it packs; these copies keep the symbol table that names a tombstone's frames.
+          mkdir -p "$RUNNER_TEMP/apk/symbols"
+          cp "$libs/armeabi-v7a/libmain.so" "$libs/armeabi-v7a/libcurl-plx.so" "$RUNNER_TEMP/apk/symbols/"
+          readelf -S "$RUNNER_TEMP/apk/symbols/libmain.so" | grep -q '\.symtab' \
+            || { echo "::error::libmain.so has no symbol table to keep"; exit 1; }
           readelf -d "$libs/armeabi-v7a/libmain.so" | grep -E 'NEEDED|SONAME'
           # Android loads libraries RTLD_NOW, so a webOS-only symbol left undefined fails the app at start.
           # GL calls resolve from libGLESv2, which libmain.so must then need; svg_* must be linked in.
@@ -853,6 +858,7 @@ jobs:
           path: |
             ${{ runner.temp }}/apk/*.apk
             ${{ runner.temp }}/apk/lgpl-source/
+            ${{ runner.temp }}/apk/symbols/
           if-no-files-found: error
 
   # The production webOS package (`com.beb.plxnative`): stable flavour, production telemetry
