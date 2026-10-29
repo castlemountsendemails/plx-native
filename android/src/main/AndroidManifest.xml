@@ -10,12 +10,15 @@
 
     <application
         android:label="PlxNative"
+        android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/banner"
         android:allowBackup="false">
 
         <!-- LAUNCHER as well as LEANBACK_LAUNCHER: without it Fire OS can leave the app out of Manage Applications. -->
         <activity
             android:name=".PlxActivity"
             android:exported="true"
+            android:banner="@drawable/banner"
             android:launchMode="singleInstance"
             android:screenOrientation="landscape"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
