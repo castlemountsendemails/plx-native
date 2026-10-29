@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.17] - 2026-10-29
+
+### Added
+- The Fire TV CI artifact now carries the unstripped `libmain.so` and `libcurl-plx.so` under `symbols/`, so the frames in a crash dump from a stick can be named. The build fails if `libmain.so` has no symbol table.
+
 ## [0.2.16] - 2026-10-28
 
 ### Fixed
