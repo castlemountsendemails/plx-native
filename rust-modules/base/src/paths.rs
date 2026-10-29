@@ -133,6 +133,12 @@ fn android_app_id(files: &Path) -> Option<String> {
     Some(files.parent()?.file_name()?.to_str()?.to_owned())
 }
 
+/// The runtime root of an APK: a folder in its own files folder, since an app cannot create `/tmp`.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn android_runtime_dir(files: &Path) -> PathBuf {
+    files.to_path_buf()
+}
+
 /// The webOS app id implied by an executable path, or `None` when that path is not a webOS install.
 ///
 /// Split out from [`app_id`] purely so it is testable — `app_id` memoises into a process-wide
@@ -1076,6 +1082,17 @@ mod tests {
             ),
             std::path::Path::new("/tmp")
         );
+    }
+
+    /// An Android app cannot create `/tmp`, so no trigger (the Watchlist live switch among them)
+    /// could ever be armed there: the runtime root of an APK is a folder inside its own files folder.
+    /// Named `run`, never `plxnative-…`, for the reason the flavoured root above gives.
+    #[test]
+    fn an_android_runtime_root_is_inside_the_files_folder() {
+        let files = std::path::Path::new("/data/user/0/com.beb.plxnative.debug/files");
+        let root = super::android_runtime_dir(files);
+        assert_eq!(root, files.join("run"));
+        assert!(!root.file_name().unwrap().to_string_lossy().starts_with("plxnative-"));
     }
 
     /// Two installs must not share one sign-in. The file holds the client identifier, the account
