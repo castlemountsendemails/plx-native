@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.18] - 2026-10-29
+
+### Fixed
+- The app no longer freezes while it reads each library's Collections count from a slow or unreachable server. On Fire TV the freeze tripped the 2-second watchdog, which killed the app on the "Which libraries do you want?" question. Shared code: the LG app gets this fix too.
+
 ## [0.2.17] - 2026-10-29
 
 ### Added
