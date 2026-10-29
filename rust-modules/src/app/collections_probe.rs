@@ -315,11 +315,12 @@ fn walk<F>(
 ) where F: Fn(Target, u32) + Send + 'static {
     let lock = move || queue.lock().unwrap_or_else(|e| e.into_inner());
     if !lock().push(targets, now) { return; }
-    let started = spawn(Box::new(move || {
-        while let Some((target, now)) = lock().next() {
-            // A section that panics is a section not asked, not a walk that stops.
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| each(target, now)));
-        }
+    let started = spawn(Box::new(move || loop {
+        // Its own statement, so the guard drops before the probe: a `while let` would keep the
+        // queue locked through it, and the frame thread's next landing would wait on the server.
+        let Some((target, now)) = lock().next() else { break };
+        // A section that panics is a section not asked, not a walk that stops.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| each(target, now)));
     }));
     if !started { lock().abandon(); }
 }
