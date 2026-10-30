@@ -791,6 +791,10 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
     restore_window: impl FnOnce(*mut c_void)) {
     let et = rd_u32(&app.ev, 0);
     app.window_activity.event(et);
+    // SDL's Android pump delivers the background pair, then blocks on the next pump until resume,
+    // and restores the GL context before it delivers the foreground pair.
+    #[cfg(target_os = "android")]
+    if matches!(et, 0x104..=0x106) { plx_base::task::watchdog::loop_parked(et == 0x104); }
     let playing = matches!(app.route(), AppArg::Player);
     plx_telemetry::telemetry::window::lifecycle(et, playing);
     if controlled_replay(app) {

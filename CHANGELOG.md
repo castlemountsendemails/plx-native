@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.20] - 2026-10-30
+
+### Fixed
+- Fire TV: the debug build no longer dies about 2 seconds after you press Home. Android stops the app's main loop while it's in the background, and the 2-second watchdog took that for a freeze. The watchdog now ignores that pause. The LG app is unchanged.
+
 ## [0.2.19] - 2026-10-29
 
 ### Changed

@@ -115,6 +115,7 @@ static UNLABELED: BlockingLabel = BlockingLabel::new("unlabeled");
 struct Signals {
     active: AtomicBool,
     presented: AtomicBool,
+    parked: AtomicBool,
     progress: AtomicUsize,
     label: AtomicPtr<BlockingLabel>,
 }
@@ -124,13 +125,14 @@ impl Signals {
         Self {
             active: AtomicBool::new(false),
             presented: AtomicBool::new(false),
+            parked: AtomicBool::new(false),
             progress: AtomicUsize::new(0),
             label: AtomicPtr::new(&UNLABELED as *const BlockingLabel as *mut BlockingLabel),
         }
     }
 
     fn progress(&self) -> Option<usize> {
-        (self.active.load(Ordering::Acquire) && self.presented.load(Ordering::Acquire))
+        (self.active.load(Ordering::Acquire) && self.presented.load(Ordering::Acquire) && !self.parked.load(Ordering::Acquire))
             .then(|| self.progress.load(Ordering::Acquire))
     }
 
@@ -281,7 +283,11 @@ impl Drop for LoopWatch {
 
 /// Tells the observer that the watched loop's silence is expected. SDL's Android pump blocks the
 /// loop from background until resume, which is otherwise indistinguishable from a hang.
-pub fn loop_parked(_parked: bool) {}
+pub fn loop_parked(parked: bool) {
+    WATCHED.with(|watched| {
+        if let Some(signals) = watched.get() { signals.parked.store(parked, Ordering::Release); }
+    });
+}
 
 fn observe_loop(
     #[cfg(feature = "threadcheck")] main_thread: usize,
