@@ -1,7 +1,7 @@
 # Third-party notices — Fire TV APK
 
 This file accompanies the **PlxNative** Fire TV package (`com.beb.plxnative`, and the
-`com.beb.plxnative.debug` build), an unofficial native Plex client for Amazon Fire TV sticks.
+`com.beb.plxnative.dev` build), an unofficial native Plex client for Amazon Fire TV sticks.
 PlxNative itself is Copyright (c) 2026 Gleb Linnik and is distributed under GPL-3.0-or-later
 (see `LICENSE`; the brand reservation is in `TRADEMARKS.md`). The webOS package has its own
 notice file, `THIRD-PARTY-NOTICES.md`; this one lists what the APK contains.

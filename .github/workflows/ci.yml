@@ -816,7 +816,7 @@ jobs:
           apk="$RUNNER_TEMP/apk/plxnative-$FIRETV_VERSION_NAME-firetv-debug.apk"
           mv build/outputs/apk/debug/*.apk "$apk"
           unzip -l "$apk" | grep -E 'lib/|assets/|classes'
-          ../ci/check-apk.sh "$apk" com.beb.plxnative.debug 900 "$FIRETV_VERSION_NAME" "$FIRETV_DEBUG_CERT_SHA256" true
+          ../ci/check-apk.sh "$apk" com.beb.plxnative.dev 900 "$FIRETV_VERSION_NAME" "$FIRETV_DEBUG_CERT_SHA256" true
 
       # Only on a dispatch that names a versionCode: the throwaway skeletons of the downgrade test.
       - name: Build, sign and check the release skeleton
