@@ -158,7 +158,8 @@ unsafe fn call_ioctl<T>(
     // between a profiling leg that survives a stray signal and one that disables itself halfway
     // through and reports a truncated sample set as if it were the run.
     loop {
-        if unsafe { libc::ioctl(fd, request, ptr::from_mut(arg)) } >= 0 {
+        // bionic's request is an `int`, glibc's an `unsigned long`.
+        if unsafe { libc::ioctl(fd, request as libc::Ioctl, ptr::from_mut(arg)) } >= 0 {
             return Ok(());
         }
         let error = std::io::Error::last_os_error();

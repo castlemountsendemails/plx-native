@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.2.20] - 2026-10-30
+
+### Fixed
+- Fire TV: the debug build no longer dies about 2 seconds after you press Home. Android stops the app's main loop while it's in the background, and the 2-second watchdog took that for a freeze. The watchdog now ignores that pause. The LG app is unchanged.
+
+## [0.2.19] - 2026-10-29
+
+### Changed
+- Fire TV: the app's runtime folder is now `run` inside its files folder, because a stick has no `/tmp`. Dev switches such as the Watchlist live switch can now be set on a stick, so the debug build's Watchlist add and remove can be tested there. The LG app is unchanged.
+
+## [0.2.18] - 2026-10-29
+
+### Fixed
+- The app no longer freezes while it reads each library's Collections count from a slow or unreachable server. On Fire TV the freeze tripped the 2-second watchdog, which killed the app on the "Which libraries do you want?" question. Shared code: the LG app gets this fix too.
+
+## [0.2.17] - 2026-10-29
+
+### Added
+- The Fire TV CI artifact now carries the unstripped `libmain.so` and `libcurl-plx.so` under `symbols/`, so the frames in a crash dump from a stick can be named. The build fails if `libmain.so` has no symbol table.
+
+## [0.2.16] - 2026-10-28
+
+### Fixed
+- Home no longer asks your server for a row it doesn't show, several times a second, for as long as the app is open. The loop slowed the app and loaded the server on both the LG (about 3 requests a second) and Fire TV (about 9). Home still shows only Continue Watching.
+
+### Changed
+- Shared code, for the LG check: Home's refresh now keeps only the Continue Watching row and drops the server's other Home rows as soon as they arrive. The LG app gets this change too.
+
+## [0.2.15] - 2026-10-28
+
+### Added
+- On Fire TV the saved sign-in is now sealed by the Keystore: the account token, server, profiles and their tokens are encrypted, and the language, settings, Home pins, recent searches and client id are kept as plain JSON beside them. A sign-in saved by an earlier Fire TV build is sealed the first time the app starts. Not yet tried on any stick.
+- If the Keystore can't open the sealed part (its key is gone, or it fails for the moment), the Fire TV app starts signed out, with no error, and keeps the language and screen resolution, as the LG app does. Signing in again replaces the sealed part. Anything else saved meanwhile leaves the sealed part untouched, so a Keystore failure that passes doesn't cost the sign-in.
+- The Fire TV `--es secure remove` test run now deletes the session's Keystore key even when no earlier `--es secure test` blob exists.
+
+### Changed
+- Shared code, for the LG check: on Fire TV only, the session file is read and written through the sealed record, and a failed session write is not followed by the fallback `auth.json` copy. The LG app reads and writes its session as before.
+
+## [0.2.14] - 2026-10-28
+
+### Added
+- The Fire TV remote now drives the app: D-pad, OK, BACK, play/pause, rewind and fast-forward, and MENU or holding BACK for about a second for Exit. Search can be typed with the Fire keyboard, and its delete key edits the search. BACK closes the keyboard. Not yet tried on any stick.
+
+### Changed
+- Shared code, for the LG check: on Fire TV only, key events and typed text are read where stock SDL puts them, the Fire keyboard's per-letter key events are ignored (its text is used), and a keyboard closed by Fire OS ends editing. The LG app reads keys and text as before.
+
+## [0.2.13] - 2026-10-27
+
+### Added
+- The Fire TV app now starts the real PlxNative app when it's opened from the Fire TV home screen, or with `am start` and no extras. The test runs (`clip`, `secure`, `net`) still start from their extras. The remote doesn't reach the app yet, so you can't get past the screen after sign-in, and saved sign-ins aren't sealed by the Keystore yet. Not yet tried on any stick.
+- On Fire TV the app keeps its sign-in and settings in a `state` folder inside its own storage, and ships all four of the LG app's fonts (Inter regular and bold, Noto Sans CJK, Noto Emoji), copied into storage after each install or update.
+- The Fire TV app shows up on plex.tv and on your server as `PlxNative (Fire TV)` (`PlxNative debug (Fire TV)` for the debug build), on platform Android with the stick's Android version and device `Amazon Fire TV`. The LG app's name and details are unchanged.
+- The Fire TV licence notice now covers the three extra fonts, nanosvg and the Rust libraries the app brings in.
+
+## [0.2.12] - 2026-10-27
+
+### Added
+- The Fire TV app carries its own libcurl 8.23.0 with OpenSSL 3.5.9, and checks server certificates against the Mozilla CA list it ships with (plus the Let's Encrypt roots it already used as a fallback for `*.plex.direct` servers). The first time the app starts after each install or update, it copies both certificate files into its own storage. The LG app is unchanged.
+- A Fire TV test run of the network (`--es net check --es server <your server's plex.direct address>`) fetches plex.tv, your server's `/identity` and a site with an expired certificate. It shows a pass or fail line for each on screen and in logcat. It's the only use so far, since sign-in isn't wired up yet, and it hasn't been tried on any stick.
+- The Fire TV licence notice now covers libcurl, OpenSSL and the CA list. The curl and MPL-2.0 licence texts are added; they also ship in the LG package, unused there.
+
 ## [0.2.11] - 2026-10-27
 
 ### Added

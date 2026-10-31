@@ -261,7 +261,7 @@ fn caplisten(port: u16) {
             libc::SOL_SOCKET,
             libc::SO_REUSEADDR,
             &one as *const c_int as *const c_void,
-            std::mem::size_of::<c_int>() as u32,
+            std::mem::size_of::<c_int>() as libc::socklen_t,
         );
         let mut addr: libc::sockaddr_in = std::mem::zeroed();
         addr.sin_family = libc::AF_INET as libc::sa_family_t;
@@ -274,7 +274,7 @@ fn caplisten(port: u16) {
             if libc::bind(
                 lfd,
                 &addr as *const _ as *const libc::sockaddr,
-                std::mem::size_of::<libc::sockaddr_in>() as u32,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
             ) == 0
             {
                 bound = true;
@@ -316,7 +316,7 @@ fn caplisten(port: u16) {
                 libc::IPPROTO_TCP,
                 libc::TCP_NODELAY,
                 &one as *const c_int as *const c_void,
-                std::mem::size_of::<c_int>() as u32,
+                std::mem::size_of::<c_int>() as libc::socklen_t,
             );
             let tv = libc::timeval {
                 tv_sec: 2,
@@ -327,7 +327,7 @@ fn caplisten(port: u16) {
                 libc::SOL_SOCKET,
                 libc::SO_SNDTIMEO,
                 &tv as *const _ as *const c_void,
-                std::mem::size_of::<libc::timeval>() as u32,
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
             );
             let rtv = libc::timeval {
                 tv_sec: 0,
@@ -338,7 +338,7 @@ fn caplisten(port: u16) {
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
                 &rtv as *const _ as *const c_void,
-                std::mem::size_of::<libc::timeval>() as u32,
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
             );
 
             // hello: "PXRQ" w:u16 h:u16 (8B, legacy jpeg) or "PXR2" w:u16 h:u16
@@ -398,7 +398,7 @@ fn caplisten(port: u16) {
                     libc::SOL_SOCKET,
                     libc::SO_SNDTIMEO,
                     &mtv as *const _ as *const c_void,
-                    std::mem::size_of::<libc::timeval>() as u32,
+                    std::mem::size_of::<libc::timeval>() as libc::socklen_t,
                 );
                 log(&format!(
                     "capture: mpeg client connected (fd={fd}, {} @{}bps)",

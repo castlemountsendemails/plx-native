@@ -159,7 +159,7 @@ plx_base::dynlib! {
     /// The seven multi-interface symbols, frozen to webOS's oldest libcurl (7.53.1). See this
     /// module's doc before adding an eighth — `curl_multi_poll`/`curl_multi_wakeup` are absent on
     /// the dev television and present on the Mac.
-    curlmulti: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib"] {
+    curlmulti: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib", "libcurl-plx.so"] {
     fn curl_multi_init() -> *mut CURLM;
     fn curl_multi_add_handle(multi: *mut CURLM, easy: *mut CURL) -> c_int;
     fn curl_multi_perform(multi: *mut CURLM, running: *mut c_int) -> c_int;
@@ -1117,6 +1117,9 @@ impl CurlSource {
                 plx_net::net::curl_easy_setopt_long(easy, CURLOPT_SSL_VERIFYHOST, 2),
                 "CURLOPT_SSL_VERIFYHOST"
             );
+            // The Fire TV libcurl has no CA file of its own; roots mode below still replaces this.
+            #[cfg(target_os = "android")]
+            require_setopt!(plx_net::net::apply_android_ca(easy), "CURLOPT_CAINFO");
             // The host suite's CA override, the twin of `net::request_result_evidence`'s: a test
             // that serves a certificate through a loopback TLS double must be able to make libcurl
             // trust the test CA. Compiled out of every non-test build.
@@ -2418,6 +2421,17 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::sync::atomic::AtomicUsize;
+
+    // The webOS names come first and in their old order, so a television binds what it did before
+    // the Fire TV name joined; both tables stay one list so they bind the same library.
+    #[test]
+    fn the_curl_candidates_keep_the_webos_order_and_match_across_tables() {
+        assert_eq!(
+            plx_net::net::curl::CANDIDATES,
+            ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib", "libcurl-plx.so"]
+        );
+        assert_eq!(curlmulti::CANDIDATES, plx_net::net::curl::CANDIDATES);
+    }
 
     #[test]
     fn lower_media_layer_refuses_plaintext_credentials_in_store_policy() {

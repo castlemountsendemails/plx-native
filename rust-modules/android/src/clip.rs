@@ -17,8 +17,8 @@ pub struct Clip {
     pub size: Option<(u16, u16)>,
 }
 
-/// `None` without a `clip=` argument, which leaves the skeleton screen as it was. Arguments
-/// without `=`, unknown keys and an unparsable `fps` are ignored.
+/// `None` without a `clip=` argument, which starts the app unless another harness was asked for.
+/// Arguments without `=`, unknown keys and an unparsable `fps` are ignored.
 pub fn parse<'a>(args: impl IntoIterator<Item = &'a str>) -> Option<Clip> {
     let mut clip = Clip {
         url: String::new(),
@@ -58,7 +58,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_clip_argument_means_the_skeleton_screen() {
+    fn no_clip_argument_means_no_clip() {
         assert_eq!(parse(["PlxNative"]), None);
         assert_eq!(parse(["vc=hevc", "ac=aac"]), None);
         assert_eq!(parse(["clip="]), None);

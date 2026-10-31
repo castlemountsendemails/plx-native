@@ -115,6 +115,7 @@ static UNLABELED: BlockingLabel = BlockingLabel::new("unlabeled");
 struct Signals {
     active: AtomicBool,
     presented: AtomicBool,
+    parked: AtomicBool,
     progress: AtomicUsize,
     label: AtomicPtr<BlockingLabel>,
 }
@@ -124,13 +125,14 @@ impl Signals {
         Self {
             active: AtomicBool::new(false),
             presented: AtomicBool::new(false),
+            parked: AtomicBool::new(false),
             progress: AtomicUsize::new(0),
             label: AtomicPtr::new(&UNLABELED as *const BlockingLabel as *mut BlockingLabel),
         }
     }
 
     fn progress(&self) -> Option<usize> {
-        (self.active.load(Ordering::Acquire) && self.presented.load(Ordering::Acquire))
+        (self.active.load(Ordering::Acquire) && self.presented.load(Ordering::Acquire) && !self.parked.load(Ordering::Acquire))
             .then(|| self.progress.load(Ordering::Acquire))
     }
 
@@ -279,6 +281,14 @@ impl Drop for LoopWatch {
     }
 }
 
+/// Tells the observer that the watched loop's silence is expected. SDL's Android pump blocks the
+/// loop from background until resume, which is otherwise indistinguishable from a hang.
+pub fn loop_parked(parked: bool) {
+    WATCHED.with(|watched| {
+        if let Some(signals) = watched.get() { signals.parked.store(parked, Ordering::Release); }
+    });
+}
+
 fn observe_loop(
     #[cfg(feature = "threadcheck")] main_thread: usize,
     #[cfg(feature = "threadcheck")] log_only: bool,
@@ -378,6 +388,35 @@ mod tests {
         assert!(matches!(detector.observe(5_252, signals.progress(), signals.label()), Some(Event::Began { .. })));
         watch.advance();
         assert!(matches!(detector.observe(6_000, signals.progress(), signals.label()), Some(Event::Ended { ms: 999, .. })));
+    }
+
+    #[test]
+    fn a_parked_loop_is_not_a_hang_and_the_timer_restarts_on_return() {
+        let signals = signals();
+        let watch = LoopWatch::attach(signals);
+        watch.presented();
+        let mut detector = Detector::default();
+        assert_eq!(detector.observe(0, signals.progress(), signals.label()), None);
+        loop_parked(true);
+        assert_eq!(signals.progress(), None);
+        assert_eq!(detector.observe(30_000, signals.progress(), signals.label()), None);
+        loop_parked(false);
+        assert_eq!(detector.observe(30_001, signals.progress(), signals.label()), None);
+        assert!(matches!(detector.observe(30_252, signals.progress(), signals.label()), Some(Event::Began { .. })));
+    }
+
+    #[cfg(feature = "threadcheck")]
+    #[test]
+    fn a_parked_loop_is_never_killed() {
+        let signals = signals();
+        let watch = LoopWatch::attach(signals);
+        watch.presented();
+        let mut observer = DevObserver::default();
+        observer.poll(0, signals.progress(), signals.label(), HW);
+        loop_parked(true);
+        for now in (POLL_MS..=30_000).step_by(POLL_MS as usize) {
+            assert!(!observer.poll(now, signals.progress(), signals.label(), HW).kill);
+        }
     }
 
     #[test]

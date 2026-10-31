@@ -192,6 +192,8 @@ vendor/ffmpeg-prefix-host
 # The Fire TV build (`ANDROID=1 ci/build-ffmpeg.sh`).
 vendor/ffmpeg-build-android
 vendor/ffmpeg-prefix-android
+# The Fire TV libcurl (`ci/build-android-curl.sh vendor/curl-prefix-android`).
+vendor/curl-prefix-android
 pkg/*.dylib
 pkg/.ffabi-host-ok
 rust-modules/target-sym/

@@ -689,6 +689,19 @@ pub(crate) unsafe fn ingest(app: &mut App, fr: &mut Frame) {
         for tok in toks {
             if !supplied { let _ = ingress_token(app, fr, &tok); }
         }
+        #[cfg(target_os = "android")]
+        {
+            if let Some(frame) = super::ANDROID_FRAME.get() {
+                frame();
+            }
+            if crate::textinput::take_sdl_dismissal() {
+                app.inputs.push(plx_machine::machine::InputEvent {
+                    at: plx_machine::machine::Tick { ms: clock::now(), dt_us: 0 },
+                    source: plx_machine::machine::Source::Sdl,
+                    kind: plx_machine::machine::InputKind::SystemKeyboard(false),
+                });
+            }
+        }
         drain_sdl(app, fr);
 }
 
@@ -778,6 +791,10 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
     restore_window: impl FnOnce(*mut c_void)) {
     let et = rd_u32(&app.ev, 0);
     app.window_activity.event(et);
+    // SDL's Android pump delivers the background pair, then blocks on the next pump until resume,
+    // and restores the GL context before it delivers the foreground pair.
+    #[cfg(target_os = "android")]
+    if matches!(et, 0x104..=0x106) { plx_base::task::watchdog::loop_parked(et == 0x104); }
     let playing = matches!(app.route(), AppArg::Player);
     plx_telemetry::telemetry::window::lifecycle(et, playing);
     if controlled_replay(app) {
@@ -980,6 +997,9 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         }
     } else if et == SDL_KEYDOWN || et == SDL_KEYUP {
         let (state, wcode, sym) = decode_key(&app.ev);
+        if cfg!(target_os = "android") && is_keyboard_echo(sym) {
+            return;
+        }
         // The press's IDENTITY, resolved once from the two raw fields
         // (`ui::consts::classify`, which is where the spellings live and where they
         // are tested). `sym` and `wcode` are still read raw by the arms below — the

@@ -1,14 +1,18 @@
-//! The Fire TV skeleton: SDLActivity enters `SDL_main` on its SDL thread, and this draws three lines
-//! of text with SDL2_ttf, the last one the latest key press, until SDL quits, logging to logcat
-//! under the tag `PlxNative`. With a `clip=` argument the harness plays it first and its label
-//! replaces those lines until BACK stops it.
+//! SDLActivity enters `SDL_main` here on its SDL thread. With no harness argument it installs the
+//! Fire TV port and runs the app. With `secure=`, `net=` or `clip=` it runs that harness instead and
+//! draws its lines with SDL2_ttf until SDL quits; a clip plays first and its label replaces the
+//! lines until BACK stops it. Everything logs to logcat under the tag `PlxNative`.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
+use std::path::PathBuf;
 
 use crate::clip;
 use crate::harness::{self, Harness};
 use crate::jni;
+use crate::keys::{self, Edge};
+use crate::netcheck;
+use plxnative_modules::KeyEdge;
 use crate::secure;
 
 #[allow(dead_code)] // read by SDL only
@@ -96,6 +100,7 @@ extern "C" {
     fn TTF_CloseFont(font: Handle);
     fn TTF_RenderUTF8_Blended(font: Handle, text: *const c_char, fg: Color) -> Handle;
     fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    fn SDL_AndroidGetInternalStoragePath() -> *const c_char;
 }
 
 pub fn log(prio: c_int, message: &str) {
@@ -116,8 +121,27 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         .filter(|arg| !arg.is_null())
         .map(|arg| unsafe { CStr::from_ptr(arg) }.to_string_lossy().into_owned())
         .collect();
-    let secure = args.iter().find_map(|arg| arg.strip_prefix("secure=")).map(secure::harness);
-    match run(clip::parse(args.iter().map(String::as_str)), secure) {
+    // The engine's socket sends without MSG_NOSIGNAL; a reset peer must not kill the process.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+    if let Some(files) = files_dir() {
+        plx_base::paths::set_android_files_dir(files);
+    } else {
+        log(LOG_ERROR, "SDL_AndroidGetInternalStoragePath failed; app files are looked for nowhere");
+    }
+    let arg = |key: &str| args.iter().find_map(|arg| arg.strip_prefix(key)?.strip_prefix('='));
+    let lines = match (arg("secure"), arg("net")) {
+        (Some(mode), _) => Some(secure::harness(mode)),
+        (None, Some(_)) => Some(netcheck::harness(arg("server"))),
+        (None, None) => None,
+    };
+    let clip = clip::parse(args.iter().map(String::as_str));
+    if clip.is_none() && lines.is_none() {
+        if plx_platform::tv::install(&crate::port::PORT).is_err() {
+            log(LOG_ERROR, "a port was already installed");
+        }
+        return plxnative_modules::run_android(push_presses);
+    }
+    match run(clip, lines) {
         Ok(()) => 0,
         Err(message) => {
             log(LOG_ERROR, &message);
@@ -126,7 +150,28 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 }
 
-fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), String> {
+fn push_presses() {
+    jni::tick();
+    for press in jni::take_presses() {
+        let edge = match press.edge {
+            Edge::Down => KeyEdge::Down,
+            Edge::Repeat => KeyEdge::Repeat,
+            Edge::Up => KeyEdge::Up,
+        };
+        if !plxnative_modules::push_remote_key(keys::token(press.key), edge) {
+            log(LOG_ERROR, &format!("no app key for {:?}", press.key));
+        }
+    }
+}
+
+fn files_dir() -> Option<PathBuf> {
+    let dir = unsafe { SDL_AndroidGetInternalStoragePath() };
+    (!dir.is_null()).then(|| PathBuf::from(unsafe { CStr::from_ptr(dir) }.to_string_lossy().into_owned()))
+}
+
+/// `harness_lines` are what a `secure=` or `net=` harness reported; without them (a clip that has
+/// stopped) the screen shows the latest key press.
+fn run(clip: Option<clip::Clip>, harness_lines: Option<Vec<String>>) -> Result<(), String> {
     unsafe {
         if SDL_Init(SDL_INIT_VIDEO) != 0 {
             return Err(sdl_error("SDL_Init"));
@@ -159,7 +204,7 @@ fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), Stri
         if font.is_null() {
             return Err(sdl_error("TTF_OpenFont"));
         }
-        log(LOG_INFO, "skeleton started");
+        log(LOG_INFO, "harness screen started");
         let mut harness = clip.map(Harness::start);
 
         let mut size = (0, 0);
@@ -198,11 +243,11 @@ fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), Stri
                     labelled_at = SDL_GetTicks();
                     harness::LABEL.time(|| harness.label())
                 }
-                None if secure.is_some() => secure.clone().unwrap_or_default(),
+                None if harness_lines.is_some() => harness_lines.clone().unwrap_or_default(),
                 None => {
                     let readout = jni::readout();
                     let key = if readout.is_empty() { "press a key".into() } else { readout };
-                    vec!["PlxNative for Fire TV: skeleton".into(), format!("surface {w}x{h}"), key]
+                    vec!["PlxNative for Fire TV: harness".into(), format!("surface {w}x{h}"), key]
                 }
             };
             if lines != shown {
@@ -226,7 +271,7 @@ fn run(clip: Option<clip::Clip>, secure: Option<Vec<String>>) -> Result<(), Stri
             harness.stop();
         }
 
-        log(LOG_INFO, "skeleton quitting");
+        log(LOG_INFO, "harness screen quitting");
         TTF_CloseFont(font);
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);

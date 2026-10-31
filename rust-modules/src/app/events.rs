@@ -95,9 +95,35 @@ pub(crate) fn decode_key(ev: &[u8]) -> (u32, u32, u32) {
             host_wcode(sym)
         };
         (state, wcode, sym)
+    } else if cfg!(target_os = "android") {
+        decode_android_key(ev)
     } else {
         (rd_u32(ev, 16), rd_u32(ev, 20), rd_u32(ev, 24))
     }
+}
+
+/// Stock SDL2 on Android: pressed@12, repeat@13, `keysym.scancode`@16, sym@20. The scancode is
+/// the wcode, as it is on LG, and `SDL_PushEvent` keeps every byte here, so a synthetic press
+/// carries its wcode in that field.
+pub(crate) fn decode_android_key(ev: &[u8]) -> (u32, u32, u32) {
+    let state = u32::from(ev[12]) | if ev[13] != 0 { 0x100 } else { 0 };
+    (state, rd_u32(ev, 16), rd_u32(ev, 20))
+}
+
+pub(crate) fn encode_android_key(sym: c_uint, wcode: c_uint, down: bool) -> [u8; 128] {
+    let mut ev = [0u8; 128];
+    ev[0..4].copy_from_slice(&if down { SDL_KEYDOWN } else { SDL_KEYUP }.to_ne_bytes());
+    ev[12] = u8::from(down);
+    ev[16..20].copy_from_slice(&wcode.to_ne_bytes());
+    ev[20..24].copy_from_slice(&sym.to_ne_bytes());
+    ev
+}
+
+/// On Android SDL sends a key down and up for each ASCII character the system keyboard types,
+/// ahead of the `SDL_TEXTINPUT` that carries it. As keys they would act (`q` is BACK, `p`'s
+/// scancode a PLAY code), so they are dropped; no remote key has a printable sym.
+pub(crate) fn is_keyboard_echo(sym: c_uint) -> bool {
+    (0x20..0x7f).contains(&sym)
 }
 
 /// The `windowID` a SYNTHETIC key event carries on the host, marking it as one — see [`decode_key`]
@@ -136,6 +162,9 @@ pub(crate) fn host_wcode(sym: u32) -> u32 {
 /// Pure, and separate from the `SDL_PushEvent` that consumes it, precisely so that test can run on
 /// the host — `make check` links no SDL.
 pub(crate) fn encode_key(sym: c_uint, wcode: c_uint, down: bool) -> [u8; 128] {
+    if cfg!(target_os = "android") {
+        return encode_android_key(sym, wcode, down);
+    }
     let mut ev = [0u8; 128];
     ev[0..4].copy_from_slice(&if down { SDL_KEYDOWN } else { SDL_KEYUP }.to_ne_bytes());
     if cfg!(feature = "hostsim") {
@@ -166,8 +195,8 @@ pub(crate) fn encode_key(sym: c_uint, wcode: c_uint, down: bool) -> [u8; 128] {
 /// `Edge::Repeat` a screen receives without a real remote's own repeat cadence.
 pub(crate) fn encode_key_repeat(sym: c_uint, wcode: c_uint) -> [u8; 128] {
     let mut ev = encode_key(sym, wcode, true);
-    if cfg!(feature = "hostsim") {
-        ev[13] = 1; // the `repeat` byte `decode_key`'s hostsim arm folds into `state & 0x100`
+    if cfg!(feature = "hostsim") || cfg!(target_os = "android") {
+        ev[13] = 1; // the `repeat` byte the stock-SDL arms of `decode_key` fold into `state & 0x100`
     } else {
         let state = rd_u32(&ev, 16) | 0x100;
         ev[16..20].copy_from_slice(&state.to_ne_bytes());
@@ -638,6 +667,41 @@ mod key_layout_tests {
                     "a synthetic edge must never look like auto-repeat"
                 );
             }
+        }
+    }
+
+    /// The Android layout, graded on the host whichever layout this build compiled.
+    #[test]
+    fn android_key_bytes_round_trip_and_read_sdls_own_events() {
+        use super::{decode_android_key, encode_android_key};
+        for (sym, wcode) in [(SDLK_DOWN, 0), (SDLK_RETURN, 0), (0, WCODE_PAUSE), (8, 42)] {
+            for down in [true, false] {
+                let (state, got_wcode, got_sym) = decode_android_key(&encode_android_key(sym, wcode, down));
+                assert_eq!((state, got_wcode, got_sym), (u32::from(down), wcode, sym));
+            }
+        }
+        // The Fire keyboard's backspace as stock SDL writes it: windowID 1, pressed, repeat,
+        // scancode 42 (BACKSPACE), sym 8. It must read as the LG panel's backspace pair.
+        let mut ev = [0u8; 128];
+        ev[8] = 1;
+        ev[12] = 1;
+        ev[13] = 1;
+        ev[16] = 42;
+        ev[20] = 8;
+        assert_eq!(decode_android_key(&ev), (0x101, 42, 8));
+    }
+
+    /// Dropping the keyboard's per-character key events must never drop a remote key.
+    #[test]
+    fn keyboard_echoes_are_printable_and_no_remote_key_is_one() {
+        use super::{is_keyboard_echo, remote_token_key};
+        for ch in [b'q', b'p', b'a', b'Z', b' ', b'5', b'~'] {
+            assert!(is_keyboard_echo(u32::from(ch)), "{}", ch as char);
+        }
+        for token in ["up", "down", "left", "right", "ok", "back", "pageup", "pagedown", "chup",
+            "chdown", "play", "pause", "stop", "ff", "rew", "playpause", "exit", "backspace", "clear"] {
+            let (sym, _) = remote_token_key(token).unwrap();
+            assert!(!is_keyboard_echo(sym), "{token}");
         }
     }
 

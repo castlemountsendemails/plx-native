@@ -81,6 +81,27 @@ pub fn map(code: i32) -> Option<Key> {
     })
 }
 
+/// The app's remote-token name for `key`, which gives the `(sym, wcode)` pair a webOS remote sends.
+pub fn token(key: Key) -> &'static str {
+    match key {
+        Key::Up => "up",
+        Key::Down => "down",
+        Key::Left { alt: false } => "left",
+        Key::Right { alt: false } => "right",
+        Key::Left { alt: true } => "rew",
+        Key::Right { alt: true } => "ff",
+        Key::Ok => "ok",
+        Key::Back => "back",
+        Key::Play => "play",
+        Key::Pause => "pause",
+        Key::PlayPause => "playpause",
+        Key::Stop => "stop",
+        Key::Exit => "exit",
+        Key::PageUp => "chup",
+        Key::PageDown => "chdown",
+    }
+}
+
 /// Turns `KeyEvent`s into presses. BACK is held back until it is released (a tap: `Back`) or held
 /// for `LONG_BACK_MS` (`Exit`, once, with no repeats); every other key passes its edges through.
 #[derive(Default)]

@@ -1,6 +1,5 @@
-//! The Fire TV port table. The engine path reads only the sink, the sandbox verdict and the device
-//! info, so every entry but the sink and the sealed-secret trio answers as a television with
-//! no platform services.
+//! The Fire TV port table, installed before the app or the clip harness runs. Every entry but the
+//! sink and the sealed-secret trio answers as a television with no platform services.
 
 use plx_platform::tv::{sandbox, toast, LocaleReply, Port};
 

@@ -11,7 +11,7 @@ use ::jni::sys::{jint, JNI_VERSION_1_6};
 use ::jni::{JNIEnv, JavaVM};
 
 use crate::keys::{self, Edge, Key, Keys, Press};
-use crate::skeleton::{log, LOG_ERROR, LOG_INFO};
+use crate::entry::{log, LOG_ERROR, LOG_INFO};
 
 struct Bridge {
     keys: Keys,
@@ -69,7 +69,7 @@ pub fn tick() {
     bridge.record(presses);
 }
 
-/// The last press, as the skeleton draws it; empty before the first.
+/// The last press, as the harness screen draws it; empty before the first.
 pub fn readout() -> String {
     bridge().readout.clone()
 }

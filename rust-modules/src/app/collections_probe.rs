@@ -315,11 +315,12 @@ fn walk<F>(
 ) where F: Fn(Target, u32) + Send + 'static {
     let lock = move || queue.lock().unwrap_or_else(|e| e.into_inner());
     if !lock().push(targets, now) { return; }
-    let started = spawn(Box::new(move || {
-        while let Some((target, now)) = lock().next() {
-            // A section that panics is a section not asked, not a walk that stops.
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| each(target, now)));
-        }
+    let started = spawn(Box::new(move || loop {
+        // Its own statement, so the guard drops before the probe: a `while let` would keep the
+        // queue locked through it, and the frame thread's next landing would wait on the server.
+        let Some((target, now)) = lock().next() else { break };
+        // A section that panics is a section not asked, not a walk that stops.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| each(target, now)));
     }));
     if !started { lock().abandon(); }
 }
@@ -475,6 +476,22 @@ mod tests {
         assert_eq!(started.lock().unwrap().len(), 1, "the refused worker left no 'running' behind");
         started.lock().unwrap().pop().unwrap()();
         assert_eq!(*asked.lock().unwrap(), [3, 4], "the refused landing's sections are gone, the panicking one did not stop the walk");
+    }
+
+    /// **The worker lets go of the queue while it asks a section**: the frame thread queues every
+    /// landing on it, so a section probe holding it would hold the frame for as long as the server
+    /// takes to answer.
+    #[test]
+    fn the_warm_walk_leaves_its_queue_free_while_a_section_is_asked() {
+        use std::sync::Arc;
+        static QUEUE: Mutex<Walk> = Mutex::new(Walk::new());
+        let free: Arc<Mutex<Vec<bool>>> = Default::default();
+        let each = { let free = Arc::clone(&free); move |_: Target, _: u32| free.lock().unwrap().push(QUEUE.try_lock().is_ok()) };
+        let started = jobs();
+        let spawn = { let started = Arc::clone(&started); move |job: Box<dyn FnOnce() + Send>| { started.lock().unwrap().push(job); true } };
+        walk(&QUEUE, vec![(ServerId::from_raw(4), 1), (ServerId::from_raw(4), 2)], 1, spawn, each);
+        started.lock().unwrap().pop().unwrap()();
+        assert_eq!(*free.lock().unwrap(), [true, true], "the queue was locked while a section was asked");
     }
 
     /// **The section the header names is never behind the walk.** The walk queues a section and

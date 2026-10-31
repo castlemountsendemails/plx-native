@@ -157,6 +157,11 @@ Four choices that were not obvious:
   those layers' extraction until it was finished, video sink and all. As a fence it held the line
   without blocking the split. The gate no longer sees a reference into the port from outside, so
   it can become a crate on top. L15b is the open step that makes it a port another OS could fill.
+- **The Fire TV port is a second fence.** `[port android]` is the `libmain.so` crate
+  (`rust-modules/android/`, mounted as `android`). It fills the same `tv` interfaces, installs its
+  table before it enters the app through `run_android` in `lib.rs`, and on Android `port` and
+  `system` are compiled out. Nothing outside it may name it, so the shared code cannot grow an
+  Android branch by naming the crate.
 
 This agrees with the hand-written rules already gated by `ci/check-deps.sh` (the tables in
 `rust-modules/ui/src/CLAUDE.md` and `screens/CLAUDE.md`). `ui` names no application type, `screens` never names

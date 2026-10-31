@@ -1213,6 +1213,7 @@ derived_output() {
   case "$1" in
     rust-modules/target*) ;;                                    # every feature set's cargo target dir
     vendor/ffmpeg-*|vendor/sentry-native-*|vendor/libass-*|vendor/downloads|vendor/nanosvg|vendor/vendor) ;;
+    vendor/curl-prefix-android) ;;                              # ci/build-android-curl.sh's install
     pkg/plxnative|pkg/plxnative-storage|pkg/plxnative-stackwalk|pkg/plxnative.debug|pkg/threadprobe) ;;
     pkg/mali-irq-sample|pkg/sockprobe|pkg/logmprobe) ;;
     pkg/*.ipk|pkg/ipk.sha256|pkg/lib*-plx.so.*|pkg/libass-plx-host.so.0*|pkg/libass-plx.0.dylib.*.new) ;;
