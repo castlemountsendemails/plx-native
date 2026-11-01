@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.21] - 2026-11-01
+
+### Added
+- Fire TV: the app now reads each stick's own video decoders and its TV's audio formats (AC-3, E-AC3, DTS) instead of assuming the LG's. This lets the server transcode 4K for the HD and 3rd gen, and convert audio a TV can't take. It re-reads at every Play and when the app returns from the background. Playback isn't wired up on Fire TV yet, so nothing visible changes today. `--es caps dump` logs what each stick reports. Shared code: the LG app keeps reading its own codec file once at boot and is unchanged.
+
 ## [0.2.20] - 2026-10-30
 
 ### Fixed
