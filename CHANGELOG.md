@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.22] - 2026-11-01
+
+### Added
+- Fire TV: a paused seek now shows its one picture in silence, on passthrough and PCM alike, and the sound starts from that picture when you press Play. The real app's video can also show through the UI, as the test harness's could, and a decoder that fails before the first picture now shows the error screen instead of spinning. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.21] - 2026-11-01
 
 ### Added
