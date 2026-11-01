@@ -39,6 +39,7 @@ import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -67,7 +68,7 @@ public class PlxActivity extends SDLActivity {
     protected String[] getArguments() {
         List<String> args = new ArrayList<>();
         Intent intent = getIntent();
-        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure", "net", "server"}) {
+        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure", "net", "server", "caps"}) {
             String value = intent == null ? null : intent.getStringExtra(key);
             if (value != null) {
                 args.add(key + "=" + value);
@@ -191,6 +192,17 @@ public class PlxActivity extends SDLActivity {
 
     private static native boolean nativeKey(int keyCode, int action, int repeatCount);
 
+    // Back in front: what the TV and the audio settings accept may have changed while the app was away.
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!mBrokenLibraries) {
+            nativeResumed();
+        }
+    }
+
+    private static native void nativeResumed();
+
     private static void setVideoSurface(Surface surface) {
         synchronized (sVideoLock) {
             sVideoSurface = surface;
@@ -201,7 +213,7 @@ public class PlxActivity extends SDLActivity {
     // Called by the native sink on its load thread: a started MediaTek decoder for mime that renders
     // to the video SurfaceView, or null (logged). The native side feeds and drains it itself.
     static MediaCodec openVideoDecoder(String mime, int width, int height) {
-        String name = "OMX.MTK.VIDEO.DECODER." + ("video/hevc".equals(mime) ? "HEVC" : "AVC");
+        String name = decoderName(mime);
         if (!hasDecoder(name, mime)) {
             Log.e(TAG, "video: no decoder " + name + " for " + mime);
             return null;
@@ -251,18 +263,27 @@ public class PlxActivity extends SDLActivity {
         }
     }
 
-    private static boolean hasDecoder(String name, String mime) {
+    // The one decoder the sink opens for a mime; the capability table reads this same one.
+    private static String decoderName(String mime) {
+        return "OMX.MTK.VIDEO.DECODER." + ("video/hevc".equals(mime) ? "HEVC" : "AVC");
+    }
+
+    private static MediaCodecInfo decoderInfo(String name, String mime) {
         for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
             if (info.isEncoder() || !info.getName().equals(name)) {
                 continue;
             }
             for (String type : info.getSupportedTypes()) {
                 if (type.equalsIgnoreCase(mime)) {
-                    return true;
+                    return info;
                 }
             }
         }
-        return false;
+        return null;
+    }
+
+    private static boolean hasDecoder(String name, String mime) {
+        return decoderInfo(name, mime) != null;
     }
 
     // Called by the native sink when the decoder's output format changes: the SurfaceView is resized
@@ -415,6 +436,123 @@ public class PlxActivity extends SDLActivity {
             }
         }
         return takes;
+    }
+
+    // The lines android/caps.rs turns into the capability table: "video h264|hevc WIDTH HEIGHT FPS" for
+    // each decoder the sink opens, "aac CHANNELS" and "hdmi ENCODING...". Null if the read failed.
+    static String codecFacts() {
+        try {
+            StringBuilder facts = new StringBuilder();
+            for (String mime : new String[] {"video/avc", "video/hevc"}) {
+                MediaCodecInfo info = decoderInfo(decoderName(mime), mime);
+                if (info != null) {
+                    appendVideo(facts, "video/hevc".equals(mime) ? "hevc" : "h264",
+                            info.getCapabilitiesForType(mime).getVideoCapabilities());
+                }
+            }
+            facts.append("aac ").append(aacChannels()).append('\n').append("hdmi");
+            for (int encoding : hdmiEncodings()) {
+                facts.append(' ').append(encoding);
+            }
+            return facts.append('\n').toString();
+        } catch (Exception e) {
+            Log.e(TAG, "caps: could not read the codec facts", e);
+            return null;
+        }
+    }
+
+    // The widest raster the decoder takes with its frame rate there. Its reported maxima are separate
+    // bounds, so the pair is checked, then 4K and 1080p; no line if none is supported.
+    private static void appendVideo(StringBuilder facts, String codec, MediaCodecInfo.VideoCapabilities video) {
+        int[][] rasters = {
+                {video.getSupportedWidths().getUpper(), video.getSupportedHeights().getUpper()}, {3840, 2160}, {1920, 1088}};
+        for (int[] raster : rasters) {
+            if (video.isSizeSupported(raster[0], raster[1])) {
+                double fps = 0;
+                try {
+                    fps = video.getSupportedFrameRatesFor(raster[0], raster[1]).getUpper();
+                } catch (IllegalArgumentException e) {
+                    Log.w(TAG, "caps: no frame rate for " + raster[0] + "x" + raster[1], e);
+                }
+                facts.append("video ").append(codec).append(' ').append(raster[0]).append(' ').append(raster[1])
+                        .append(' ').append((int) Math.ceil(fps)).append('\n');
+                return;
+            }
+        }
+    }
+
+    // The channel limit of the first AAC decoder, the one createDecoderByType gives the sink; 0 if none.
+    private static int aacChannels() {
+        for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
+            if (info.isEncoder()) {
+                continue;
+            }
+            for (String type : info.getSupportedTypes()) {
+                if (type.equalsIgnoreCase(AAC)) {
+                    return info.getCapabilitiesForType(AAC).getAudioCapabilities().getMaxInputChannelCount();
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static List<Integer> hdmiEncodings() {
+        List<Integer> encodings = new ArrayList<>();
+        for (AudioDeviceInfo device : hdmiOutputs()) {
+            for (int encoding : device.getEncodings()) {
+                if (!encodings.contains(encoding)) {
+                    encodings.add(encoding);
+                }
+            }
+        }
+        return encodings;
+    }
+
+    private static final List<String> DUMPED_TYPES =
+            Arrays.asList("video/avc", "video/hevc", "audio/ac3", "audio/eac3", "audio/vnd.dts");
+
+    // Logs each decoder of the types the table covers with its limits, then the audio outputs, so every
+    // stick's real values can be set beside what the table made of them.
+    static void dumpCodecs() {
+        for (MediaCodecInfo info : new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
+            if (info.isEncoder()) {
+                continue;
+            }
+            for (String type : info.getSupportedTypes()) {
+                if (!DUMPED_TYPES.contains(type.toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+                MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(type);
+                StringBuilder line = new StringBuilder("caps: " + info.getName() + " " + type + " profile/level");
+                for (MediaCodecInfo.CodecProfileLevel level : caps.profileLevels) {
+                    line.append(" 0x").append(Integer.toHexString(level.profile))
+                            .append("/0x").append(Integer.toHexString(level.level));
+                }
+                MediaCodecInfo.VideoCapabilities video = caps.getVideoCapabilities();
+                if (video != null) {
+                    line.append(" widths ").append(video.getSupportedWidths())
+                            .append(" heights ").append(video.getSupportedHeights())
+                            .append(" fps at 1080p ").append(frameRates(video, 1920, 1080))
+                            .append(" at 2160p ").append(frameRates(video, 3840, 2160));
+                }
+                MediaCodecInfo.AudioCapabilities audio = caps.getAudioCapabilities();
+                if (audio != null) {
+                    line.append(" max channels ").append(audio.getMaxInputChannelCount());
+                }
+                line.append(" secure ").append(caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_SecurePlayback))
+                        .append(" tunneled ").append(caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_TunneledPlayback));
+                Log.i(TAG, line.toString());
+            }
+        }
+        reportAudio();
+    }
+
+    private static String frameRates(MediaCodecInfo.VideoCapabilities video, int width, int height) {
+        try {
+            return String.valueOf(video.getSupportedFrameRatesFor(width, height));
+        } catch (IllegalArgumentException e) {
+            return "unsupported";
+        }
     }
 
     // Logs what each source reports about the audio outputs, so each stick's HDMI formats are on record.

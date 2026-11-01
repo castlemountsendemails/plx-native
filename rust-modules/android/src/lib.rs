@@ -5,6 +5,7 @@
 //! `video` and `audio` also build, and are tested, on the host.
 
 pub mod audio;
+pub mod caps;
 pub mod clip;
 pub mod keys;
 pub mod video;

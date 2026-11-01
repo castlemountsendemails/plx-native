@@ -416,6 +416,30 @@ pub fn sink_takes(encoding: i32) -> i32 {
         .unwrap_or(-1)
 }
 
+/// `PlxActivity.codecFacts`: the lines `caps::table` reads, or `None` when the read failed.
+pub fn codec_facts() -> Option<String> {
+    let class = activity()?;
+    with_env("read the codec facts", |env| {
+        let facts = JString::from(env.call_static_method(class, "codecFacts", "()Ljava/lang/String;", &[])?.l()?);
+        let facts: String = env.get_string(&facts)?.into();
+        Ok(facts)
+    })
+}
+
+/// Logs the stick's video decoders and Dolby/DTS audio decoders with their limits, and the audio outputs.
+pub fn dump_codecs() {
+    if let Some(class) = activity() {
+        with_env("dump the codecs", |env| env.call_static_method(class, "dumpCodecs", "()V", &[]).map(drop));
+    }
+}
+
+/// `static native void nativeResumed()`: the Activity is back in front, where the TV or the audio
+/// settings may have changed while it was away.
+#[no_mangle]
+pub extern "system" fn Java_com_beb_plxnative_PlxActivity_nativeResumed(_env: *mut c_void, _class: *mut c_void) {
+    plx_platform::devcaps::refresh();
+}
+
 /// Logs what the outputs, the HDMI plug broadcast and Fire OS's audio settings report, and the
 /// stick's AAC decoders.
 pub fn audio_report() {

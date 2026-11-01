@@ -7823,6 +7823,9 @@ fn request_play_inner(
         );
         return false;
     }
+    // The decision request below is built from the device table, and a platform that reads it from
+    // a running system (Fire TV: the TV's audio formats) may have a different answer than at boot.
+    plx_platform::devcaps::refresh();
     // **The playback funnel's denominator, minted HERE and not where the plan lands.** Every way
     // into playback comes through this one function, including the ones that go on to be refused at
     // `/decision` — and a refusal never reaches the engine, so anchoring the attempt any later

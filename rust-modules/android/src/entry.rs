@@ -7,6 +7,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
 use std::path::PathBuf;
 
+use crate::caps;
 use crate::clip;
 use crate::harness::{self, Harness};
 use crate::jni;
@@ -129,10 +130,12 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         log(LOG_ERROR, "SDL_AndroidGetInternalStoragePath failed; app files are looked for nowhere");
     }
     let arg = |key: &str| args.iter().find_map(|arg| arg.strip_prefix(key)?.strip_prefix('='));
-    let lines = match (arg("secure"), arg("net")) {
-        (Some(mode), _) => Some(secure::harness(mode)),
-        (None, Some(_)) => Some(netcheck::harness(arg("server"))),
-        (None, None) => None,
+    plx_platform::devcaps::set_source(caps::source);
+    let lines = match (arg("secure"), arg("net"), arg("caps")) {
+        (Some(mode), _, _) => Some(secure::harness(mode)),
+        (None, Some(_), _) => Some(netcheck::harness(arg("server"))),
+        (None, None, Some(mode)) => Some(caps::harness(mode)),
+        (None, None, None) => None,
     };
     let clip = clip::parse(args.iter().map(String::as_str));
     if clip.is_none() && lines.is_none() {

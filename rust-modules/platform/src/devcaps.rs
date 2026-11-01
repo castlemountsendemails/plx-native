@@ -39,7 +39,8 @@
 //! before this module. Misreading the table must degrade to yesterday's behavior, not invent a
 //! weaker television: the issue-#22 lesson cuts both ways, and a client that suddenly transcodes
 //! everything on a healthy 4K panel is as wrong as one that direct-plays HEVC to a SoC without it.
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::{OnceLock, PoisonError, RwLock};
 
 pub mod dv;
 
@@ -170,8 +171,42 @@ impl Caps {
     }
 }
 
-static CAPS: OnceLock<Caps> = OnceLock::new();
-/// Did [`probe`] READ the table, or is [`caps`] returning [`Caps::assumed`]?
+/// The held snapshot and whether it came from a real read.
+///
+/// `get` hands out `&'static Caps`, so a replaced snapshot is leaked rather than freed under its
+/// readers; a replacement needs a different television or setting, so the leak is a few hundred
+/// bytes per change.
+struct Held {
+    caps: RwLock<Option<&'static Caps>>,
+    measured: AtomicBool,
+}
+
+impl Held {
+    const fn new() -> Self {
+        Self { caps: RwLock::new(None), measured: AtomicBool::new(false) }
+    }
+
+    fn get(&self) -> Option<&'static Caps> {
+        *self.caps.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn measured(&self) -> bool {
+        self.measured.load(Relaxed)
+    }
+
+    /// Whether this replaced what was held; an identical snapshot is not stored again.
+    fn put(&self, caps: Caps, measured: bool) -> bool {
+        let mut held = self.caps.write().unwrap_or_else(PoisonError::into_inner);
+        if held.is_some_and(|held| *held == caps) && self.measured() == measured {
+            return false;
+        }
+        *held = Some(Box::leak(Box::new(caps)));
+        self.measured.store(measured, Relaxed);
+        true
+    }
+}
+
+/// Did the table get READ, or is [`caps`] returning [`Caps::assumed`]?
 ///
 /// The two are indistinguishable from the values alone — on the 49SM9000PLA they are equal by
 /// construction, and on every other set the fallback silently claims that set's profile. The event
@@ -181,14 +216,47 @@ static CAPS: OnceLock<Caps> = OnceLock::new();
 /// the dev set's decoder profile as if it had measured the reporter's is the [[silent-instrument-
 /// trap]] shape exactly — an instrument that cannot say it did not measure.
 ///
-/// **`false` when `probe` has not run**, which covers host tests as well as a boot that never got
+/// **`false` when nothing has been read**, which covers host tests as well as a boot that never got
 /// here: "not measured" is the honest reading of both.
-static MEASURED: OnceLock<bool> = OnceLock::new();
+static CAPS: Held = Held::new();
+static ASSUMED: OnceLock<Caps> = OnceLock::new();
 
 /// What this device decodes. Falls back to [`Caps::assumed`] if [`probe`] has not run — the
 /// boot calls it first, so that path exists for host tests, not the TV.
 pub fn caps() -> &'static Caps {
-    CAPS.get_or_init(Caps::assumed)
+    CAPS.get().unwrap_or_else(|| ASSUMED.get_or_init(Caps::assumed))
+}
+
+/// The port's reader of the table, for a platform whose table is read from a running system
+/// (the Fire TV's decoders and HDMI sink) rather than from a file at boot. `None` is a failed read.
+static SOURCE: OnceLock<fn() -> Option<String>> = OnceLock::new();
+
+pub fn set_source(source: fn() -> Option<String>) {
+    let _ = SOURCE.set(source);
+}
+
+/// Reads the table from the port's source again, and whether [`caps`] changed. A failed read keeps
+/// the snapshot held, or the assumed one before any. Does nothing without a source (webOS reads
+/// its file once, in [`probe`]).
+pub fn refresh() -> bool {
+    let Some(source) = SOURCE.get() else { return false };
+    match source().and_then(|text| parse(&text)) {
+        Some(c) => {
+            let line = describe(&c);
+            let changed = CAPS.put(c, true);
+            if changed {
+                plx_base::eventlog::log(&format!("devcaps: {line} (device)"));
+            }
+            changed
+        }
+        None => {
+            if CAPS.get().is_none() {
+                CAPS.put(Caps::assumed(), false);
+                plx_base::eventlog::log("devcaps: the device table could not be read — assuming the 49SM9000PLA profile");
+            }
+            false
+        }
+    }
 }
 
 /// One codec name, canonicalized: the table writes `"H.264"`, `"H.265"`, `"HEVC"`, `"EAC3"`;
@@ -368,40 +436,20 @@ pub fn vp9_bit_depth_for(major: u32) -> u32 {
 
 /// Read the table once and log what was derived. Called at boot right after `webos::probe`,
 /// before anything can fail; safe when the file does not exist (older/odd firmware → assumed).
+/// A platform with a [`set_source`] reader takes its table from that instead.
 pub fn probe() {
+    if SOURCE.get().is_some() {
+        refresh();
+        return;
+    }
     let mut measured = false;
     let caps = match std::fs::read_to_string(CAPS_TABLE) {
         Ok(s) => match parse(&s) {
             Some(c) => {
                 measured = true;
-                let av1_row = if c.av1 {
-                    format!(" av1={}x{}@{}", c.av1_row.0, c.av1_row.1, c.av1_row.2)
-                } else {
-                    String::new()
-                };
-                let vp9_row = if c.vp9 {
-                    format!(" vp9={}x{}@{}", c.vp9_row.0, c.vp9_row.1, c.vp9_row.2)
-                } else {
-                    String::new()
-                };
                 let mut c = c;
                 c.vp9_bit_depth = vp9_bit_depth_for(crate::tv::device::info().major);
-                plx_base::eventlog::log(&format!(
-                    "devcaps: hevc={} {}x{} vp9={} av1={} audio={} rows: h264={}x{}@{} hevc={}x{}@{}{vp9_row}{av1_row} vp9bits={} (device table)",
-                    c.hevc,
-                    c.hevc_max.0,
-                    c.hevc_max.1,
-                    c.vp9,
-                    c.av1,
-                    c.audio,
-                    c.h264_row.0,
-                    c.h264_row.1,
-                    c.h264_row.2,
-                    c.hevc_row.0,
-                    c.hevc_row.1,
-                    c.hevc_row.2,
-                    c.vp9_bit_depth
-                ));
+                plx_base::eventlog::log(&format!("devcaps: {} (device table)", describe(&c)));
                 c
             }
             None => {
@@ -418,13 +466,41 @@ pub fn probe() {
             Caps::assumed()
         }
     };
-    let _ = MEASURED.set(measured);
-    let _ = CAPS.set(caps);
+    CAPS.put(caps, measured);
 }
 
-/// Whether [`caps`] reflects THIS set's table or the assumed profile — see [`MEASURED`].
+fn describe(c: &Caps) -> String {
+    let av1_row = if c.av1 {
+        format!(" av1={}x{}@{}", c.av1_row.0, c.av1_row.1, c.av1_row.2)
+    } else {
+        String::new()
+    };
+    let vp9_row = if c.vp9 {
+        format!(" vp9={}x{}@{}", c.vp9_row.0, c.vp9_row.1, c.vp9_row.2)
+    } else {
+        String::new()
+    };
+    format!(
+        "hevc={} {}x{} vp9={} av1={} audio={} rows: h264={}x{}@{} hevc={}x{}@{}{vp9_row}{av1_row} vp9bits={}",
+        c.hevc,
+        c.hevc_max.0,
+        c.hevc_max.1,
+        c.vp9,
+        c.av1,
+        c.audio,
+        c.h264_row.0,
+        c.h264_row.1,
+        c.h264_row.2,
+        c.hevc_row.0,
+        c.hevc_row.1,
+        c.hevc_row.2,
+        c.vp9_bit_depth
+    )
+}
+
+/// Whether [`caps`] reflects THIS set's table or the assumed profile — see [`CAPS`].
 pub fn measured() -> bool {
-    *MEASURED.get().unwrap_or(&false)
+    CAPS.measured()
 }
 
 #[cfg(test)]
@@ -518,6 +594,54 @@ mod tests {
     }
   ]
 }"#;
+
+    /// What `android::caps::table` writes for a Stick 4K whose TV takes AC-3 and E-AC3, and for an
+    /// HD whose TV takes PCM only: the HD's profile must leave AC-3 out so the server converts it.
+    #[test]
+    fn a_fire_tv_table_parses_by_the_same_rules() {
+        let stick_4k = parse(concat!(
+            r#"{"videoCodecs":[{"name":"H.264","maxWidth":4096,"maxHeight":2304,"maxFrameRate":60},"#,
+            r#"{"name":"HEVC","maxWidth":3840,"maxHeight":2160,"maxFrameRate":60}],"#,
+            r#""audioCodecs":[{"name":"AAC","channels":8},{"name":"AC3"},{"name":"EAC3"}]}"#
+        ))
+        .unwrap();
+        assert!(stick_4k.hevc);
+        assert_eq!(stick_4k.hevc_max, (3840, 2160));
+        assert_eq!(stick_4k.audio, "aac,ac3,eac3");
+        assert!(stick_4k.audio_supports("eac3", 8) && stick_4k.audio_supports("aac", 8));
+
+        let hd = parse(concat!(
+            r#"{"videoCodecs":[{"name":"H.264","maxWidth":1920,"maxHeight":1088,"maxFrameRate":60},"#,
+            r#"{"name":"HEVC","maxWidth":1920,"maxHeight":1088,"maxFrameRate":60}],"#,
+            r#""audioCodecs":[{"name":"AAC","channels":8}]}"#
+        ))
+        .unwrap();
+        assert_eq!(hd.hevc_max, (1920, 1088));
+        assert_eq!(hd.audio, "aac");
+        assert!(!hd.audio_has("ac3") && !hd.audio_has("eac3"));
+    }
+
+    #[test]
+    fn a_fire_tv_table_without_an_h264_row_is_rejected() {
+        let no_h264 = r#"{"videoCodecs":[{"name":"HEVC","maxWidth":1920,"maxHeight":1088,"maxFrameRate":60}],"audioCodecs":[{"name":"AAC"}]}"#;
+        assert!(parse(no_h264).is_none());
+    }
+
+    #[test]
+    fn held_caps_are_replaced_only_by_a_different_table() {
+        let held = Held::new();
+        assert!(held.get().is_none() && !held.measured());
+        assert!(held.put(Caps::assumed(), true), "the first table is a change");
+        let first = held.get().unwrap();
+        assert!(held.measured());
+        assert!(!held.put(Caps::assumed(), true), "the same table is not");
+        assert!(std::ptr::eq(first, held.get().unwrap()), "and is not stored again");
+        let hd = Caps { audio: "aac".into(), ..Caps::assumed() };
+        assert!(held.put(hd.clone(), true));
+        assert_eq!(held.get().unwrap(), &hd);
+        assert!(held.put(hd, false), "the same caps no longer measured is a change");
+        assert!(!held.measured());
+    }
 
     #[test]
     fn reads_the_dev_sets_real_table() {
