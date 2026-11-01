@@ -111,6 +111,35 @@ impl Timeline {
     }
 }
 
+/// When the track runs: while the sink plays and no preroll mute stands. A mute keeps the track
+/// stopped rather than quieting it, because `setVolume` cannot quiet a passthrough track, and the
+/// audio already fed then plays from the picture's own time when the viewer resumes.
+#[derive(Default)]
+pub struct Transport {
+    playing: bool,
+    muted: bool,
+}
+
+impl Transport {
+    pub fn runs(&self) -> bool {
+        self.playing && !self.muted
+    }
+
+    /// `Some(whether the track should now run)` when that changed.
+    pub fn set_playing(&mut self, playing: bool) -> Option<bool> {
+        let before = self.runs();
+        self.playing = playing;
+        (self.runs() != before).then_some(self.runs())
+    }
+
+    /// `Some(whether the track should now run)` when that changed.
+    pub fn set_muted(&mut self, muted: bool) -> Option<bool> {
+        let before = self.runs();
+        self.muted = muted;
+        (self.runs() != before).then_some(self.runs())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Source {
     /// `AudioTrack.getTimestamp`: a frame and the time it reached the output.
@@ -241,6 +270,38 @@ mod tests {
         let mut position = Position::default();
         assert_eq!(position.sample(None, 0, 9600, 1_000), None);
         assert_eq!(position.sample(None, 480, 9600, 2_000), Some((480, 2_000, Source::Head)));
+    }
+
+    #[test]
+    fn a_muted_play_leaves_the_track_stopped_until_the_mute_lifts() {
+        let mut transport = Transport::default();
+        assert_eq!(transport.set_muted(true), None);
+        assert_eq!(transport.set_playing(true), None, "the preroll's Play must not sound");
+        assert!(!transport.runs());
+        assert_eq!(transport.set_muted(false), Some(true), "the viewer resumed during the preroll");
+        assert!(transport.runs());
+    }
+
+    #[test]
+    fn a_preroll_paused_again_before_the_mute_lifts_waits_for_the_next_play() {
+        let mut transport = Transport::default();
+        transport.set_muted(true);
+        transport.set_playing(true);
+        assert_eq!(transport.set_playing(false), None);
+        assert_eq!(transport.set_muted(false), None, "still paused: no sound yet");
+        assert!(!transport.runs());
+        assert_eq!(transport.set_playing(true), Some(true));
+    }
+
+    #[test]
+    fn the_track_changes_only_when_what_it_should_do_changes() {
+        let mut transport = Transport::default();
+        assert_eq!(transport.set_playing(true), Some(true));
+        assert_eq!(transport.set_playing(true), None);
+        assert_eq!(transport.set_muted(true), Some(false));
+        transport.set_muted(false);
+        assert_eq!(transport.set_playing(false), Some(false));
+        assert_eq!(transport.set_playing(false), None);
     }
 
     #[test]

@@ -172,6 +172,8 @@ fn drain() {
             Some(Step::Failed) => {
                 log(LOG_ERROR, "amc: the decoder failed; no more frames are shown");
                 DRAINING.store(false, Relaxed);
+                // Before the first picture this type fails the source; after one the engine only logs it.
+                event(18, 0, Some(c"decoder failed"));
             }
         }
     }
@@ -275,7 +277,8 @@ impl VideoSink for AmcSink {
         audiotrack::pause();
         c_int::from(held.is_some())
     }
-    unsafe fn set_volume(&self, _: &MainThread, _volume: c_int) -> c_int {
+    unsafe fn set_volume(&self, _: &MainThread, volume: c_int) -> c_int {
+        audiotrack::set_muted(volume == 0);
         1
     }
     unsafe fn flush(&self, _: &MainThread) -> c_int {

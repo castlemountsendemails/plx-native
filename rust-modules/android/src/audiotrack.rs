@@ -11,7 +11,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::amediacodec::{now_ns, FEED_FULL, FEED_OK};
-use crate::audio::{self, Plan, Position, Source, Timeline, AC3_FRAMES, ENCODING_AC3, ENCODING_DTS, ENCODING_E_AC3, ENCODING_PCM_FLOAT};
+use crate::audio::{self, Plan, Position, Source, Timeline, Transport, AC3_FRAMES, ENCODING_AC3, ENCODING_DTS, ENCODING_E_AC3, ENCODING_PCM_FLOAT};
 use crate::harness::Span;
 use crate::jni::{self, Codec, Input, Output, Track};
 use crate::entry::{log, LOG_ERROR, LOG_INFO};
@@ -71,7 +71,7 @@ struct Out {
     bytes: i64,
     position: Position,
     source: Option<Source>,
-    playing: bool,
+    transport: Transport,
     polls: u32,
     polled_ns: i64,
     logged_ns: i64,
@@ -91,7 +91,7 @@ impl Out {
             bytes: 0,
             position: Position::default(),
             source: None,
-            playing: false,
+            transport: Transport::default(),
             polls: 0,
             polled_ns: 0,
             logged_ns: 0,
@@ -142,7 +142,7 @@ impl Out {
             }
         }
         let wrote = self.write();
-        if self.playing && now - self.polled_ns >= POLL_NS {
+        if self.transport.runs() && now - self.polled_ns >= POLL_NS {
             self.poll(now);
         }
         busy || wrote
@@ -226,7 +226,7 @@ impl Out {
             self.fail(why);
             return;
         };
-        if self.playing {
+        if self.transport.runs() {
             track.play();
         }
         self.track = Some(track);
@@ -275,6 +275,24 @@ impl Out {
         self.chunk = None;
         WRITTEN.fetch_add(1, Relaxed);
         true
+    }
+
+    fn follow(&mut self, runs: Option<bool>) {
+        let Some(runs) = runs else {
+            return;
+        };
+        if runs {
+            self.position.reset();
+            self.polls = 0;
+        }
+        if let Some(track) = self.track.as_ref() {
+            if runs {
+                track.play();
+            } else {
+                track.pause();
+            }
+        }
+        publish(None);
     }
 
     fn poll(&mut self, now: i64) {
@@ -403,24 +421,26 @@ pub fn feed(data: &[u8], pts: i64) -> c_char {
 
 pub fn play() {
     if let Some(out) = lock(&OUT).as_mut() {
-        out.playing = true;
-        out.position.reset();
-        out.polls = 0;
-        if let Some(track) = out.track.as_ref() {
-            track.play();
-        }
+        let runs = out.transport.set_playing(true);
+        out.follow(runs);
     }
-    publish(None);
 }
 
 pub fn pause() {
     if let Some(out) = lock(&OUT).as_mut() {
-        out.playing = false;
-        if let Some(track) = out.track.as_ref() {
-            track.pause();
-        }
+        let runs = out.transport.set_playing(false);
+        out.follow(runs);
     }
-    publish(None);
+}
+
+/// A paused preroll's picture: the track stays stopped, and frames run on their own clock, since
+/// no audio clock will start for them to wait on.
+pub fn set_muted(muted: bool) {
+    if let Some(out) = lock(&OUT).as_mut() {
+        EXPECTED.store(!muted && out.playable(), Relaxed);
+        let runs = out.transport.set_muted(muted);
+        out.follow(runs);
+    }
 }
 
 /// Drops everything queued and the track itself, which the writer opens again for the next AU:

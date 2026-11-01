@@ -124,6 +124,9 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         .collect();
     // The engine's socket sends without MSG_NOSIGNAL; a reset peer must not kill the process.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+    // An alpha channel that SurfaceFlinger honours, so the video SurfaceView under this one
+    // shows wherever the UI clears to transparent.
+    unsafe { SDL_SetHint(c"SDL_VIDEO_EGL_ALLOW_TRANSPARENCY".as_ptr(), c"1".as_ptr()) };
     if let Some(files) = files_dir() {
         plx_base::paths::set_android_files_dir(files);
     } else {
@@ -182,9 +185,6 @@ fn run(clip: Option<clip::Clip>, harness_lines: Option<Vec<String>>) -> Result<(
         if TTF_Init() != 0 {
             return Err(sdl_error("TTF_Init"));
         }
-        // An alpha channel that SurfaceFlinger honours, so the video SurfaceView under this one
-        // shows wherever the UI clears to transparent.
-        SDL_SetHint(c"SDL_VIDEO_EGL_ALLOW_TRANSPARENCY".as_ptr(), c"1".as_ptr());
         SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
         // Android sizes the window to the surface, which PlxActivity fixes at 1920x1080.
         let window = SDL_CreateWindow(
