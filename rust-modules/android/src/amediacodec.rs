@@ -13,13 +13,13 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use plx_base::task::MainThread;
-use plx_media::player::sf_on_event;
+use plx_media::player::{duration_ns, playpos_ns, sf_on_event};
 use plx_platform::tv::sink::{UnloadTicket, VideoSink, VP_EXPORTED};
 
 use crate::audiotrack;
 use crate::jni::{Codec, Input, Output};
 use crate::entry::{log, LOG_ERROR, LOG_INFO};
-use crate::video::{self, Action, Au, Clock, Inputs};
+use crate::video::{self, Action, Au, Clock, Ending, Inputs, Tail};
 
 pub(crate) const FEED_OK: c_char = b'O' as c_char;
 pub(crate) const FEED_FULL: c_char = b'B' as c_char;
@@ -76,12 +76,17 @@ struct Decoder {
     playing: bool,
     clock: Clock,
     last_fed_us: i64,
+    /// Set once end of stream is queued, until a flush.
+    tail: Option<Tail>,
+    video_ended: bool,
+    last_pts: i64,
 }
 
 enum Step {
     Idle,
     Busy,
     Presented(i64),
+    PlayedOut(i64),
     Failed,
 }
 
@@ -91,6 +96,29 @@ impl Decoder {
         self.inputs.clear();
         self.pending = None;
         self.clock.reset();
+        self.tail = None;
+        self.video_ended = false;
+    }
+
+    /// Past the last frame, the position comes from the audio.
+    fn ending(&mut self) -> Step {
+        if !self.video_ended || !self.playing {
+            return Step::Idle;
+        }
+        let Some(tail) = self.tail.as_mut() else {
+            return Step::Idle;
+        };
+        match tail.ending(audiotrack::clock(), now_ns(), self.last_pts) {
+            Ending::Wait => Step::Idle,
+            Ending::Position(pts) => {
+                self.last_pts = pts;
+                Step::Presented(pts)
+            }
+            Ending::PlayedOut => {
+                self.video_ended = false;
+                Step::PlayedOut(self.last_pts)
+            }
+        }
     }
 
     /// Moves queued AUs into free input buffers; `None` if the decoder failed.
@@ -113,11 +141,12 @@ impl Decoder {
         if self.pending.is_none() {
             match self.codec.dequeue() {
                 None => return Step::Failed,
-                Some(Output::None) => return Step::Idle,
+                Some(Output::None) => return self.ending(),
                 Some(Output::FormatChanged) => return Step::Busy,
                 Some(Output::Frame { index, end: true, .. }) => {
                     log(LOG_INFO, "amc: end of stream decoded");
                     self.codec.release(index, None);
+                    self.video_ended = true;
                     return Step::Busy;
                 }
                 Some(Output::Frame { index, pts_us, end: false }) => {
@@ -128,8 +157,11 @@ impl Decoder {
         let Some((index, pts)) = self.pending.filter(|_| self.playing) else {
             return Step::Idle;
         };
-        let audio = audiotrack::clock();
         let now = now_ns();
+        let audio = match self.tail.as_mut() {
+            Some(tail) => tail.audio(audiotrack::clock(), now),
+            None => audiotrack::clock(),
+        };
         let render = match self.clock.action(pts, now, audio) {
             Action::Wait => return Step::Idle,
             Action::Show(at) => Some(at),
@@ -154,6 +186,7 @@ impl Decoder {
             let drift = drift.map_or("-".into(), |drift| format!("{}ms", drift / 1_000_000));
             log(LOG_INFO, &format!("amc: frame {what} #{n} pts={}ms drift={drift} queued={}", pts / 1_000_000, self.inputs.queued()));
         }
+        self.last_pts = pts;
         Step::Presented(pts)
     }
 }
@@ -167,6 +200,10 @@ fn drain() {
     while DRAINING.load(Relaxed) {
         match with_decoder(Decoder::step) {
             Some(Step::Presented(pts)) => event(0, pts, None),
+            Some(Step::PlayedOut(last_pts)) => {
+                log(LOG_INFO, "amc: played out");
+                event(0, video::end_position(last_pts, duration_ns(), playpos_ns()), None);
+            }
             Some(Step::Busy) => {}
             Some(Step::Idle) | None => std::thread::sleep(IDLE),
             Some(Step::Failed) => {
@@ -230,7 +267,7 @@ impl VideoSink for AmcSink {
         };
         log(LOG_INFO, &format!("amc: {} started for {format:?}", codec.name));
         lock(&NAME).clone_from(&codec.name);
-        *lock(&DECODER) = Some(Decoder { codec, inputs: Inputs::default(), pending: None, playing: false, clock: Clock::default(), last_fed_us: 0 });
+        *lock(&DECODER) = Some(Decoder { codec, inputs: Inputs::default(), pending: None, playing: false, clock: Clock::default(), last_fed_us: 0, tail: None, video_ended: false, last_pts: 0 });
         for count in [&FED, &SHOWN, &LATE, &FEED_MAX_US] {
             count.store(0, Relaxed);
         }
@@ -264,6 +301,9 @@ impl VideoSink for AmcSink {
             if !d.playing {
                 d.playing = true;
                 d.clock.reset();
+                if let Some(tail) = d.tail.as_mut() {
+                    tail.rearm(now_ns());
+                }
             }
         });
         audiotrack::play();
@@ -292,6 +332,7 @@ impl VideoSink for AmcSink {
     unsafe fn push_eos(&self, _: &MainThread) -> c_int {
         let queued = with_decoder(|d| {
             d.inputs.push(Au { data: Vec::new(), pts_us: d.last_fed_us, end: true });
+            d.tail = Some(Tail::new(now_ns()));
             d.put_inputs()
         });
         if queued.flatten().is_some() {
