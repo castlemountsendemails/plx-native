@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.23] - 2026-11-02
+
+### Added
+- Fire TV: a movie whose sound runs on past its last picture now ends and returns to the app, instead of stopping on a black screen just short of its length. Fire TV only: the LG app is unchanged.
+
 ## [0.2.22] - 2026-11-01
 
 ### Added
