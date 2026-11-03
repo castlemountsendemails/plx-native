@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.25] - 2026-11-03
+
+### Added
+- Fire TV: when the TV drops the HDMI link (some TVs do on an input switch), playback now parks at the same spot and frees the audio. Any button press brings it back, and Play resumes it. The app also re-reads what the TV accepts when you return to a parked movie, from Home or after the link drop. If the TV no longer takes the movie's sound (for example, Surround Sound was set to PCM while you were away), the app asks the server again at the same spot. Not yet tried on any stick. Shared code: the LG reads its codec file once at boot, so it never sees a change, and the LG app is unchanged.
+
 ## [0.2.24] - 2026-11-02
 
 ### Added
