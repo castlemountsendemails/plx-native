@@ -2050,6 +2050,7 @@ pub(crate) unsafe fn construct(
         adapters,
         repause_at,
         decoder_parked: false,
+        caps_changed: false,
         ok_armed,
         last_route_reported,
         ptr,

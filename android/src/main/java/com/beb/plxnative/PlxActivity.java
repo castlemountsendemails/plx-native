@@ -1,5 +1,6 @@
 package com.beb.plxnative;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -55,6 +56,7 @@ public class PlxActivity extends SDLActivity {
     private static Surface sVideoSurface;
     private static SurfaceView sVideoView;
     private static Context sContext;
+    private BroadcastReceiver mHdmiPlug;
 
     // SDLActivity loads these in order and enters SDL_main in the last one.
     @Override
@@ -105,7 +107,29 @@ public class PlxActivity extends SDLActivity {
         mLayout.addView(video, 0, new RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         sVideoView = video;
+        // A TV that drops the HDMI link on an input switch gives the app no lifecycle event, only
+        // this broadcast; the sink parks playback on it.
+        mHdmiPlug = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!isInitialStickyBroadcast() && intent.getIntExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 1) == 0) {
+                    nativeHdmiUnplugged();
+                }
+            }
+        };
+        registerReceiver(mHdmiPlug, new IntentFilter(AudioManager.ACTION_HDMI_AUDIO_PLUG));
     }
+
+    @Override
+    protected void onDestroy() {
+        if (mHdmiPlug != null) {
+            unregisterReceiver(mHdmiPlug);
+            mHdmiPlug = null;
+        }
+        super.onDestroy();
+    }
+
+    private static native void nativeHdmiUnplugged();
 
     // The native side reads these from the files folder (paths::app_dir), not the APK. They are copied
     // again whenever the package's lastUpdateTime differs from the marker's, which every install and
@@ -191,17 +215,6 @@ public class PlxActivity extends SDLActivity {
     }
 
     private static native boolean nativeKey(int keyCode, int action, int repeatCount);
-
-    // Back in front: what the TV and the audio settings accept may have changed while the app was away.
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (!mBrokenLibraries) {
-            nativeResumed();
-        }
-    }
-
-    private static native void nativeResumed();
 
     private static void setVideoSurface(Surface surface) {
         synchronized (sVideoLock) {

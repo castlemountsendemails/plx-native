@@ -6667,6 +6667,17 @@ pub fn audio_track_direct_plays(ps: &PlaybackSession, codec: &str, channels: i64
     audio_direct_plays(ps.direct_play_mode, codec, channels)
 }
 
+/// Whether the route on screen was decided for a device table that has since changed under it
+/// (Fire TV re-reads the TV's audio formats on return from the background): a direct play whose
+/// audio the table no longer takes, or any server encode, which was built for the old table.
+pub fn route_outlived_caps(ps: &PlaybackSession) -> bool {
+    match (live_family(ps), ps.cur_audio.as_ref()) {
+        (RouteFamily::Direct, Some(a)) => !audio_track_direct_plays(ps, &a.codec, a.channels),
+        (RouteFamily::Direct, None) => false,
+        _ => true,
+    }
+}
+
 /// **Would the server convert this track's audio if it played?** The track menu's "converted by
 /// your server" mark: a track the TV cannot decode (`audio_direct_plays`, the same capability
 /// answer the planner and the profile use) plays through the server's remux or re-encode with its

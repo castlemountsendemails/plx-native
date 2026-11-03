@@ -455,6 +455,18 @@ impl VideoSink for AmcSink {
     unsafe fn plane_resume(&self, _: &MainThread) {}
 }
 
+/// The TV dropped the HDMI link and the audio track dies with it. Reported as the pipeline taking
+/// the decoder back (type 18, number 600), so the engine parks the session at its spot and the
+/// viewer's next press restores it. Before the first picture that number would fail the source,
+/// so nothing is reported then.
+pub fn hdmi_unplugged() {
+    if SHOWN.load(Relaxed) == 0 || lock(&DECODER).is_none() {
+        return;
+    }
+    log(LOG_INFO, "amc: HDMI unplugged; parking the session");
+    event(18, 600, Some(c"HDMI unplugged"));
+}
+
 /// For the label: the decoder's name, then video AUs fed, frames shown and late frames dropped
 /// since the last Load.
 pub fn stats() -> (String, u64, u64, u64) {

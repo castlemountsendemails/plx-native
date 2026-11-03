@@ -981,6 +981,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             plx_machine::idle::invalidate();
             // A decoder-release park is claimed by this edge like any other park.
             app.decoder_parked = false;
+            note_caps_on_claim(app);
             let activation = drive_foreground(
                 &mut app.player.lifecycle,
                 &mut app.player.session,
@@ -1692,6 +1693,7 @@ fn claim_press_after_decoder_release(app: &mut App, press: WakePress) -> bool {
         return false;
     }
     app.decoder_parked = false;
+    note_caps_on_claim(app);
     let input = wake_input(press, app.player.lifecycle.claimable_clock());
     let activation = drive_foreground(
         &mut app.player.lifecycle,
@@ -1709,9 +1711,23 @@ fn claim_press_after_decoder_release(app: &mut App, press: WakePress) -> bool {
     true
 }
 
+/// Re-reads the device table as a parked session is claimed. Only a platform that reads it from a
+/// running system (Fire TV: the TV's audio formats, which may change while the app is away or the
+/// HDMI link is down) can see a change; webOS reads its file once.
+fn note_caps_on_claim(app: &mut App) {
+    let changed = plx_platform::devcaps::refresh();
+    app.caps_changed |= changed && app.player.lifecycle.awaiting_load();
+}
+
 /// A foreground Load launched — straight from the DID edge, or from the frame that landed a flight
 /// the restore was waiting on (`poll_foreground_flight`): mount the player and pin its transport.
 fn finish_foreground_launch(app: &mut App) {
+    // The restore reloads the parked route; one decided for a table that has since changed is
+    // asked for again at the restored spot once the Load settles.
+    if std::mem::take(&mut app.caps_changed) && plx_media::route::route_outlived_caps(&app.player.session) {
+        log("player: the device table changed while parked — asking the server again");
+        plx_media::route::request_user_route_intent(&app.player.session, plx_media::route::UserRouteIntent::Retranscode);
+    }
     // The park kept the page, so this is ordinarily a no-op; it is written out
     // because a foreground that finds the player gone has to put it back rather
     // than resume a session with nothing on screen.
@@ -3434,6 +3450,7 @@ mod lifecycle_regression_tests {
             },
             repause_at: -1,
             decoder_parked: false,
+            caps_changed: false,
             ok_armed: Default::default(),
             last_route_reported: Default::default(),
             ptr: Pointer::IDLE,
