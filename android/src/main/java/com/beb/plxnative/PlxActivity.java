@@ -70,7 +70,7 @@ public class PlxActivity extends SDLActivity {
     protected String[] getArguments() {
         List<String> args = new ArrayList<>();
         Intent intent = getIntent();
-        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure", "net", "server", "caps"}) {
+        for (String key : new String[] {"clip", "vc", "ac", "fps", "size", "secure", "net", "server", "caps", "ass"}) {
             String value = intent == null ? null : intent.getStringExtra(key);
             if (value != null) {
                 args.add(key + "=" + value);
@@ -137,6 +137,8 @@ public class PlxActivity extends SDLActivity {
     private static final String[] FILES_FROM_ASSETS = {
         "cacert.pem", "le-roots.pem", "appfont.ttf", "appfont-bold.ttf", "appfont-emoji.ttf", "appfont-cjk.ttf",
     };
+    // The subtitle faces and their manifest (libass finds a script's face by family name): every file in this assets folder.
+    private static final String SUBS_ASSET_DIR = "fonts/subs";
     private static final String ASSETS_MARKER = "assets.installed";
 
     private void copyAssetsToFiles() {
@@ -151,9 +153,19 @@ public class PlxActivity extends SDLActivity {
         if (stamp.equals(readText(marker))) {
             return;
         }
+        List<String> names = new ArrayList<>(Arrays.asList(FILES_FROM_ASSETS));
+        try {
+            for (String face : getAssets().list(SUBS_ASSET_DIR)) {
+                names.add(SUBS_ASSET_DIR + "/" + face);
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "assets: could not list " + SUBS_ASSET_DIR, e);
+            return;
+        }
         byte[] buffer = new byte[64 * 1024];
-        for (String name : FILES_FROM_ASSETS) {
+        for (String name : names) {
             File part = new File(dir, name + ".part");
+            part.getParentFile().mkdirs();
             try (InputStream in = getAssets().open(name); OutputStream out = new FileOutputStream(part)) {
                 int n;
                 while ((n = in.read(buffer)) > 0) {
@@ -174,7 +186,7 @@ public class PlxActivity extends SDLActivity {
             Log.e(TAG, "assets: could not write the marker", e);
             return;
         }
-        Log.i(TAG, "assets: copied " + Arrays.toString(FILES_FROM_ASSETS) + " to " + dir);
+        Log.i(TAG, "assets: copied " + names.size() + " files to " + dir);
     }
 
     private static String readText(File file) {

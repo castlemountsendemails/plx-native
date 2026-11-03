@@ -3,7 +3,8 @@
 
 Only plx_ass_* leaves the resulting shared library. No firmware FreeType, FriBidi,
 HarfBuzz, libass, or platform font provider can affect its ABI or rendering.
-The same source pins and configuration build both the ARM library and host one.
+The same source pins and configuration build the webOS ARM library, the host one, and (ANDROID=1,
+with ANDROID_NDK_HOME) the Fire TV one: libass-plx.so, armeabi-v7a, API 25.
 """
 import fcntl
 import hashlib
@@ -131,7 +132,7 @@ def apply_patches(dep, source_dir, root=ROOT):
     print('libass: ' + dep['id'] + ' patched (' + str(len(patches)) + ')', flush=True)
 
 
-def verify_library(path, darwin, readelf=None):
+def verify_library(path, darwin, readelf=None, android=False):
     """Prove the bundled font stack stayed private and needs no C++ runtime."""
     if darwin:
         load_commands = subprocess.check_output(['otool', '-L', str(path)], text=True).splitlines()[1:]
@@ -142,7 +143,8 @@ def verify_library(path, darwin, readelf=None):
     else:
         dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True)
         needed = re.findall(r'\(NEEDED\).*\[([^\]]+)\]', dynamic)
-        allowed = {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'}
+        allowed = ({'libc.so', 'libm.so', 'libdl.so'} if android else
+                   {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'})
         symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True)
         names = []
         for line in symbols.splitlines():
@@ -159,10 +161,14 @@ def verify_library(path, darwin, readelf=None):
 
 def build():
     host = bool(os.environ.get('HOST'))
+    android = bool(os.environ.get('ANDROID'))
+    if host and android:
+        raise ValueError('HOST and ANDROID are separate builds')
     darwin = host and platform.system() == 'Darwin'
-    target = 'host' if host else 'arm'
-    prefix = ROOT / ('vendor/libass-prefix-host' if host else 'vendor/libass-prefix')
-    work = ROOT / ('vendor/libass-build-host' if host else 'vendor/libass-build')
+    target = 'host' if host else ('android' if android else 'arm')
+    suffix = '-host' if host else ('-android' if android else '')
+    prefix = ROOT / ('vendor/libass-prefix' + suffix)
+    work = ROOT / ('vendor/libass-build' + suffix)
     sources = deps.cache_dir()
     for directory in [work, sources, prefix, ROOT / 'pkg']:
         directory.mkdir(parents=True, exist_ok=True)
@@ -170,10 +176,10 @@ def build():
     # Host and ARM have separate workspaces and can build concurrently.
     with (work / '.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        build_locked(host, darwin, target, prefix, work, sources)
+        build_locked(host, darwin, target, prefix, work, sources, android)
 
 
-def build_locked(host, darwin, target, prefix, work, sources):
+def build_locked(host, darwin, target, prefix, work, sources, android=False):
     manifest = deps.load(PINS)
     check_patch_set(manifest)
     pins = stack(manifest)
@@ -206,6 +212,20 @@ def build_locked(host, darwin, target, prefix, work, sources):
         if darwin:
             flags.append('-mmacosx-version-min=11.0')
             cmake_flags.append('-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0')
+    elif android:
+        ndk = os.environ.get('ANDROID_NDK_HOME')
+        if not ndk:
+            raise ValueError('set ANDROID_NDK_HOME to the NDK')
+        ndk = Path(ndk)
+        tools = ndk / 'toolchains/llvm/prebuilt/linux-x86_64/bin'
+        cc, cxx = str(tools / 'armv7a-linux-androideabi25-clang'), str(tools / 'armv7a-linux-androideabi25-clang++')
+        ar, ranlib = str(tools / 'llvm-ar'), str(tools / 'llvm-ranlib')
+        readelf = str(tools / 'llvm-readelf')
+        identity = subprocess.check_output([cc, '--version'])
+        cmake_flags += ['-DCMAKE_TOOLCHAIN_FILE=' + str(ndk / 'build/cmake/android.toolchain.cmake'),
+                        '-DANDROID_ABI=armeabi-v7a', '-DANDROID_PLATFORM=android-25',
+                        '-DCMAKE_FIND_ROOT_PATH=' + str(prefix)]
+        configure_flags += ['--host=arm-linux-androideabi']
     else:
         sdk = Path(os.environ.get('WEBOS_SDK', str(Path.home() / 'webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot'))).resolve()
         cross = sdk / 'bin/arm-webos-linux-gnueabi-'
@@ -304,7 +324,8 @@ def build_locked(host, darwin, target, prefix, work, sources):
         stamp.write_text(key)
     # The facade changes more often than the upstream stack; relinking it does not
     # require a clean FreeType/HarfBuzz rebuild.
-    name = 'libass-plx.0.dylib' if darwin else ('libass-plx-host.so.0' if host else 'libass-plx.so.0')
+    name = ('libass-plx.0.dylib' if darwin else 'libass-plx-host.so.0' if host else
+            'libass-plx.so' if android else 'libass-plx.so.0')
     output = prefix / 'lib' / name
     objects = [prefix / 'lib' / n for n in static_names]
     wrapper_flags = [f for f in flags if f != '-fvisibility=hidden']
@@ -329,7 +350,12 @@ def build_locked(host, darwin, target, prefix, work, sources):
             # `make symbols-libs` extracts from the unstripped $prefix/lib copy can be paired with it.
             command += ['-Wl,--build-id=sha1']
     run([*command, '-o', output], env=env)
-    verify_library(output, darwin, shutil.which('readelf') if host else str(cross) + 'readelf')
+    verify_library(output, darwin, shutil.which('readelf') if host else readelf if android else str(cross) + 'readelf',
+                   android)
+    if android:
+        # The APK is packed from the prefix: Gradle strips the library and the loader needs no versioned name.
+        print('libass: ' + str(output.relative_to(ROOT)), flush=True)
+        return
     staged = ROOT / 'pkg' / name
     candidate = staged.with_name(staged.name + '.' + str(os.getpid()) + '.new')
     sidecars = ['.link.map', '.link.trace', '.link.json'] if not host else []

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.26] - 
+
+### Added
+- Fire TV: the app now carries the subtitle renderer (libass, built with the Android toolkit) and the subtitle fonts for every script, so text subtitles have something to draw with. A test start with `--es ass check` lays out one SRT line and reports whether it drew. Nothing plays subtitles yet, and this is not yet tried on any stick. Shared code: the subtitle renderer's library-name list gains one more name, tried last; the LG already finds its own and is unchanged.
+
 ## [0.2.25] - 2026-11-03
 
 ### Added

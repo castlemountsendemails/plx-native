@@ -1,5 +1,5 @@
 //! SDLActivity enters `SDL_main` here on its SDL thread. With no harness argument it installs the
-//! Fire TV port and runs the app. With `secure=`, `net=` or `clip=` it runs that harness instead and
+//! Fire TV port and runs the app. With `secure=`, `net=`, `caps=`, `ass=` or `clip=` it runs that harness instead and
 //! draws its lines with SDL2_ttf until SDL quits; a clip plays first and its label replaces the
 //! lines until BACK stops it. Everything logs to logcat under the tag `PlxNative`.
 
@@ -7,6 +7,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
 use std::path::PathBuf;
 
+use crate::asscheck;
 use crate::caps;
 use crate::clip;
 use crate::harness::{self, Harness};
@@ -134,11 +135,12 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
     let arg = |key: &str| args.iter().find_map(|arg| arg.strip_prefix(key)?.strip_prefix('='));
     plx_platform::devcaps::set_source(caps::source);
-    let lines = match (arg("secure"), arg("net"), arg("caps")) {
-        (Some(mode), _, _) => Some(secure::harness(mode)),
-        (None, Some(_), _) => Some(netcheck::harness(arg("server"))),
-        (None, None, Some(mode)) => Some(caps::harness(mode)),
-        (None, None, None) => None,
+    let lines = match (arg("secure"), arg("net"), arg("caps"), arg("ass")) {
+        (Some(mode), ..) => Some(secure::harness(mode)),
+        (None, Some(_), ..) => Some(netcheck::harness(arg("server"))),
+        (None, None, Some(mode), _) => Some(caps::harness(mode)),
+        (None, None, None, Some(mode)) => Some(asscheck::harness(mode)),
+        (None, None, None, None) => None,
     };
     let clip = clip::parse(args.iter().map(String::as_str));
     if clip.is_none() && lines.is_none() {

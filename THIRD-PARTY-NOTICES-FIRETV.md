@@ -15,12 +15,14 @@ are in `assets/licenses/`. The APK contains exactly these third-party components
 | `lib/armeabi-v7a/libSDL2.so` and the SDL Java classes in `classes*.dex` | SDL 2.32.10 | 2 |
 | `lib/armeabi-v7a/libSDL2_ttf.so` | SDL2_ttf 2.24.0 with FreeType 2.13.2 | 3 |
 | `lib/armeabi-v7a/libcurl-plx.so` | libcurl 8.23.0 with OpenSSL 3.5.9 | 4 |
+| `lib/armeabi-v7a/libass-plx.so` | libass 0.17.5 with FreeType 2.15.0, FriBidi 1.0.17, HarfBuzz 14.6.0, libunibreak 8.0 | 8 |
 | `assets/cacert.pem` | The Mozilla CA certificate store | 5 |
 | `assets/le-roots.pem` | Four Let's Encrypt root certificates | 5 |
 | `lib/armeabi-v7a/libmain.so` | PlxNative, the Rust crates of section 7, the Rust standard library, nanosvg | 7 |
 | `assets/appfont.ttf`, `assets/appfont-bold.ttf` | Inter | 6 |
 | `assets/appfont-cjk.ttf` | Noto Sans CJK KR | 6 |
 | `assets/appfont-emoji.ttf` | Noto Emoji | 6 |
+| `assets/fonts/subs/*.ttf` | Noto Sans Bold, one face per script (22) | 6 |
 
 Full licence texts are in `assets/licenses/` and are not repeated inline, except where a licence has
 no file there (sections 2, 4 and 6).
@@ -192,7 +194,7 @@ against them, with the chain, its dates and the host name all still checked.
 
 ## 6. Fonts
 
-All four are the same files the webOS package ships, and `THIRD-PARTY-NOTICES.md` §2.3 says how
+All of these are the same files the webOS package ships, and `THIRD-PARTY-NOTICES.md` §2.3 says how
 each was cut from its upstream. Licence: **SIL Open Font License 1.1**, shipped as
 `licenses/OFL.txt` in the APK assets; each font's copyright statement is also in its own name table.
 
@@ -207,6 +209,17 @@ and/or other countries."
 
 **Noto Emoji** — `assets/appfont-emoji.ttf`, the monochrome Noto Emoji converted to TrueType.
 Copyright 2013-2026 Google LLC. No Reserved Font Name is declared.
+
+**Noto Sans <script> Bold** — `assets/fonts/subs/NotoSans<Script>-Bold.ttf` and its
+`manifest.json`, 22 faces (Thai, Lao, Khmer, Myanmar, Devanagari, Bengali, Gurmukhi, Gujarati,
+Tamil, Telugu, Kannada, Malayalam, Sinhala, Oriya, Tibetan, Arabic, Hebrew, Thaana, Georgian,
+Armenian, Ethiopic and Canadian Aboriginal), the faces the subtitle renderer (libass) draws those
+scripts with. Copyright 2022 The Noto Project Authors (https://github.com/notofonts/<script>) for
+each face, except Hebrew (2024), Bengali (2025) and Tibetan ("Copyright 2015 Google Inc. All Rights
+Reserved."), per each font's own name table. No Reserved Font Name is declared. Each is subset to
+its script's codepoints, unhinted, and given two added name records ("PlxSubs" and "Inter") so
+libass selects it as a fallback; `THIRD-PARTY-NOTICES.md` §2.3 has the sources and the recipe
+(`tools/cut-noto-subs.py`).
 
 ## 7. Code statically linked into `libmain.so`
 
@@ -376,9 +389,40 @@ licence and copyright columns from `ci/third-party-crates.json`, and CI fails wh
 disagrees with the Android graph. Build-time machinery (proc-macro crates, build and dev
 dependencies) is not linked and has no row.
 
-## 8. Not in the APK
+## 8. libass and its font stack — ISC, LGPL-2.1-or-later, MIT, FreeType License, Zlib
 
-The APK carries no AndroidX or Android Support libraries, no Sentry or other crash-reporting
-code, no libass, and none of the webOS package's subtitle fonts (`fonts/subs/`). The Android system libraries it
+`libass-plx.so` is the PlxNative subtitle facade (`src/ass.c`, `src/ass_fonts.c`, GPL-3.0-or-later)
+linked statically with the same pinned stack as the webOS package (`THIRD-PARTY-NOTICES.md` §1.2),
+built by `ci/build-android-libass.sh` with the NDK. It is loaded by name at run time (`dlopen`) from
+the app's native library directory; no system font provider and no firmware library is used.
+
+| Component | Version | Licence |
+|---|---|---|
+| libass | 0.17.5 | ISC (`licenses/libass-ISC.txt`) |
+| FreeType | 2.15.0 | Elected FreeType License; contributed MIT and Zlib code (`licenses/FreeType.txt`, `licenses/Zlib.txt`) |
+| FriBidi | 1.0.17 | LGPL-2.1-or-later (`licenses/LGPL-2.1.txt`) |
+| HarfBuzz | 14.6.0 | Old MIT (`licenses/HarfBuzz-Old-MIT.txt`) |
+| libunibreak | 8.0 | zlib (`licenses/libunibreak-Zlib.txt`) |
+
+Portions of this software are copyright © 2026 The FreeType Project (https://freetype.org). All
+rights reserved. FriBidi is Copyright (C) 1999, 2000, 2017-2019 Dov Grobgeld; 2001, 2002, 2004,
+2005 Behdad Esfahbod; 2004 Sharif FarsiWeb, Inc.; and other contributors. libunibreak is Copyright
+(C) Wu Yongwei, Tom Hacohen, Petr Filipsky and Andreas Roever. libass and HarfBuzz copyright
+notices are retained in their licence files.
+
+**Complete corresponding source.** The five upstream archives (checksums in `ci/dependencies.json`),
+the one local libass patch (`ci/patches/libass-0001-grow-font-faces.patch`, ISC, applied by
+`ci/build-libass.py`), the facade sources and the build recipe (`ci/build-android-libass.sh`,
+`ci/build-libass.py`) are published beside every PlxNative Fire TV APK, in the `lgpl-source/` folder
+of the build artifact. With the Android NDK 27.3.13750724 (`ANDROID_NDK_HOME`),
+`ci/build-android-libass.sh` rebuilds the library, FriBidi included; put the result in the Gradle
+project's native library directory under the same file name and build and sign the APK with
+`android/`. The application checks the facade's ABI version and declines a library that reports
+another.
+
+## 9. Not in the APK
+
+The APK carries no AndroidX or Android Support libraries and no Sentry or other crash-reporting
+code. The Android system libraries it
 loads at run time (`libc`, `libm`, `libdl`, `libz`, `liblog`, OpenGL ES, OpenSL ES, AAudio) belong to the
 device and are not redistributed here.
