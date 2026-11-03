@@ -80,7 +80,7 @@ fn eac3(au: &[u8]) -> Option<(i32, i64)> {
 
 /// A DTS core frame (the engine strips DTS-HD extensions): NBLKS + 1 blocks of 32 samples.
 fn dts(au: &[u8]) -> Option<(i32, i64)> {
-    if au.len() < 9 || au[..4] != [0x7f, 0xfe, 0x80, 0x01] {
+    if au.len() < 9 || !au.starts_with(&[0x7f, 0xfe, 0x80, 0x01]) {
         return None;
     }
     let blocks = (i64::from(au[4] & 1) << 6 | i64::from(au[5] >> 2)) + 1;
