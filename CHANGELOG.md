@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.24] - 2026-11-02
+
+### Added
+- Fire TV: E-AC3 (Dolby Digital Plus, Atmos included) and DTS audio now play, sent to the TV as they are when the TV takes them, where before the picture played in silence. A TV that can't take them gets its audio converted by the server. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.23] - 2026-11-02
 
 ### Added
