@@ -327,16 +327,18 @@ public class PlxActivity extends SDLActivity {
     // The decoder downmixes 7.1 to 5.1, the most PCM channels the sticks list for HDMI.
     private static final int AAC_MAX_CHANNELS = 6;
 
-    // Called by the native audio sink: a streaming track, or null (logged). AC-3 goes out as it is
-    // (HDMI passthrough), as 5.1 or else stereo; PCM is what the AAC decoder produced.
+    // Called by the native audio sink: a streaming track, or null (logged). AC-3, E-AC3 and DTS go
+    // out as they are (HDMI passthrough), as 5.1 or else stereo; PCM is what the AAC decoder produced.
     static AudioTrack openAudioTrack(int encoding, int sampleRate, int channels) {
         boolean pcm = encoding == AudioFormat.ENCODING_PCM_16BIT || encoding == AudioFormat.ENCODING_PCM_FLOAT;
         int[] masks = pcm ? new int[] {channelMask(channels)}
                 : new int[] {AudioFormat.CHANNEL_OUT_5POINT1, AudioFormat.CHANNEL_OUT_STEREO};
         for (int mask : masks) {
             int min = AudioTrack.getMinBufferSize(sampleRate, mask, encoding);
-            // PCM: four times the minimum. AC-3: about half a second at 640 kbit/s.
-            int size = pcm ? Math.max(min, 1) * 4 : Math.max(min, 40000);
+            // PCM: four times the minimum. AC-3: about half a second at 640 kbit/s; E-AC3 and DTS
+            // core at 1.5 Mbit/s.
+            int size = pcm ? Math.max(min, 1) * 4
+                    : Math.max(min, encoding == AudioFormat.ENCODING_AC3 ? 40000 : 96000);
             try {
                 AudioTrack track = new AudioTrack(
                         new AudioAttributes.Builder()

@@ -1,7 +1,7 @@
-//! The Fire TV audio sink: the engine's audio AUs played by an `AudioTrack`, AC-3 as it is (HDMI
-//! passthrough) and AAC after a `MediaCodec` decodes it to PCM. `feed` queues AUs on the engine
-//! thread; a writer thread moves them into the track without blocking and publishes which stream
-//! time the track is playing, which the video drain times its frames against.
+//! The Fire TV audio sink: the engine's audio AUs played by an `AudioTrack`, AC-3, E-AC3 and DTS as
+//! they are (HDMI passthrough) and AAC after a `MediaCodec` decodes it to PCM. `feed` queues AUs on
+//! the engine thread; a writer thread moves them into the track without blocking and publishes which
+//! stream time the track is playing, which the video drain times its frames against.
 
 use std::collections::VecDeque;
 use std::ffi::c_char;
@@ -24,8 +24,8 @@ const POLL_NS: i64 = 20_000_000;
 const LOG_EVERY_NS: i64 = 5_000_000_000;
 /// The first few position readings after each play are logged, to show how the track's clock starts.
 const LOG_FIRST_POLLS: u32 = 6;
-/// AC-3 is opened as 5.1; Java falls back to stereo if the track refuses that.
-const AC3_CHANNELS: i32 = 6;
+/// Passthrough tracks are opened as 5.1; Java falls back to stereo if the track refuses that.
+const PASSTHROUGH_CHANNELS: i32 = 6;
 
 static OUT: Mutex<Option<Out>> = Mutex::new(None);
 /// The stream time the track plays and the `CLOCK_MONOTONIC` time it plays it.
@@ -55,12 +55,14 @@ struct Chunk {
     at: usize,
     pts: i64,
     marked: bool,
+    /// Samples per channel a passthrough AU carries; 0 for PCM, which is counted in bytes.
+    frames: i64,
 }
 
 struct Out {
     plan: Plan,
     decoder: Option<Codec>,
-    /// The encoding, rate and channels of the track, from the first AC-3 AU or the decoder's output.
+    /// The encoding, rate and channels of the track, from the first passthrough AU or the decoder's output.
     format: Option<(i32, i32, i32)>,
     track: Option<Track>,
     queue: VecDeque<(Vec<u8>, i64)>,
@@ -69,6 +71,8 @@ struct Out {
     /// Frames written since the track was opened; for PCM, `bytes` over the frame size.
     frames: i64,
     bytes: i64,
+    /// Samples per channel of the last passthrough AU whose header was read, for one that cannot be.
+    au_frames: i64,
     position: Position,
     source: Option<Source>,
     transport: Transport,
@@ -89,6 +93,7 @@ impl Out {
             timeline: Timeline::new(1),
             frames: 0,
             bytes: 0,
+            au_frames: AC3_FRAMES,
             position: Position::default(),
             source: None,
             transport: Transport::default(),
@@ -155,14 +160,21 @@ impl Out {
         let Some((data, pts)) = self.queue.pop_front() else {
             return false;
         };
+        let header = audio::syncframe(encoding, &data);
         if self.format.is_none() {
-            let rate = audio::ac3_rate(&data).unwrap_or_else(|| {
-                log(LOG_ERROR, "audio: the first AU is not an AC-3 syncframe; opening the track at 48 kHz");
-                48_000
-            });
-            self.format = Some((encoding, rate, AC3_CHANNELS));
+            let rate = header.map_or_else(
+                || {
+                    log(LOG_ERROR, &format!("audio: the first AU is not an {} syncframe; opening the track at 48 kHz", encoding_name(encoding)));
+                    48_000
+                },
+                |(rate, _)| rate,
+            );
+            self.format = Some((encoding, rate, PASSTHROUGH_CHANNELS));
         }
-        self.chunk = Some(Chunk { data, at: 0, pts, marked: false });
+        if let Some((_, frames)) = header {
+            self.au_frames = frames;
+        }
+        self.chunk = Some(Chunk { data, at: 0, pts, marked: false, frames: self.au_frames });
         true
     }
 
@@ -212,7 +224,7 @@ impl Out {
                 let data = decoder.output(index);
                 decoder.release(index, None).ok_or("the AAC decoder failed")?;
                 if let Some(data) = data.filter(|data| !data.is_empty() && !end) {
-                    self.chunk = Some(Chunk { data, at: 0, pts: pts_us * 1_000, marked: false });
+                    self.chunk = Some(Chunk { data, at: 0, pts: pts_us * 1_000, marked: false, frames: 0 });
                 }
                 busy = true;
             }
@@ -222,8 +234,8 @@ impl Out {
 
     fn open(&mut self, encoding: i32, rate: i32, channels: i32) {
         let Some(track) = Track::open(encoding, rate, channels) else {
-            let why = if encoding == ENCODING_AC3 { "the AC-3 track did not open" } else { "the PCM track did not open" };
-            self.fail(why);
+            let kind = if self.plan == Plan::Aac { "PCM" } else { encoding_name(encoding) };
+            self.fail(&format!("the {kind} track did not open"));
             return;
         };
         if self.transport.runs() {
@@ -270,7 +282,7 @@ impl Out {
             return n > 0;
         }
         if !pcm {
-            self.frames += AC3_FRAMES;
+            self.frames += chunk.frames;
         }
         self.chunk = None;
         WRITTEN.fetch_add(1, Relaxed);
@@ -379,9 +391,6 @@ pub fn load(payload: &str) {
             }
         }
         Plan::Aac => "AAC to PCM".into(),
-        Plan::NotPlayed { encoding } => {
-            format!("{} not played (HDMI lists it: {})", encoding_name(encoding), listed(jni::sink_takes(encoding)))
-        }
         Plan::None => "none".into(),
     };
     log(LOG_INFO, &format!("audio: {status}"));
