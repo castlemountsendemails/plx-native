@@ -929,9 +929,10 @@ impl Native {
         #[cfg(test)]
         OPEN_DATA_CALLS.with(|c| c.set(c.get() + 1));
         static LOADED: OnceLock<bool> = OnceLock::new();
-        let loaded = *LOADED.get_or_init(|| {
-            native_ass::load(Some(asset_dir())).ok() && unsafe { plx_ass_abi_version() } == NATIVE_ABI
-        });
+        // An Android APK keeps its libraries in its own library directory, which the linker searches
+        // for a bare name (as for FFmpeg); everywhere else the library sits in the app directory.
+        let dir = if cfg!(target_os = "android") { None } else { Some(asset_dir()) };
+        let loaded = *LOADED.get_or_init(|| native_ass::load(dir).ok() && unsafe { plx_ass_abi_version() } == NATIVE_ABI);
         if !loaded {
             return Err(Fault::Unavailable);
         }
