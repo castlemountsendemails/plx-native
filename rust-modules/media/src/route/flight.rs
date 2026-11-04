@@ -299,10 +299,13 @@ fn run_retranscode_claim_worker(
         };
     }
     let inputs = inputs.expect("an encode or recovery flight is dispatched with its claim inputs");
+    // The contract the claim's selection PUT was sent for, if one was sent.
+    let mut put_for: Option<plx_plex::plex::EncodeContract> = None;
     match work {
         ClaimWork::Rebase(_) | ClaimWork::AutoHls(_) => unreachable!("handled above"),
         ClaimWork::Encode(primary_contract) => {
-            select_streams_for_encode(off, inputs);
+            select_streams_for_encode(off, inputs, &primary_contract);
+            put_for = Some(primary_contract);
             if let RetranscodeWorkerOutcome::Applied(applied) = try_retranscode(off, inputs, primary_contract) {
                 return RetranscodeClaimResult::Retranscode(applied);
             }
@@ -311,11 +314,6 @@ fn run_retranscode_claim_worker(
             if let Some(net) = run_original_recovery(off, &plan) {
                 return RetranscodeClaimResult::OriginalRecovery(Box::new(OriginalRecoveryLanding { plan: *plan, net }));
             }
-            // The recovery's own selection PUT named the candidate's track; a rebuild owed to a
-            // displaced pick names the session's, so it sends its own, once, like any other claim.
-            if matches!(fallback, RetranscodeFallback::Retranscode(_)) {
-                select_streams_for_encode(off, inputs);
-            }
         }
     }
     match fallback {
@@ -323,10 +321,17 @@ fn run_retranscode_claim_worker(
         RetranscodeFallback::Native { ordinal, codec } => {
             RetranscodeClaimResult::NativeAudio { ordinal, codec }
         }
-        RetranscodeFallback::Retranscode(contract) => match try_retranscode(off, inputs, contract) {
-            RetranscodeWorkerOutcome::Applied(applied) => RetranscodeClaimResult::Retranscode(applied),
-            RetranscodeWorkerOutcome::Refused => RetranscodeClaimResult::Rejected(LEGACY_REJECTED),
-        },
+        RetranscodeFallback::Retranscode(contract) => {
+            // A recovery's own PUT named the candidate's track, and a primary remux PUT may have
+            // named 0 for a subtitle this re-encode must burn: the fallback names its own.
+            if put_for.is_none_or(|p| p.remux != contract.remux && inputs.subtitle_drawn_on_remux) {
+                select_streams_for_encode(off, inputs, &contract);
+            }
+            match try_retranscode(off, inputs, contract) {
+                RetranscodeWorkerOutcome::Applied(applied) => RetranscodeClaimResult::Retranscode(applied),
+                RetranscodeWorkerOutcome::Refused => RetranscodeClaimResult::Rejected(LEGACY_REJECTED),
+            }
+        }
     }
 }
 

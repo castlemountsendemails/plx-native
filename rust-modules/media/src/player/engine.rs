@@ -1592,6 +1592,9 @@ fn start_bufferfeed_inner(
     // spawned: the demuxer reads `side_subs_owner` once, as it opens the stream, and must never
     // also open subtitle decoders or ASS sources the reader replaces.
     let side_target = if stream { crate::route::side_reader_target(ps) } else { None };
+    if side_target.is_some() {
+        crate::route::note_side_reader_start(ps);
+    }
 
     if stream {
         let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter

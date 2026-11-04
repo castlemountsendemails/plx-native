@@ -2325,6 +2325,9 @@ pub(super) fn build_stream(off: &plx_base::task::OffFrame, rk: &str, part: &str,
                 )
         });
     let client_draws = remux && (side_draws || carried_draw || sidecar_id.is_some());
+    // PMS burns the Part's selected subtitle into a remux whatever the wire says (docs/pms-api.md
+    // M8), so the selection PUT names 0 for an embedded track the reader draws; the stop restores it.
+    let embedded_draw = remux && (side_draws || (carried_draw && env.sub_drawn.is_some_and(|ord| ord >= 0)));
     // A server transcode that is not a copy (a capped or HLS re-encode) cannot leave the app to draw
     // the sidecar, and moving the selection to 0 would make PMS discard a downloaded one: it stays
     // selected and the encoder burns it (the same request a carried sidecar pick makes).
@@ -2503,7 +2506,7 @@ pub(super) fn build_stream(off: &plx_base::task::OffFrame, rk: &str, part: &str,
     // `env.sub_sid` (an already-active burn) unless THIS route is the one that just started one
     // (M7's Burn, forced by an embedded subtitle plus the audio enhancement; rule 3's commentary
     // stand-in; a remembered pick on a route that already re-encodes, Q-TOP (b)).
-    put_selection(off, env.sid, plan.part_id, encode_audio, burn_sub_sid);
+    put_selection(off, env.sid, plan.part_id, encode_audio, if embedded_draw { 0 } else { burn_sub_sid });
     if remux_probed && adaptive {
         // Probe registered start.mkv on this playback identity. HLS `/decision` reuses it;
         // closeResourceSession=1 would 503 the next start. A failed sample already stopped
