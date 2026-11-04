@@ -62,6 +62,8 @@ struct Chunk {
 struct Out {
     plan: Plan,
     decoder: Option<Codec>,
+    /// The AAC config the decoder was opened with.
+    csd: [u8; 2],
     /// The encoding, rate and channels of the track, from the first passthrough AU or the decoder's output.
     format: Option<(i32, i32, i32)>,
     track: Option<Track>,
@@ -86,6 +88,7 @@ impl Out {
         Self {
             plan,
             decoder: None,
+            csd: [0; 2],
             format: None,
             track: None,
             queue: VecDeque::new(),
@@ -180,6 +183,13 @@ impl Out {
 
     /// Feeds queued AUs to the AAC decoder and takes its next decoded buffer.
     fn decode(&mut self) -> Result<bool, &'static str> {
+        // A new config drops the old decoder with the few AUs still inside it; the new one's
+        // output format then reopens the track.
+        if self.decoder.is_some() && self.queue.front().is_some_and(|(au, _)| audio::config_changes(self.csd, au)) {
+            if let Some(decoder) = self.decoder.take() {
+                decoder.close();
+            }
+        }
         if self.decoder.is_none() {
             let Some((au, _)) = self.queue.front() else {
                 return Ok(false);
@@ -188,12 +198,16 @@ impl Out {
             let decoder = Codec::open_aac(adts.rate, adts.channels, &adts.csd).ok_or("no AAC decoder opened")?;
             log(LOG_INFO, &format!("audio: {} started for {adts:?}", decoder.name));
             self.decoder = Some(decoder);
+            self.csd = adts.csd;
         }
         let Some(decoder) = self.decoder.as_ref() else {
             return Ok(false);
         };
         let mut busy = false;
         while let Some((au, pts)) = self.queue.front() {
+            if audio::config_changes(self.csd, au) {
+                break;
+            }
             let raw = audio::adts(au).map_or(&au[..], |adts| &au[adts.header_len..]);
             match decoder.queue(raw, pts / 1_000, false).ok_or("the AAC decoder failed")? {
                 Input::Queued => {}

@@ -131,6 +131,12 @@ pub fn adts(au: &[u8]) -> Option<Adts> {
     (au.len() >= header_len).then_some(Adts { header_len, rate, channels, csd })
 }
 
+/// Whether `au` carries an AAC config other than `csd`. HLS rungs can differ in channel layout,
+/// and a decoder opened for one layout gives silence for another, with no error.
+pub fn config_changes(csd: [u8; 2], au: &[u8]) -> bool {
+    adts(au).is_some_and(|adts| adts.csd != csd)
+}
+
 /// Which stream time each frame written to the track carries: the PTS of every AU or decoded
 /// buffer at the frame count where its first frame went in, counted from the track's start.
 pub struct Timeline {
@@ -342,6 +348,15 @@ mod tests {
         assert_eq!(adts.csd, [0x13, 0x38]);
         let stereo = super::adts(&header(3, 2, 10)).unwrap();
         assert_eq!((stereo.rate, stereo.channels, stereo.csd), (48_000, 2, [0x11, 0x90]));
+    }
+
+    #[test]
+    fn a_new_channel_layout_mid_stream_needs_a_new_decoder() {
+        let stereo = adts(&header(3, 2, 10)).unwrap().csd;
+        assert!(!config_changes(stereo, &header(3, 2, 10)));
+        assert!(config_changes(stereo, &header(3, 6, 10)), "a 5.1 rung after a stereo one");
+        assert!(config_changes(stereo, &header(4, 2, 10)), "a new rate");
+        assert!(!config_changes(stereo, &[0x21, 0x10, 0x04, 0x60, 0x8c, 0x1c, 0]), "a frame with no header keeps the decoder");
     }
 
     #[test]
