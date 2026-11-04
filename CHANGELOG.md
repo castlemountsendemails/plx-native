@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.28] - 2026-11-04
+
+### Fixed
+- Fire TV: sound vanished partway through some server-converted films on Auto quality, and came back only after a seek. When the stream stepped up to a quality whose sound has a different channel layout (stereo below, 5.1 above), the app kept decoding it as the old layout and played silence. The app now restarts its sound decoder on such a change. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.27] - 2026-11-04
 
 ### Fixed
