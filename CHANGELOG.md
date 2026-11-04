@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.27] - 2026-11-04
+
+### Fixed
+- Subtitles drawn twice when the server converts a film's sound (Fire TV HD with AC-3; the LG with TrueHD or DTS). With an embedded subtitle picked, the server burned it into the picture while the app also drew it, so two lines showed and Off left the burned one on screen. While the app draws the subtitle, the server is now told it's Off, and your pick goes back to the server when playback stops. If the app is force-closed mid-film, that film's subtitle reads Off next time. Passed on the Fire TV HD and Stick 4K; not yet tried on the LG. Shared code: the LG app changes too.
+
 ## [0.2.26] - 2026-11-03
 
 ### Added
