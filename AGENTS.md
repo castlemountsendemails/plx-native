@@ -58,6 +58,11 @@ the macOS simulator are valuable, but they cannot prove every device behavior.
   `[port webos]` to `webos`, `keymanager`, `system`, `player::ffi` or `port`. Fix the reference
   (`docs/module-layers.md` says where code belongs and how to cut an upward name) instead of
   adding a (file, member) pair to `ci/allow/layers.txt`, which is empty and only shrinks.
+- **Declare thread-locals with `plx_base::tls!`** (`crate::tls!` inside `plx_base`), which takes
+  `thread_local!`'s syntax. On 32-bit Android std spends one of the process's 128 pthread keys per
+  `thread_local!`, never frees it, and aborts with "out of TLS keys" once they run out; `tls!` holds
+  every thread-local under one key there and is std's macro elsewhere. The one file on std's macro,
+  `storage_service/failure.rs`, is also built into the storage helper, which has no `plx_base`.
 - **Re-basing a stacked PR after the one below it squashes:** on the upper branch, `git merge
   <lower's final head>`, `git merge <squash>^`, `git merge -s ours <squash>`, then
   `git merge origin/main`. `-s ours` on the squash alone drops whatever `main` gained before it.
