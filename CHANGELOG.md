@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.30] - 2026-11-05
+
+### Fixed
+- Fire TV: the app could close by itself during a session, most likely the first time subtitles appeared after it had been running a while. Android lets an app keep only a small number of per-thread memory slots, and the app was spending one on each of over a hundred internal values until none were left. It now keeps all of them in a single slot, and its log notes how many slots are in use at launch and at each film. Not yet tried on any stick. Shared code: the LG app builds those values exactly as before.
+
 ## [0.2.29] - 2026-11-05
 
 ### Fixed
