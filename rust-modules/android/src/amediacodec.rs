@@ -48,6 +48,9 @@ static DRIFT_MAX_US: AtomicI64 = AtomicI64::new(-1);
 
 static DECODER: Mutex<Option<Decoder>> = Mutex::new(None);
 static DRAIN: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+/// The last unload's teardown. Closing the codecs and the track can take most of a second on a
+/// stick, and a Home park runs it on the loop just before SDL marks the loop parked.
+static RETIRE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static NAME: Mutex<String> = Mutex::new(String::new());
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -242,6 +245,26 @@ fn teardown() {
     );
 }
 
+/// Waits for the previous unload's teardown, so nothing opens or closes alongside it.
+fn await_retire() {
+    if let Some(retire) = lock(&RETIRE).take() {
+        plx_base::task::join("amc retire", retire);
+    }
+}
+
+/// The drain stops here, so no frame event can follow the unload's completion.
+fn retire() {
+    await_retire();
+    stop_drain();
+    match std::thread::Builder::new().name("amc-retire".into()).spawn(teardown) {
+        Ok(retire) => *lock(&RETIRE) = Some(retire),
+        Err(e) => {
+            log(LOG_ERROR, &format!("amc: no retire thread ({e}); tearing down on the loop"));
+            teardown();
+        }
+    }
+}
+
 fn note_feed(size: c_uint, pts: i64, took_us: u64) {
     let n = FED.fetch_add(1, Relaxed) + 1;
     if n <= 5 || n.is_multiple_of(LOG_EVERY) {
@@ -257,6 +280,7 @@ impl VideoSink for AmcSink {
             return 0;
         }
         let payload = if payload.is_null() { "".into() } else { CStr::from_ptr(payload).to_string_lossy() };
+        await_retire();
         let Some(format) = video::format(&payload) else {
             log(LOG_ERROR, &format!("amc: no decoder for the load payload {payload}"));
             return 0;
@@ -396,7 +420,8 @@ impl VideoSink for AmcSink {
         }
     }
     unsafe fn unload(&self, _owner: &UnloadTicket) {
-        teardown();
+        // The engine has joined its demux by now, so nothing feeds the codecs being retired.
+        retire();
         if READY.load(Relaxed) {
             UNLOAD_COMPLETED.store(true, Relaxed);
             // UNLOADCOMPLETED, which the engine's release takes as its evidence.
@@ -420,6 +445,7 @@ impl VideoSink for AmcSink {
     }
     unsafe fn quarantine(&self, _: &MainThread) {
         GATE_RETIRED.store(true, Relaxed);
+        await_retire();
         teardown();
         READY.store(false, Relaxed);
         LOADED.store(false, Relaxed);
@@ -460,7 +486,7 @@ impl VideoSink for AmcSink {
 /// viewer's next press restores it. Before the first picture that number would fail the source,
 /// so nothing is reported then.
 pub fn hdmi_unplugged() {
-    if SHOWN.load(Relaxed) == 0 || lock(&DECODER).is_none() {
+    if SHOWN.load(Relaxed) == 0 || !LOADED.load(Relaxed) || lock(&DECODER).is_none() {
         return;
     }
     log(LOG_INFO, "amc: HDMI unplugged; parking the session");
