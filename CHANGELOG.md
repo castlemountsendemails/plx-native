@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.29] - 2026-11-05
+
+### Fixed
+- Fire TV: pressing Home during a film could close the debug app, so coming back started it fresh at Home instead of in the film. Leaving playback froze the app for up to two seconds, and the debug build's freeze check stopped it at two. The app now shuts down the picture and sound decoders and the audio output in the background, and the next film waits for that to finish before it starts. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.28] - 2026-11-04
 
 ### Fixed
