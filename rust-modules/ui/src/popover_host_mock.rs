@@ -4,7 +4,7 @@
 // replaces a CPU framebuffer (`PIXELS`), which popover_host_tests.rs draws into.
 use std::cell::RefCell;
 
-thread_local! {
+plx_base::tls! {
     pub(super) static PIXELS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     /// How many times the snapshot was thrown away on this thread (`FrameCache::invalidate`), for
     /// a test that grades WHEN the dispatcher re-takes it.

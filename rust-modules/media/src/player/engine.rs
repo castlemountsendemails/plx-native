@@ -2556,7 +2556,7 @@ fn lane_starved(priming: bool, max_fed: i64, seek_base: i64, prime_ns: i64, pres
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     /// The test feed clock: each read advances it by `FEED_TEST_CLOCK_STEP_US`, which is 0 unless
     /// a test sets it. At 0, the host seam's near-free `sf_feed` never runs out the slice, so a
     /// slow or preempted test machine cannot change what one tick feeds.

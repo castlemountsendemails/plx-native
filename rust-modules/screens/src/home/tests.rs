@@ -2934,7 +2934,7 @@ fn a_shelf_heading_on_screen_is_drawn_while_its_cards_are_still_below_the_edge()
     assert!(!drawn(&s), "a shelf entirely below the screen draws nothing");
 }
 
-thread_local! {
+plx_base::tls! {
     /// What [`HeroArtSpy`] was asked, and which backdrops it has "decoded". Thread-local, like the
     /// source slot and the render cache it stands in front of.
     static HERO_ART: std::cell::RefCell<HeroArtState> = std::cell::RefCell::new(HeroArtState::default());

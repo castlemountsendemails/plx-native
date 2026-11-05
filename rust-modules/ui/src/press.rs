@@ -443,7 +443,7 @@ struct Snap {
     arm: u32,
 }
 
-thread_local! {
+plx_base::tls! {
     static SNAP: std::cell::Cell<Snap> = const { std::cell::Cell::new(Snap { scale: REST, live: false, active: false, arm: 0 }) };
 }
 

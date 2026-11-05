@@ -40,7 +40,7 @@ pub fn policy() -> CaptionPolicy {
 }
 
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     /// A per-thread Under posters setting for a test, so it never writes the process-wide cell the
     /// other tests read through [`policy`].
     pub(crate) static TEST_UNDER_POSTERS: std::cell::Cell<Option<plx_plex::plex::session::UnderPosters>> =

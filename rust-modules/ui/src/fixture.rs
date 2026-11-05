@@ -605,7 +605,7 @@ pub struct FixtureModal {
     pub held_faces: Vec<bool>,
 }
 
-thread_local! {
+plx_base::tls! {
     static MODAL_TEXT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -803,7 +803,7 @@ impl Machine<FixtureHost> for FixtureModal {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     /// What [`FixtureModal::pointer_held`] answers — a test raises it to model a surface whose
     /// content is in motion (`ui::panel_motion`). Thread-local like every other piece of test state.
     static MODAL_HOLDS_POINTER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

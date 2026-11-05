@@ -81,7 +81,7 @@ plx_base::devtrig::latched_flag!(
 );
 
 #[cfg(test)]
-thread_local! { static FORCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+plx_base::tls! { static FORCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
 /// Arm the probe for the calling test thread only (the trigger is a process-wide file).
 #[cfg(test)]
@@ -131,7 +131,7 @@ struct State {
     last: Option<Focused>,
 }
 
-thread_local! { static STATE: RefCell<State> = RefCell::new(State::default()); }
+plx_base::tls! { static STATE: RefCell<State> = RefCell::new(State::default()); }
 
 fn hash(srv: u16, path: &str, w: i32, h: i32) -> u64 {
     use std::hash::{Hash, Hasher};

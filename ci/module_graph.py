@@ -477,7 +477,7 @@ class Crate:
             if t == 'static' and at(k + 1) == 'mut': k += 1
             j = k
             while at(j + 1) == '::' and at(j + 2) and WORD.match(text[j + 2]): j += 2
-            if at(j) == 'thread_local' and at(j + 1) == '!' and at(j + 2) in ('{', '('):
+            if at(j) in ('thread_local', 'tls') and at(j + 1) == '!' and at(j + 2) in ('{', '('):
                 # `thread_local! { static NAME: T = …; }` declares its statics inside the group.
                 m, stop_at = j + 3, group_end(j + 2)
                 while m < stop_at:

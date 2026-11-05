@@ -24,7 +24,7 @@ struct Tape {
     // exceeding this controlled-domain budget fails the run instead of accepting unbound mail.
     person: BTreeMap<(u32, u32), u32>,
 }
-thread_local! { static TAPE: RefCell<Tape> = RefCell::new(Tape::default()); }
+plx_base::tls! { static TAPE: RefCell<Tape> = RefCell::new(Tape::default()); }
 
 /// Arm the tape for a controlled run. `credits` is the booted Filmography credit count
 /// (`app::bootstrap::Initial::person_credits`), `None` when the boot carries no content domain.

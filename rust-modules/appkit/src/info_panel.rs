@@ -1010,7 +1010,7 @@ mod focus_tests {
     // TEST ONLY: a thread-confined store, so `set_current_for_test`/`apply` and the `view()`
     // this test's `on_ok`/`is_episode` calls read from are the SAME owner, not two disconnected
     // `MetadataStore::default()`s (same pattern as `screens::detail::tests`'s `TEST_METADATA`).
-    thread_local! {
+    plx_base::tls! {
         static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
             std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
     }

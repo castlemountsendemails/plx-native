@@ -214,7 +214,7 @@ fn spawn() -> Option<Session> {
 /// The render thread's half: upload the current frame if it changed and composite it UNDER what
 /// the UI drew this frame. Called once per presented frame, before the capture and the swap.
 pub fn composite_under() {
-    thread_local! {
+    plx_base::tls! {
         /// `(texture, frame number it holds)`.
         static TEX: std::cell::Cell<(c_uint, Option<u64>)> = const { std::cell::Cell::new((0, None)) };
     }

@@ -1544,7 +1544,7 @@ fn retirement_retries_parent_sync_even_after_the_file_is_gone() {
     let _serial = plx_base::testlock::serial();
     let file = TempSession::new("retirement-parent-sync-retry");
     std::fs::write(file.file(), fallback_bytes(&signed_in()).unwrap()).unwrap();
-    std::thread_local! {
+    plx_base::tls! {
         static SYNCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
     struct ResetSync;
@@ -1654,7 +1654,7 @@ fn recovery_retirement_retries_pending_parent_sync_before_skipping_absent_files(
     let _serial = plx_base::testlock::serial();
     let file = TempSession::new("recovery-parent-sync-retry");
     std::fs::write(file.file(), fallback_bytes(&signed_in()).unwrap()).unwrap();
-    std::thread_local! {
+    plx_base::tls! {
         static SYNCS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
     struct ResetSync;

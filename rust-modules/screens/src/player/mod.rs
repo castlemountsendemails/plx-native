@@ -3378,7 +3378,7 @@ mod repair_confirmation_tests {
     impl PlayerLike for TestHost {
         fn session<'a>(cx: &Cx<'a, Self>) -> &'a plx_media::route::PlaybackSession { cx.views }
     }
-    thread_local! {
+    plx_base::tls! {
         static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
             std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
     }

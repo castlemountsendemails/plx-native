@@ -148,7 +148,7 @@ const TEXT_OFF: usize = if cfg!(feature = "hostsim") || cfg!(target_os = "androi
 /// discipline.
 const MAX_PENDING: usize = 256;
 
-thread_local! {
+plx_base::tls! {
     /// Committed text, oldest first, waiting for [`drain`].
     ///
     /// Nothing drains it in production: while a search field owns input, typed text (the

@@ -203,7 +203,7 @@ impl Aggregator {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     static AGG: RefCell<Aggregator> = const { RefCell::new(Aggregator::new()) };
     static LAST_RENDER_US: Cell<Option<u32>> = const { Cell::new(None) };
     static LAST_JOB_US: Cell<Option<u32>> = const { Cell::new(None) };

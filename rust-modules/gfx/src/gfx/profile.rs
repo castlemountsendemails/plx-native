@@ -182,7 +182,7 @@ mod imp {
         acc: Vec<CpuAcc>,
     }
 
-    thread_local! {
+    plx_base::tls! {
         static CPU: RefCell<CpuState> = const { RefCell::new(CpuState { frames: 0, acc: Vec::new() }) };
     }
 
@@ -298,7 +298,7 @@ mod imp {
         }
     }
 
-    thread_local! {
+    plx_base::tls! {
         static STATE: RefCell<State> = const { RefCell::new(State::new()) };
     }
 

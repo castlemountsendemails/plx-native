@@ -371,7 +371,7 @@ impl AudioPreferencesCache {
 static AUDIO_PREFERENCES_CACHE: AudioPreferencesCache = AudioPreferencesCache::new();
 
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     static GET_PROBE: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
 }
 

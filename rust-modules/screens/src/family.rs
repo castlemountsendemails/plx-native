@@ -299,7 +299,7 @@ where
     form.table.row_opens(i as i32).then_some(key)
 }
 
-thread_local! {
+plx_base::tls! {
     /// The surface's ground palette, published for the frame so the pages' controls are keyed to
     /// the ground they sit on (what `settings::control_palette` answered). RENDER state: set by
     /// the surface at draw, read by the pages' draws, never hashed.

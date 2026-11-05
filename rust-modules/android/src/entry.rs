@@ -110,6 +110,18 @@ pub fn log(prio: c_int, message: &str) {
     unsafe { __android_log_write(prio, c"PlxNative".as_ptr(), text.as_ptr()) };
 }
 
+/// Bionic hands out the lowest free pthread key, so at least this many of the process's 128 are in
+/// use. A count that climbs across Loads is a key leak heading for std's "out of TLS keys" abort.
+pub fn log_free_pthread_key(when: &str) {
+    let mut key: libc::pthread_key_t = 0;
+    if unsafe { libc::pthread_key_create(&mut key, None) } != 0 {
+        log(LOG_ERROR, &format!("tls: no free pthread key {when}"));
+        return;
+    }
+    unsafe { libc::pthread_key_delete(key) };
+    log(LOG_INFO, &format!("tls: lowest free pthread key {} {when}", key & 0x7fff_ffff));
+}
+
 fn sdl_error(call: &str) -> String {
     let detail = unsafe { CStr::from_ptr(SDL_GetError()) };
     format!("{call} failed: {}", detail.to_string_lossy())
@@ -135,6 +147,7 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
     let arg = |key: &str| args.iter().find_map(|arg| arg.strip_prefix(key)?.strip_prefix('='));
     plx_platform::devcaps::set_source(caps::source);
+    log_free_pthread_key("at launch");
     let lines = match (arg("secure"), arg("net"), arg("caps"), arg("ass")) {
         (Some(mode), ..) => Some(secure::harness(mode)),
         (None, Some(_), ..) => Some(netcheck::harness(arg("server"))),

@@ -2072,7 +2072,7 @@ pub(super) mod tests {
 
     #[test]
     fn a_read_that_a_write_overtook_does_not_store_its_validator() {
-        thread_local! { static HELD: std::cell::RefCell<Vec<Box<dyn FnOnce() + Send>>> = Default::default(); }
+        plx_base::tls! { static HELD: std::cell::RefCell<Vec<Box<dyn FnOnce() + Send>>> = Default::default(); }
         fn hold(_: &str, f: Box<dyn FnOnce() + Send + 'static>) -> bool {
             HELD.with(|h| h.borrow_mut().push(f));
             true

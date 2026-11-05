@@ -38,7 +38,7 @@
 use crate::{Painter, Rect};
 use std::cell::Cell;
 
-thread_local! {
+plx_base::tls! {
     /// The armed pattern, or `None` for the ordinary page. Armed and drawn on the one thread that
     /// runs the frame loop (`boot`, the `pat:` remote token and `draw` are all called from it).
     static CURRENT: Cell<Option<Pattern>> = const { Cell::new(None) };

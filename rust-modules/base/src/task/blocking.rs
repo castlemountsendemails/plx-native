@@ -14,7 +14,7 @@ impl BlockingLabel {
     pub fn text(&self) -> &'static str { self.text }
 }
 
-thread_local! {
+crate::tls! {
     static FRAMES: Cell<u32> = const { Cell::new(0) };
     static ALLOWED: Cell<u32> = const { Cell::new(0) };
 }
@@ -37,7 +37,7 @@ impl Drop for FrameScope {
 /// names only the innermost label.
 type Exception = (&'static BlockingLabel, &'static Location<'static>);
 
-thread_local! {
+crate::tls! {
     static EXCEPTION: Cell<Option<Exception>> = const { Cell::new(None) };
 }
 

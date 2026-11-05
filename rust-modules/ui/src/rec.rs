@@ -951,7 +951,7 @@ impl TableMeasure {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     static SPECULATIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

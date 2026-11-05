@@ -39,12 +39,12 @@ struct Wrapped {
 }
 // A `thread_local!`: the memo holds `Rc`s, which are `!Send` by design, and only the render thread
 // wraps text.
-thread_local! {
+plx_base::tls! {
     static WRAP_CACHE: std::cell::RefCell<HashMap<u64, Rc<Wrapped>>> = std::cell::RefCell::default();
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! { static FORBID_LIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+plx_base::tls! { static FORBID_LIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 #[cfg(any(test, feature = "test-support"))]
 pub struct ForbidLive(bool);
 #[cfg(any(test, feature = "test-support"))]

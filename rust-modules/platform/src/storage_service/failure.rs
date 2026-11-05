@@ -100,7 +100,7 @@ pub fn activation_failure(stage: &str, code: Option<i32>) -> Detail {
     }, code)
 }
 
-thread_local! {
+plx_base::tls! {
     static LAST: std::cell::Cell<Option<HelperFailure>> = const { std::cell::Cell::new(None) };
 }
 pub fn last() -> Option<HelperFailure> { LAST.with(|slot| slot.get()) }

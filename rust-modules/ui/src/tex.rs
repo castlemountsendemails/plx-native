@@ -116,7 +116,7 @@ pub trait Source {
     fn idle(&self) -> bool;
 }
 
-thread_local! {
+plx_base::tls! {
     /// The render cache, on the GL thread. A named render-cache static (spec §15.2): screens
     /// reach it through the free functions below until they take it from `Cx` (phases 5–8).
     static CACHE: RefCell<TexCache<PosterKey>> =

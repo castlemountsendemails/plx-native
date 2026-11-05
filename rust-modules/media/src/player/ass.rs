@@ -881,7 +881,7 @@ plx_base::dynlib! {
 struct Native(*mut c_void);
 
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     /// Renderers created on this thread: the cost D12's reuse exists to avoid (a library, a
     /// renderer and every face re-read). Per thread because the native tests run in parallel.
     static OPEN_DATA_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };

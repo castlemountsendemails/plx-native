@@ -459,7 +459,7 @@ pub fn frame_clear_through() {
     frame_clear_alpha(0.0, 0.0, 0.0, 0.0);
 }
 
-thread_local! {
+plx_base::tls! {
     static SUPPRESS_FRAME_CLEAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -537,7 +537,7 @@ struct ClearProbe {
     armed: std::cell::Cell<bool>,
 }
 
-thread_local! {
+plx_base::tls! {
     static CLEAR_PROBE: ClearProbe = ClearProbe::default();
 }
 
@@ -2295,7 +2295,7 @@ pub mod tex_ledger {
     use std::collections::HashMap;
     use std::os::raw::{c_int, c_uint};
 
-    thread_local! {
+    plx_base::tls! {
         static LIVE: RefCell<HashMap<c_uint, (u64,u64)>> = RefCell::new(HashMap::new());
         static REVISION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
         #[cfg(any(test, feature = "test-support"))]
@@ -5654,7 +5654,7 @@ static mut CULL_RECT: Option<[f32; 4]> = None;
 // through these two names exactly as it did when the flag was declared here.
 pub use plx_machine::idle::{page_frozen, set_page_frozen};
 
-thread_local! {
+plx_base::tls! {
     /// **This frame's picture is a hardware VIDEO PLANE** (restructure spec §9), armed for the
     /// length of the draw by `Dispatcher::draw_with`.
     ///
@@ -8784,7 +8784,7 @@ mod tests {
 mod clear_probe_tests {
     use std::cell::RefCell;
 
-    thread_local! { static LOG: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) }; }
+    plx_base::tls! { static LOG: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) }; }
 
     #[test]
     fn a_frame_brackets_its_first_clear_once() {

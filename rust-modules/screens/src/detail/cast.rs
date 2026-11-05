@@ -8,7 +8,7 @@ use plx_machine::machine::{GroupId, Measure};
 use plx_ui::widgets::Art;
 use plx_ui::{theme, Painter, Rect};
 
-thread_local! {
+plx_base::tls! {
     /// The focused headshot's marquee clock — its name AND role are one block on one clock and one
     /// cycle ([`marquee::Block`]). One tile holds focus app-wide, so one clock (a poster shelf's
     /// label block has its own in `card_row`, a menu row's in `table`).

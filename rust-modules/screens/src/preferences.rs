@@ -168,7 +168,7 @@ enum Pending {
     Local(Receiver<bool>),
 }
 
-thread_local! {
+plx_base::tls! {
     /// The last confirmed account snapshot a landed load or save published, with a generation that
     /// moves on every publish. The field list and its pickers are pages of ONE stack on the UI
     /// thread; this is how a picker starts from the snapshot its parent confirmed (no second

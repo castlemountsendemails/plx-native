@@ -26,7 +26,7 @@ unsafe fn SDL_GetTicks() -> u32 {
     0
 }
 
-thread_local! {
+plx_base::tls! {
     /// The replay override: `Some(ms)` while a recorded frame is being replayed.
     static REPLAY: Cell<Option<u32>> = const { Cell::new(None) };
 }

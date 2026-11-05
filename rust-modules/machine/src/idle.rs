@@ -115,7 +115,7 @@ const KEEPALIVE_MS: u32 = 2000;
 /// saving being chased is the GPU and compositor.
 pub const IDLE_POLL_MS: u32 = 16;
 
-thread_local! {
+plx_base::tls! {
     /// Some spring moved during this frame's update phase. Cleared by [`frame_begin`].
     ///
     /// **Thread-local, and that is the correct model, not a test workaround.** Springs are stepped
@@ -171,7 +171,7 @@ thread_local! {
     /// spring motion with async/data landings without inheriting foreground-widget motion.
     static PRESENT_DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
-thread_local! {
+plx_base::tls! {
     /// Did the PREVIOUS iteration's update phase report motion? Read-and-replaced once per
     /// iteration by [`should_present`], which is what turns the first still frame after a spring
     /// lands into the SETTLE frame — see there.
@@ -426,7 +426,7 @@ pub fn invalidate() {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     /// How many times THIS thread has raised discrete damage — the test-only half of `DIRTY`.
     /// `DIRTY` and `DAMAGE_GEN` are process-wide on purpose (a worker thread's landing must wake
     /// the main loop), which makes them useless for grading "did this animation ask for a frame"
@@ -462,7 +462,7 @@ pub fn reset_for_test() {
     let _ = take_local_damage();
 }
 
-thread_local! {
+plx_base::tls! {
     /// Depth of open [`OwnScope`]s: while non-zero, every [`invalidate`] is a POPOVER's own damage.
     static OWN_SCOPE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }

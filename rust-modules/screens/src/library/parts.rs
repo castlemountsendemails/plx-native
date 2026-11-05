@@ -482,7 +482,7 @@ fn grid_clip() -> Rect {
 }
 
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     /// Every `(index, Tile.scale)` the grid handed `CardSource::overlay`, in paint order: what the
     /// card renderer is given, for tests that assert on it instead of recomputing it.
     pub(super) static OVERLAID: std::cell::RefCell<Vec<(usize, f32)>> = const { std::cell::RefCell::new(Vec::new()) };

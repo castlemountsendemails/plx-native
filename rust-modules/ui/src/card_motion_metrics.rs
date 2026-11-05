@@ -30,7 +30,7 @@ pub struct Stats {
 impl Stats {
     pub fn full(self) -> bool { !self.frame_observed && self.last_draws >= 6 && self.last_ready == self.last_draws }
 }
-thread_local! { static ACTIVE: RefCell<Option<Stats>> = const { RefCell::new(None) }; }
+plx_base::tls! { static ACTIVE: RefCell<Option<Stats>> = const { RefCell::new(None) }; }
 fn note(f: impl FnOnce(&mut Stats)) { ACTIVE.with(|s| { if let Some(s) = &mut *s.borrow_mut() { f(s); } }); }
 pub fn arm() { ACTIVE.with(|s| *s.borrow_mut() = Some(Stats::default())); }
 pub fn snapshot() -> Stats { ACTIVE.with(|s| s.borrow().unwrap_or_default()) }

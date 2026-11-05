@@ -362,7 +362,7 @@ struct Entry {
     px: i32,
     tex: c_uint,
 }
-thread_local! {
+plx_base::tls! {
     static CACHE: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) };
 }
 

@@ -1239,7 +1239,7 @@ mod tests {
         }
         let _reset = ResetCanonical;
         plx_base::paths::redirect_persistent_state_root_for_test(Some(files.dir.join("canonical")));
-        std::thread_local! {
+        plx_base::tls! {
             static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         }
         READS.with(|count| count.set(0));

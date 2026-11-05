@@ -41,7 +41,7 @@ impl Host for TestHost {
     type Memory = PageMemory;
 }
 
-thread_local! {
+plx_base::tls! {
     // TEST ONLY: see `screens::detail::tests`'s `TEST_METADATA` for why this lives here rather
     // than being threaded as a parameter — same free-helper-fn shape, same reasoning.
     static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =

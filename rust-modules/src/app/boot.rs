@@ -713,7 +713,7 @@ mod cursor_door_tests {
 
     const BLANK: usize = 0x99;
 
-    thread_local! {
+    plx_base::tls! {
         static CURRENT: Cell<usize> = const { Cell::new(0) };
         static DEFAULT: Cell<usize> = const { Cell::new(0) };
         static SET: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };

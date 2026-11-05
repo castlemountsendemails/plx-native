@@ -3,7 +3,7 @@ use plx_machine::machine::PosterKey;
 use plx_ui::tex::{Source, Warm};
 use std::cell::RefCell;
 
-thread_local! {
+plx_base::tls! {
     static ART_REQUESTS: RefCell<(Vec<String>, Vec<String>)> = const { RefCell::new((Vec::new(), Vec::new())) };
 }
 

@@ -28,7 +28,7 @@ pub struct TestStore {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-std::thread_local! {
+plx_base::tls! {
     pub static STORE_FOR_TEST: std::cell::Cell<Option<&'static TestStore>> =
         const { std::cell::Cell::new(None) };
 }

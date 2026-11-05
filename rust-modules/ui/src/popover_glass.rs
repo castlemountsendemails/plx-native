@@ -63,7 +63,7 @@ pub(crate) fn face_at(a: f32) -> GlassFace {
     crate::widgets::chip_face(FACE, a.clamp(0.0, 1.0))
 }
 
-thread_local! {
+plx_base::tls! {
     /// The modal dims drawn on this frame's visible pass so far, each with the index of the surface
     /// that owns it: `Painter::dim` notes each ([`note_dim`]), `popover::host::begin_frame` and
     /// `app/run.rs`'s frame head clear. Per thread, like the walk.

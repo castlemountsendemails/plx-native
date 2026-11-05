@@ -259,7 +259,7 @@ struct Global {
 }
 static TRACE: Mutex<Option<Global>> = Mutex::new(None);
 
-std::thread_local! {
+plx_base::tls! {
     /// MAIN thread: the draw id the probe/warm now running is for. `lookup` reads it at claim time.
     static CURRENT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// MAIN thread: which return path the running `lookup` took, for the probe that called it.

@@ -1359,7 +1359,7 @@ fn parse_window(out: &mut Vec<Shelf>, hubs: &[plx_plex::plex::Hub], sid: ServerI
 
 // The most cards a read has held at once, as a test reads it back.
 #[cfg(test)]
-thread_local! { pub(crate) static PEAK_CARDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+plx_base::tls! { pub(crate) static PEAK_CARDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 /// Gives the cards of every row outside the held range up to its descriptor. A row the pager reads
 /// comes back from its listing; any other comes back through the rating keys it showed

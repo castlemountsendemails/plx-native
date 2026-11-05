@@ -290,6 +290,7 @@ impl VideoSink for AmcSink {
             return 0;
         };
         log(LOG_INFO, &format!("amc: {} started for {format:?}", codec.name));
+        crate::entry::log_free_pthread_key("at load");
         lock(&NAME).clone_from(&codec.name);
         *lock(&DECODER) = Some(Decoder { codec, inputs: Inputs::default(), pending: None, playing: false, clock: Clock::default(), last_fed_us: 0, tail: None, video_ended: false, last_pts: 0 });
         for count in [&FED, &SHOWN, &LATE, &FEED_MAX_US] {

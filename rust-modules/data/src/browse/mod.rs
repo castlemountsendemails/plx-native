@@ -3717,7 +3717,7 @@ fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static REFUSE_DISCOVERY_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

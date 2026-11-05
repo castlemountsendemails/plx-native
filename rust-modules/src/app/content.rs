@@ -41,7 +41,7 @@ struct HeldFeature {
     hud_ms: u32,
 }
 
-std::thread_local! {
+plx_base::tls! {
     static HELD_FEATURE: std::cell::RefCell<Option<HeldFeature>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -49,7 +49,7 @@ fn halt_preview(app: &mut App) {
     halt_preview_now(&mut app.player.session, &mut app.adapters.player);
 }
 
-std::thread_local! {
+plx_base::tls! {
     /// The page instance whose hero started the preview in flight, set when its
     /// `ContentReq::PreviewStart` is accepted. See [`halt_preview_off_its_page`].
     static PREVIEW_HOST: std::cell::Cell<Option<plx_machine::machine::InstanceId>> =
@@ -244,7 +244,7 @@ fn drain_held_feature(app: &mut App) {
 // confined to the thread each test body runs on, reached only through
 // `MetadataStore::run`/`state_mut`/`view` (the sole owner API), never a second mechanism.
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
         std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
 }

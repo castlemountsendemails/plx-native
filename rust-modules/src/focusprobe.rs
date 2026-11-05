@@ -390,7 +390,7 @@ fn b(v: bool) -> u8 {
 mod tests {
     use super::*;
 
-    thread_local! {
+    plx_base::tls! {
         static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
             std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
     }

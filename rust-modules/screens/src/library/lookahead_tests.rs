@@ -20,7 +20,7 @@ struct Log {
     budget: usize,
 }
 
-thread_local! {
+plx_base::tls! {
     static LOG: RefCell<Log> = RefCell::new(Log::default());
 }
 

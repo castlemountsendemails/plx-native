@@ -460,7 +460,7 @@ fn upload(prev: u32, px: &[u8]) -> u32 {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static STAND_IN_UPLOAD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 

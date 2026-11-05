@@ -243,7 +243,7 @@ impl Phase {
 }
 
 #[cfg(feature = "devtriggers")]
-thread_local! {
+plx_base::tls! {
     /// `/tmp/plxnative-stillclock=<ms>` (`dev::scenarios::screenshot`): every [`Phase`] on this
     /// thread reads this many elapsed ms and reports NO motion, so a spinner is drawn at one fixed
     /// angle and a waiting screen can settle. `u32::MAX` = not held. Thread-local because the one
