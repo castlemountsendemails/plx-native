@@ -153,7 +153,7 @@ fn load_legacy_json_at(root: PathBuf) -> CanonicalRead {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-std::thread_local! {
+plx_base::tls! {
     pub(super) static READ_FOR_TEST: std::cell::Cell<Option<fn() -> CanonicalRead>> =
         const { std::cell::Cell::new(None) };
 }

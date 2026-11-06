@@ -860,7 +860,7 @@ const CACHE_GLYPHS: i32 = 1000;
 const CACHE_BITMAP_MIB: i32 = 24;
 
 plx_base::dynlib! {
-    native_ass: ["libass-plx-host.so.0", "libass-plx.so.0", "libass-plx.0.dylib"] {
+    native_ass: ["libass-plx-host.so.0", "libass-plx.so.0", "libass-plx.0.dylib", "libass-plx.so"] {
         fn plx_ass_abi_version() -> u32;
         fn plx_ass_create(default_font: *const c_char) -> *mut c_void;
         fn plx_ass_destroy(ctx: *mut c_void);
@@ -881,7 +881,7 @@ plx_base::dynlib! {
 struct Native(*mut c_void);
 
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     /// Renderers created on this thread: the cost D12's reuse exists to avoid (a library, a
     /// renderer and every face re-read). Per thread because the native tests run in parallel.
     static OPEN_DATA_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -929,9 +929,10 @@ impl Native {
         #[cfg(test)]
         OPEN_DATA_CALLS.with(|c| c.set(c.get() + 1));
         static LOADED: OnceLock<bool> = OnceLock::new();
-        let loaded = *LOADED.get_or_init(|| {
-            native_ass::load(Some(asset_dir())).ok() && unsafe { plx_ass_abi_version() } == NATIVE_ABI
-        });
+        // An Android APK keeps its libraries in its own library directory, which the linker searches
+        // for a bare name (as for FFmpeg); everywhere else the library sits in the app directory.
+        let dir = if cfg!(target_os = "android") { None } else { Some(asset_dir()) };
+        let loaded = *LOADED.get_or_init(|| native_ass::load(dir).ok() && unsafe { plx_ass_abi_version() } == NATIVE_ABI);
         if !loaded {
             return Err(Fault::Unavailable);
         }

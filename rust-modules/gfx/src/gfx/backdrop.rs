@@ -1202,8 +1202,8 @@ struct Walk {
     glasses: Vec<Rect>,
     snapshots: Rc<RefCell<std::collections::BTreeSet<Z>>>,
 }
-thread_local! { static WALK: RefCell<Option<Walk>> = const { RefCell::new(None) }; }
-thread_local! { static WALKS_ENTERED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+plx_base::tls! { static WALK: RefCell<Option<Walk>> = const { RefCell::new(None) }; }
+plx_base::tls! { static WALKS_ENTERED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
 /// **Which walk of the page is drawing**: a number that is new for every [`enter`] (and so every
 /// [`discover`]) and comes back with the walk when a nested [`Scope`] drops, so it names the walk
 /// and not "the latest one entered". The application draws the page several times a frame (the

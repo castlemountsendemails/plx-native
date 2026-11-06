@@ -356,7 +356,7 @@ fn neutral_band(rest: Rect) -> f32 {
     (rest.h - glyph_px(rest.w) - rest.w * GAP_RATIO - 2.0 * NAME_BOTTOM * type_k(rest.w)).max(0.0)
 }
 
-thread_local! {
+plx_base::tls! {
     /// Per (name, style, resting size): the fitted name. Settled once per resting width, so a frame
     /// pays one lookup per tile and a focus pop never re-wraps.
     static FITTED: RefCell<HashMap<u64, Rc<FittedName>>> = RefCell::new(HashMap::new());

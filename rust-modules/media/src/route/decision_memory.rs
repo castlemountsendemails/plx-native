@@ -216,6 +216,9 @@ pub fn send_parked_write_back(ps: &mut PlaybackSession) {
         Some(SubWrite::Off) => Some(0),
         None => parked.keep_subtitle,
     };
+    // Over a remux the side reader draws, the server's selection stays 0; the stop writes the pick.
+    let drawn = subtitle_presenter(ps) == SubtitlePresenter::ClientOverRemux && !ps.cur_sub_sidecar;
+    let subtitle = if drawn { subtitle.map(|_| 0) } else { subtitle };
     crate::player::log(&format!(
         "track-memory: write-back part={} audio={} sub={}",
         parked.part_id,

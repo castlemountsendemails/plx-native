@@ -443,7 +443,7 @@ struct Snap {
     arm: u32,
 }
 
-thread_local! {
+plx_base::tls! {
     static SNAP: std::cell::Cell<Snap> = const { std::cell::Cell::new(Snap { scale: REST, live: false, active: false, arm: 0 }) };
 }
 
@@ -489,7 +489,7 @@ mod ownership_tests {
             !code.iter().any(|l| l.contains(&needle)),
             "press.rs holds a static-mut again"
         );
-        let cell = ["thread_local", "!"].join(""); // as above: keep this line from matching itself
+        let cell = ["::tls", "!"].join(""); // as above: keep this line from matching itself
         let cells = code.iter().filter(|l| l.contains(&cell)).count();
         assert_eq!(cells, 1, "the one thread_local is the published snapshot");
         let input = std::fs::read_to_string(root.join("ui/src/input.rs")).unwrap();

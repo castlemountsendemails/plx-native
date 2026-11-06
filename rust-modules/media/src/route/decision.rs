@@ -317,6 +317,10 @@ pub struct PlaybackSession {
     /// The app's own drawing of a subtitle over a remux was refused or failed on this playback,
     /// so the server burn is the only route left for it. Session-scoped: cleared with the item.
     side_subs_refused: bool,
+    /// The side reader drew the selected embedded track on this playback, so the Part's selection
+    /// was PUT as 0 ([`app_draws_embedded_on_remux`]) and the stop owes PMS the pick back
+    /// ([`scrobble_stop`]). Session-scoped: cleared with the item.
+    server_sub_held: bool,
     /// The subtitle-language preference this play resolved under — the show's pref if it set one,
     /// else the account's — carried straight from [`super::plan::Plan::sub_pref_lang`] so the
     /// Subtitles menu's "yours" grouping (`metadata::sub_layout::sub_sections`) survives a reload.
@@ -525,6 +529,7 @@ impl PlaybackSession {
         cur_sub_client_drawable: false,
         cur_sub_ordinal: -1,
         side_subs_refused: false,
+        server_sub_held: false,
         cur_sub_pref_lang: None,
         cur_show_rk: String::new(),
         cur_kind: String::new(),
@@ -610,6 +615,7 @@ impl PlaybackSession {
             cur_sub_client_drawable,
             cur_sub_ordinal,
             side_subs_refused,
+            server_sub_held,
             cur_sub_pref_lang,
             cur_show_rk,
             cur_kind,
@@ -677,6 +683,7 @@ impl PlaybackSession {
             cur_sub_client_drawable: *cur_sub_client_drawable,
             cur_sub_ordinal: *cur_sub_ordinal,
             side_subs_refused: *side_subs_refused,
+            server_sub_held: *server_sub_held,
             cur_sub_pref_lang: cur_sub_pref_lang.clone(),
             cur_show_rk: cur_show_rk.clone(),
             cur_kind: cur_kind.clone(),
@@ -4098,7 +4105,7 @@ pub(super) fn run_auto_hls(off: &plx_base::task::OffFrame, plan: &AutoHlsPlan) -
             ),
         },
         AutoHlsRoute::Encode { inputs, contract } => {
-            select_streams_for_encode(off, inputs);
+            select_streams_for_encode(off, inputs, contract);
             request_retranscode(off, inputs, *contract).map_or(AutoHlsOutcome::Refused, AutoHlsOutcome::Prepared)
         }
     }
@@ -4358,6 +4365,8 @@ pub(super) struct OriginalRecoveryPlan {
     rk: String,
     part_id: i64,
     subtitle_sid: i64,
+    /// [`app_draws_embedded_on_remux`] when the recovery was planned: the remux PUTs 0.
+    subtitle_drawn_on_remux: bool,
     /// The namespace the replacement encoder's session id is minted under.
     namespace: String,
     /// The session id a DIRECT trial's Part reads (the admission probe and the trial URL) and the
@@ -4475,6 +4484,7 @@ fn plan_original_recovery(
         rk: cur_rk(ps),
         part_id: cur_part_id(ps),
             subtitle_sid: cur_sub_sid(ps),
+        subtitle_drawn_on_remux: app_draws_embedded_on_remux(ps),
         namespace,
         direct_session,
         src_acodec: ps.src_acodec.clone(),
@@ -5849,6 +5859,9 @@ pub fn scrobble_stop(
     }
     let (logical_session, pq, pqi) = (sess(ps), pq_id(ps), pq_item_id(ps));
     let (aud, sub) = (cur_audio_sid(ps), cur_sub_sid(ps)); // the selection this playback reported under
+    if std::mem::take(&mut ps.server_sub_held) && sub > 0 && !ps.cur_sub_sidecar {
+        queue_put_selection(cur_sid(ps), cur_part_id(ps), aud, sub);
+    }
     let tsession = take_active_encoder();
     let session = if tsession.is_empty() {
         logical_session
@@ -6667,6 +6680,17 @@ pub fn audio_track_direct_plays(ps: &PlaybackSession, codec: &str, channels: i64
     audio_direct_plays(ps.direct_play_mode, codec, channels)
 }
 
+/// Whether the route on screen was decided for a device table that has since changed under it
+/// (Fire TV re-reads the TV's audio formats on return from the background): a direct play whose
+/// audio the table no longer takes, or any server encode, which was built for the old table.
+pub fn route_outlived_caps(ps: &PlaybackSession) -> bool {
+    match (live_family(ps), ps.cur_audio.as_ref()) {
+        (RouteFamily::Direct, Some(a)) => !audio_track_direct_plays(ps, &a.codec, a.channels),
+        (RouteFamily::Direct, None) => false,
+        _ => true,
+    }
+}
+
 /// **Would the server convert this track's audio if it played?** The track menu's "converted by
 /// your server" mark: a track the TV cannot decode (`audio_direct_plays`, the same capability
 /// answer the planner and the profile use) plays through the server's remux or re-encode with its
@@ -7130,10 +7154,10 @@ pub(super) fn forced_server_decision(
 /// id to burn it; audioStreamID only when the user switched or the profile remembered a track for
 /// the show (else keep default).
 ///
-/// Never `0` for a subtitle the app draws itself: PMS discards a DOWNLOADED subtitle the moment the
-/// selection moves off it (docs/pms-api.md, 2026-10-06), so `0` means the viewer chose Off (now
-/// or, for a show, earlier: a remembered Off) or nothing is selected; "do not burn" is the
-/// transcode wire's `subtitles=none` alone.
+/// Never `0` for a sidecar the app draws itself: PMS discards a DOWNLOADED subtitle the moment the
+/// selection moves off it (docs/pms-api.md, 2026-10-06). An embedded track the side reader draws
+/// over a remux is PUT as `0`, since PMS burns the selection whatever the wire says (M8), and the
+/// stop PUTs it back ([`scrobble_stop`]). Otherwise `0` means Off or nothing selected.
 ///
 /// `sid` names the server that owns `part` — the resolve worker passes the id it was given, and the
 /// in-playback callers pass [`cur_sid`]. A `Part.id` is server-local, so a PUT sent to the wrong
@@ -7823,6 +7847,9 @@ fn request_play_inner(
         );
         return false;
     }
+    // The decision request below is built from the device table, and a platform that reads it from
+    // a running system (Fire TV: the TV's audio formats) may have a different answer than at boot.
+    plx_platform::devcaps::refresh();
     // **The playback funnel's denominator, minted HERE and not where the plan lands.** Every way
     // into playback comes through this one function, including the ones that go on to be refused at
     // `/decision` — and a refusal never reaches the engine, so anchoring the attempt any later
@@ -7963,6 +7990,7 @@ fn clear_track_selection(s: &mut PlaybackSession) {
     s.cur_sub_client_drawable = false;
     s.cur_sub_ordinal = -1;
     s.side_subs_refused = false;
+    s.server_sub_held = false;
 }
 
 /// What a play request does to the live track selection: clear it, and keep the pair a RETRY
@@ -8442,6 +8470,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut plx_data::stores::metadata::M
             cur_sub_client_drawable: plan.sub_render_ordinal.is_some(),
             cur_sub_ordinal: plan.sub_render_ordinal.unwrap_or(-1),
             side_subs_refused: false,
+            server_sub_held: false,
             cur_sub_pref_lang: plan.sub_pref_lang,
             cur_show_rk,
             cur_kind,
@@ -8574,7 +8603,9 @@ fn prepare_original_remux(
     let replacement = next_encoder_session(&plan.namespace);
     let subtitle = plan.subtitle_sid;
     let candidate_audio_sid = candidate.audio.as_ref().map_or(0, |a| a.sid);
-    put_selection(off, plan.sid, plan.part_id, candidate_audio_sid, subtitle);
+    // A burn names the subtitle; a remux the side reader draws over names 0.
+    let put_sub = |force_burn: bool| if !force_burn && plan.subtitle_drawn_on_remux { 0 } else { subtitle };
+    put_selection(off, plan.sid, plan.part_id, candidate_audio_sid, put_sub(force_burn));
     let spec_for = |audio, force_burn| {
         transcode_spec(
             rk,
@@ -8604,6 +8635,9 @@ fn prepare_original_remux(
         }
         enhancement_refused = true;
         audio = plx_plex::plex::AudioEnhancements::NONE;
+        if put_sub(force_burn) != put_sub(plan.subtitle_burn) {
+            put_selection(off, plan.sid, plan.part_id, candidate_audio_sid, put_sub(plan.subtitle_burn));
+        }
         force_burn = plan.subtitle_burn;
         spec = spec_for(audio, force_burn);
         decision = c.transcode_decision(off, &spec);
@@ -8697,7 +8731,7 @@ fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket, offset_sec
     let contract = plain_rebuild_precheck(ps, expected)?;
     let inputs = prepare_retranscode_inputs(ps, expected, offset_secs)?;
     let off = plx_base::task::OffFrame::for_test();
-    select_streams_for_encode(&off, &inputs);
+    select_streams_for_encode(&off, &inputs, &contract);
     match try_retranscode(&off, &inputs, contract) {
         RetranscodeWorkerOutcome::Applied(applied) => {
             install_retranscode_outcome(ps, &applied);
@@ -8853,6 +8887,25 @@ fn side_subs_allowed(ps: &PlaybackSession) -> bool {
     side_subs_allowed_for(ps, ps.cur_sub_sid, ps.cur_sub_client_drawable, ps.cur_sub_sidecar)
 }
 
+/// **Will the side reader draw the selected embedded track once a remux plays?** PMS burns the
+/// Part's selected subtitle into a remux whatever the start URL says (docs/pms-api.md M8), so a
+/// selection PUT ahead of such a remux names 0 or the track shows twice. A sidecar keeps its id:
+/// PMS discards a downloaded one when the selection moves off it.
+fn app_draws_embedded_on_remux(ps: &PlaybackSession) -> bool {
+    ps.cur_sub_sid != 0
+        && !ps.cur_sub_sidecar
+        && ps.cur_sub_client_drawable
+        && !ps.side_subs_refused
+        && side_reader_admitted(ps)
+}
+
+/// The engine starts the side reader on the selected track: the stop owes PMS the pick back.
+pub fn note_side_reader_start(ps: &mut PlaybackSession) {
+    if ps.cur_sub_sid > 0 && !ps.cur_sub_sidecar {
+        ps.server_sub_held = true;
+    }
+}
+
 /// Log the harness-readable pair every enhancement-graded decision produces, shared by
 /// `install_retranscode_outcome` (a claim flight's install), `install_auto_hls_outcome` and
 /// `route::plan`'s cold-start branch — the callers that classify a fresh `/decision` body and must
@@ -8891,6 +8944,8 @@ pub(super) struct RetranscodeClaimInputs {
     part_id: i64,
     audio_sid: i64,
     subtitle_sid: i64,
+    /// [`app_draws_embedded_on_remux`] when the claim was prepared: a remux contract PUTs 0.
+    pub(super) subtitle_drawn_on_remux: bool,
     namespace: String,
     offset_secs: i64,
     expected: WorkerTicket,
@@ -8978,9 +9033,14 @@ fn retranscode_fallback_codecs(
 /// [`try_retranscode`] attempt: every attempt of a claim shares `inputs`, so a fallback attempt
 /// would send the identical PUT again. Skipped for a stale ticket, exactly as the attempt's own
 /// gate refuses to start.
-pub(super) fn select_streams_for_encode(off: &plx_base::task::OffFrame, inputs: &RetranscodeClaimInputs) {
+pub(super) fn select_streams_for_encode(
+    off: &plx_base::task::OffFrame,
+    inputs: &RetranscodeClaimInputs,
+    contract: &plx_plex::plex::EncodeContract,
+) {
     if is_worker_ticket_current(&inputs.expected) {
-        put_selection(off, inputs.sid, inputs.part_id, inputs.audio_sid, inputs.subtitle_sid);
+        let sub = if contract.remux && inputs.subtitle_drawn_on_remux { 0 } else { inputs.subtitle_sid };
+        put_selection(off, inputs.sid, inputs.part_id, inputs.audio_sid, sub);
     }
 }
 
@@ -9168,6 +9228,7 @@ fn prepare_retranscode_inputs(
         part_id: cur_part_id(ps),
         audio_sid: cur_audio_sid(ps),
         subtitle_sid: cur_sub_sid(ps),
+        subtitle_drawn_on_remux: app_draws_embedded_on_remux(ps),
         namespace,
         offset_secs,
         expected: expected.clone(),
@@ -10587,7 +10648,13 @@ fn commit_subtitle_selection_inner(
         // from `app/playback.rs::commit_track` inside the run-loop's `FrameScope`, so this PUT runs
         // on the serial selection worker instead of blocking the frame thread.
         if put {
-            queue_put_selection(cur_sid(ps), cur_part_id(ps), cur_audio_sid(ps), cur_sub_sid(ps));
+            let sub = if in_place && app_draws_embedded_on_remux(ps) {
+                ps.server_sub_held = true;
+                0
+            } else {
+                cur_sub_sid(ps)
+            };
+            queue_put_selection(cur_sid(ps), cur_part_id(ps), cur_audio_sid(ps), sub);
         }
     }
     if in_place {

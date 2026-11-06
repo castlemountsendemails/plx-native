@@ -569,7 +569,7 @@ impl KeyMemo {
         built
     }
 }
-thread_local! {
+plx_base::tls! {
     static KEY_MEMO: std::cell::RefCell<KeyMemo> = std::cell::RefCell::default();
 }
 

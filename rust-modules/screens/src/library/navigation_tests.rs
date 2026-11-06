@@ -41,7 +41,7 @@ impl LibraryLike for TestHost {
         COLLECTION_ANSWERS.with(|answers| answers.borrow().iter().find(|(seen, _)| *seen == key).map(|(_, answer)| *answer))
     }
 }
-thread_local! {
+plx_base::tls! {
     /// What the fixture's collections probe has learned, by section key.
     static COLLECTION_ANSWERS: std::cell::RefCell<Vec<(u32, Result<u32, crate::registry::Forbidden>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }

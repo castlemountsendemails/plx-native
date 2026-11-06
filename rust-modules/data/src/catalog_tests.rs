@@ -99,7 +99,7 @@ fn park(_: &str, f: Box<dyn FnOnce() + Send + 'static>) -> bool {
     true
 }
 
-thread_local! {
+plx_base::tls! {
     static PARKED: std::cell::RefCell<Vec<Box<dyn FnOnce() + Send + 'static>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 

@@ -57,7 +57,7 @@ impl NavPresentation {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     static NAV: Cell<NavPresentation> = const { Cell::new(NavPresentation::rest()) };
     /// Dev only: swap the dip for a blurred dissolve. Latched at boot from the trigger. Kept as
     /// its own cell because it is armed once per process and read by an unrelated caller.

@@ -96,7 +96,7 @@ mod tests {
     use plx_platform::tv::secure::{Backend, Sealed, TestStore, STORE_FOR_TEST};
     use std::cell::Cell;
 
-    std::thread_local! {
+    plx_base::tls! {
         static KEY: Cell<u32> = const { Cell::new(0) };
     }
 

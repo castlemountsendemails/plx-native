@@ -211,7 +211,7 @@ pub fn sync(desired: Option<Spec>) {
 }
 
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     static TEST_SYNCS: std::cell::RefCell<Vec<Option<i32>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 

@@ -13,13 +13,13 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use plx_base::task::MainThread;
-use plx_media::player::sf_on_event;
+use plx_media::player::{duration_ns, playpos_ns, sf_on_event};
 use plx_platform::tv::sink::{UnloadTicket, VideoSink, VP_EXPORTED};
 
 use crate::audiotrack;
 use crate::jni::{Codec, Input, Output};
 use crate::entry::{log, LOG_ERROR, LOG_INFO};
-use crate::video::{self, Action, Au, Clock, Inputs};
+use crate::video::{self, Action, Au, Clock, Ending, Inputs, Tail};
 
 pub(crate) const FEED_OK: c_char = b'O' as c_char;
 pub(crate) const FEED_FULL: c_char = b'B' as c_char;
@@ -48,6 +48,9 @@ static DRIFT_MAX_US: AtomicI64 = AtomicI64::new(-1);
 
 static DECODER: Mutex<Option<Decoder>> = Mutex::new(None);
 static DRAIN: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+/// The last unload's teardown. Closing the codecs and the track can take most of a second on a
+/// stick, and a Home park runs it on the loop just before SDL marks the loop parked.
+static RETIRE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 static NAME: Mutex<String> = Mutex::new(String::new());
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -76,12 +79,17 @@ struct Decoder {
     playing: bool,
     clock: Clock,
     last_fed_us: i64,
+    /// Set once end of stream is queued, until a flush.
+    tail: Option<Tail>,
+    video_ended: bool,
+    last_pts: i64,
 }
 
 enum Step {
     Idle,
     Busy,
     Presented(i64),
+    PlayedOut(i64),
     Failed,
 }
 
@@ -91,6 +99,29 @@ impl Decoder {
         self.inputs.clear();
         self.pending = None;
         self.clock.reset();
+        self.tail = None;
+        self.video_ended = false;
+    }
+
+    /// Past the last frame, the position comes from the audio.
+    fn ending(&mut self) -> Step {
+        if !self.video_ended || !self.playing {
+            return Step::Idle;
+        }
+        let Some(tail) = self.tail.as_mut() else {
+            return Step::Idle;
+        };
+        match tail.ending(audiotrack::clock(), now_ns(), self.last_pts) {
+            Ending::Wait => Step::Idle,
+            Ending::Position(pts) => {
+                self.last_pts = pts;
+                Step::Presented(pts)
+            }
+            Ending::PlayedOut => {
+                self.video_ended = false;
+                Step::PlayedOut(self.last_pts)
+            }
+        }
     }
 
     /// Moves queued AUs into free input buffers; `None` if the decoder failed.
@@ -113,11 +144,12 @@ impl Decoder {
         if self.pending.is_none() {
             match self.codec.dequeue() {
                 None => return Step::Failed,
-                Some(Output::None) => return Step::Idle,
+                Some(Output::None) => return self.ending(),
                 Some(Output::FormatChanged) => return Step::Busy,
                 Some(Output::Frame { index, end: true, .. }) => {
                     log(LOG_INFO, "amc: end of stream decoded");
                     self.codec.release(index, None);
+                    self.video_ended = true;
                     return Step::Busy;
                 }
                 Some(Output::Frame { index, pts_us, end: false }) => {
@@ -128,8 +160,11 @@ impl Decoder {
         let Some((index, pts)) = self.pending.filter(|_| self.playing) else {
             return Step::Idle;
         };
-        let audio = audiotrack::clock();
         let now = now_ns();
+        let audio = match self.tail.as_mut() {
+            Some(tail) => tail.audio(audiotrack::clock(), now),
+            None => audiotrack::clock(),
+        };
         let render = match self.clock.action(pts, now, audio) {
             Action::Wait => return Step::Idle,
             Action::Show(at) => Some(at),
@@ -154,6 +189,7 @@ impl Decoder {
             let drift = drift.map_or("-".into(), |drift| format!("{}ms", drift / 1_000_000));
             log(LOG_INFO, &format!("amc: frame {what} #{n} pts={}ms drift={drift} queued={}", pts / 1_000_000, self.inputs.queued()));
         }
+        self.last_pts = pts;
         Step::Presented(pts)
     }
 }
@@ -167,11 +203,17 @@ fn drain() {
     while DRAINING.load(Relaxed) {
         match with_decoder(Decoder::step) {
             Some(Step::Presented(pts)) => event(0, pts, None),
+            Some(Step::PlayedOut(last_pts)) => {
+                log(LOG_INFO, "amc: played out");
+                event(0, video::end_position(last_pts, duration_ns(), playpos_ns()), None);
+            }
             Some(Step::Busy) => {}
             Some(Step::Idle) | None => std::thread::sleep(IDLE),
             Some(Step::Failed) => {
                 log(LOG_ERROR, "amc: the decoder failed; no more frames are shown");
                 DRAINING.store(false, Relaxed);
+                // Before the first picture this type fails the source; after one the engine only logs it.
+                event(18, 0, Some(c"decoder failed"));
             }
         }
     }
@@ -203,6 +245,26 @@ fn teardown() {
     );
 }
 
+/// Waits for the previous unload's teardown, so nothing opens or closes alongside it.
+fn await_retire() {
+    if let Some(retire) = lock(&RETIRE).take() {
+        plx_base::task::join("amc retire", retire);
+    }
+}
+
+/// The drain stops here, so no frame event can follow the unload's completion.
+fn retire() {
+    await_retire();
+    stop_drain();
+    match std::thread::Builder::new().name("amc-retire".into()).spawn(teardown) {
+        Ok(retire) => *lock(&RETIRE) = Some(retire),
+        Err(e) => {
+            log(LOG_ERROR, &format!("amc: no retire thread ({e}); tearing down on the loop"));
+            teardown();
+        }
+    }
+}
+
 fn note_feed(size: c_uint, pts: i64, took_us: u64) {
     let n = FED.fetch_add(1, Relaxed) + 1;
     if n <= 5 || n.is_multiple_of(LOG_EVERY) {
@@ -218,6 +280,7 @@ impl VideoSink for AmcSink {
             return 0;
         }
         let payload = if payload.is_null() { "".into() } else { CStr::from_ptr(payload).to_string_lossy() };
+        await_retire();
         let Some(format) = video::format(&payload) else {
             log(LOG_ERROR, &format!("amc: no decoder for the load payload {payload}"));
             return 0;
@@ -227,8 +290,9 @@ impl VideoSink for AmcSink {
             return 0;
         };
         log(LOG_INFO, &format!("amc: {} started for {format:?}", codec.name));
+        crate::entry::log_free_pthread_key("at load");
         lock(&NAME).clone_from(&codec.name);
-        *lock(&DECODER) = Some(Decoder { codec, inputs: Inputs::default(), pending: None, playing: false, clock: Clock::default(), last_fed_us: 0 });
+        *lock(&DECODER) = Some(Decoder { codec, inputs: Inputs::default(), pending: None, playing: false, clock: Clock::default(), last_fed_us: 0, tail: None, video_ended: false, last_pts: 0 });
         for count in [&FED, &SHOWN, &LATE, &FEED_MAX_US] {
             count.store(0, Relaxed);
         }
@@ -262,6 +326,9 @@ impl VideoSink for AmcSink {
             if !d.playing {
                 d.playing = true;
                 d.clock.reset();
+                if let Some(tail) = d.tail.as_mut() {
+                    tail.rearm(now_ns());
+                }
             }
         });
         audiotrack::play();
@@ -275,7 +342,8 @@ impl VideoSink for AmcSink {
         audiotrack::pause();
         c_int::from(held.is_some())
     }
-    unsafe fn set_volume(&self, _: &MainThread, _volume: c_int) -> c_int {
+    unsafe fn set_volume(&self, _: &MainThread, volume: c_int) -> c_int {
+        audiotrack::set_muted(volume == 0);
         1
     }
     unsafe fn flush(&self, _: &MainThread) -> c_int {
@@ -289,6 +357,7 @@ impl VideoSink for AmcSink {
     unsafe fn push_eos(&self, _: &MainThread) -> c_int {
         let queued = with_decoder(|d| {
             d.inputs.push(Au { data: Vec::new(), pts_us: d.last_fed_us, end: true });
+            d.tail = Some(Tail::new(now_ns()));
             d.put_inputs()
         });
         if queued.flatten().is_some() {
@@ -352,7 +421,8 @@ impl VideoSink for AmcSink {
         }
     }
     unsafe fn unload(&self, _owner: &UnloadTicket) {
-        teardown();
+        // The engine has joined its demux by now, so nothing feeds the codecs being retired.
+        retire();
         if READY.load(Relaxed) {
             UNLOAD_COMPLETED.store(true, Relaxed);
             // UNLOADCOMPLETED, which the engine's release takes as its evidence.
@@ -376,6 +446,7 @@ impl VideoSink for AmcSink {
     }
     unsafe fn quarantine(&self, _: &MainThread) {
         GATE_RETIRED.store(true, Relaxed);
+        await_retire();
         teardown();
         READY.store(false, Relaxed);
         LOADED.store(false, Relaxed);
@@ -409,6 +480,18 @@ impl VideoSink for AmcSink {
     unsafe fn plane_unload(&self, _: &MainThread) {}
     unsafe fn plane_pause(&self, _: &MainThread) {}
     unsafe fn plane_resume(&self, _: &MainThread) {}
+}
+
+/// The TV dropped the HDMI link and the audio track dies with it. Reported as the pipeline taking
+/// the decoder back (type 18, number 600), so the engine parks the session at its spot and the
+/// viewer's next press restores it. Before the first picture that number would fail the source,
+/// so nothing is reported then.
+pub fn hdmi_unplugged() {
+    if SHOWN.load(Relaxed) == 0 || !LOADED.load(Relaxed) || lock(&DECODER).is_none() {
+        return;
+    }
+    log(LOG_INFO, "amc: HDMI unplugged; parking the session");
+    event(18, 600, Some(c"HDMI unplugged"));
 }
 
 /// For the label: the decoder's name, then video AUs fed, frames shown and late frames dropped

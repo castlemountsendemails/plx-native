@@ -179,6 +179,66 @@ impl Clock {
     }
 }
 
+/// How long audio may stand still once the video's end of stream is queued before it counts as over.
+pub const PLAYED_OUT_NS: i64 = 1_000_000_000;
+
+/// The last stretch of an item. Video, audio and the file's duration rarely end together, and frames
+/// cannot report a position past the last of them, so from here the audio's clock does until it
+/// stands still; frames still waiting then run on their own clock.
+pub struct Tail {
+    pts_ns: Option<i64>,
+    moved_ns: i64,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Ending {
+    Wait,
+    /// The audio's stream time, for the engine's position.
+    Position(i64),
+    PlayedOut,
+}
+
+impl Tail {
+    pub fn new(now_ns: i64) -> Self {
+        Self { pts_ns: None, moved_ns: now_ns }
+    }
+
+    /// After a pause, whose time is not the audio standing still.
+    pub fn rearm(&mut self, now_ns: i64) {
+        self.moved_ns = now_ns;
+    }
+
+    /// `audio`, or `Audio::None` once it has stood still for [`PLAYED_OUT_NS`].
+    pub fn audio(&mut self, audio: Audio, now_ns: i64) -> Audio {
+        if let Audio::At { pts_ns, .. } = audio {
+            if self.pts_ns != Some(pts_ns) {
+                self.pts_ns = Some(pts_ns);
+                self.moved_ns = now_ns;
+            }
+        }
+        if now_ns - self.moved_ns >= PLAYED_OUT_NS {
+            Audio::None
+        } else {
+            audio
+        }
+    }
+
+    /// With every frame shown, `last_pts_ns` being the position last reported.
+    pub fn ending(&mut self, audio: Audio, now_ns: i64, last_pts_ns: i64) -> Ending {
+        match self.audio(audio, now_ns) {
+            Audio::None => Ending::PlayedOut,
+            Audio::At { pts_ns, .. } if pts_ns > last_pts_ns => Ending::Position(pts_ns),
+            _ => Ending::Wait,
+        }
+    }
+}
+
+/// The PTS to report so the engine's position reaches `duration_ns`, which is how it knows an item
+/// ended. Fed PTS can sit on a rebased timeline, so it is counted from the last one reported.
+pub fn end_position(last_pts_ns: i64, duration_ns: i64, position_ns: i64) -> i64 {
+    last_pts_ns + (duration_ns - position_ns).max(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +316,58 @@ mod tests {
         assert_eq!(clock.action(0, AUDIO_WAIT_NS, Audio::Pending), Action::Show(AUDIO_WAIT_NS + LEAD_NS));
         clock.reset();
         assert_eq!(clock.action(0, 5 * AUDIO_WAIT_NS, Audio::Pending), Action::Wait);
+    }
+
+    /// *Violent Night*'s last seconds: video ends at 6691 s, audio at 6695.584 s, the file says 6698 s.
+    #[test]
+    fn past_the_last_frame_the_position_follows_the_audio_until_it_stands_still() {
+        const S: i64 = 1_000_000_000;
+        let at = |pts_ns| Audio::At { pts_ns, at_ns: 0 };
+        let mut tail = Tail::new(0);
+        let last_frame = 6691 * S;
+        assert_eq!(tail.ending(at(last_frame - S), 0, last_frame), Ending::Wait, "audio behind the last frame");
+        assert_eq!(tail.ending(at(6693 * S), S, last_frame), Ending::Position(6693 * S));
+        let end = 6695 * S + 584_000_000;
+        assert_eq!(tail.ending(at(end), 2 * S, 6693 * S), Ending::Position(end));
+        assert_eq!(tail.ending(at(end), 2 * S + PLAYED_OUT_NS - 1, end), Ending::Wait);
+        assert_eq!(tail.ending(at(end), 2 * S + PLAYED_OUT_NS, end), Ending::PlayedOut);
+    }
+
+    #[test]
+    fn with_no_audio_or_a_clock_that_never_starts_the_end_comes_anyway() {
+        assert_eq!(Tail::new(0).ending(Audio::None, 0, 0), Ending::PlayedOut);
+        let mut tail = Tail::new(0);
+        assert_eq!(tail.ending(Audio::Pending, PLAYED_OUT_NS - 1, 0), Ending::Wait);
+        assert_eq!(tail.ending(Audio::Pending, PLAYED_OUT_NS, 0), Ending::PlayedOut);
+    }
+
+    #[test]
+    fn frames_left_after_the_audio_ends_run_on_their_own_clock() {
+        let held = Audio::At { pts_ns: 5, at_ns: 0 };
+        let mut tail = Tail::new(0);
+        assert_eq!(tail.audio(held, 0), held);
+        assert_eq!(tail.audio(held, PLAYED_OUT_NS - 1), held);
+        assert_eq!(tail.audio(held, PLAYED_OUT_NS), Audio::None);
+    }
+
+    #[test]
+    fn time_spent_paused_is_not_audio_standing_still() {
+        let held = Audio::At { pts_ns: 5, at_ns: 0 };
+        let mut tail = Tail::new(0);
+        tail.audio(held, 0);
+        let resumed = 60 * PLAYED_OUT_NS;
+        tail.rearm(resumed);
+        assert_eq!(tail.audio(held, resumed), held);
+        assert_eq!(tail.audio(held, resumed + PLAYED_OUT_NS), Audio::None);
+    }
+
+    #[test]
+    fn the_last_position_lands_on_the_duration_on_a_rebased_timeline_too() {
+        // Fed PTS from 0 for a play resumed at 762 s: the engine's position is 762 s ahead of them.
+        let shift = 762;
+        assert_eq!(end_position(5929, 6698, 5929 + shift) + shift, 6698);
+        assert_eq!(end_position(6691, 6698, 6691), 6698);
+        assert_eq!(end_position(6691, 6698, 6699), 6691, "already past the duration");
     }
 
     fn au(pts_us: i64) -> Au {

@@ -584,7 +584,7 @@ mod virtual_time {
     use std::cell::Cell;
     use std::time::{Duration, Instant};
 
-    thread_local! {
+    plx_base::tls! {
         static BASE: Instant = Instant::now();
         static SPENT: Cell<Duration> = const { Cell::new(Duration::ZERO) };
     }

@@ -877,7 +877,7 @@ pub struct DrawFrame<'a, 'views, H: Host> {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static STOPS_IN_RECORDING_WALK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -1004,7 +1004,7 @@ pub struct ClipScope {
     active: bool,
 }
 
-thread_local! {
+plx_base::tls! {
     /// The scissor currently set by a `ClipScope`, if any — what a nested scope restores to.
     static CLIP_STACK: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
 }

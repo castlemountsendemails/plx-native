@@ -20,34 +20,83 @@ pub enum Plan {
     Passthrough { encoding: i32 },
     /// Decoded to PCM by `MediaCodec` first.
     Aac,
-    /// Mapped to its encoding to check against what HDMI reports, but its AUs are dropped.
-    NotPlayed { encoding: i32 },
     /// No audio, or a codec with no route here.
     None,
 }
 
-/// The payload's `"audio"` is the engine's codec name for the clip's audio.
+/// The payload's `"audio"` is the engine's codec name for the clip's audio. E-AC3 with Atmos (JOC)
+/// goes out as plain E-AC3, which is all an HDMI output on these API levels can be asked for.
 pub fn plan(payload: &str) -> Plan {
     match string_after(payload, "\"audio\":") {
         Some("AC3") => Plan::Passthrough { encoding: ENCODING_AC3 },
         Some("AAC") => Plan::Aac,
-        Some("AC3 PLUS") => Plan::NotPlayed { encoding: ENCODING_E_AC3 },
-        Some("DTS") => Plan::NotPlayed { encoding: ENCODING_DTS },
+        Some("AC3 PLUS") => Plan::Passthrough { encoding: ENCODING_E_AC3 },
+        Some("DTS") => Plan::Passthrough { encoding: ENCODING_DTS },
         _ => Plan::None,
     }
 }
+
+const AC3_RATES: [i32; 3] = [48_000, 44_100, 32_000];
 
 /// The sample rate an AC-3 syncframe declares (`fscod`), or `None` for a reserved code or a short AU.
 pub fn ac3_rate(au: &[u8]) -> Option<i32> {
     if au.len() < 5 || au[0] != 0x0b || au[1] != 0x77 {
         return None;
     }
-    match au[4] >> 6 {
-        0 => Some(48_000),
-        1 => Some(44_100),
-        2 => Some(32_000),
+    AC3_RATES.get(usize::from(au[4] >> 6)).copied()
+}
+
+/// The sample rate of a passthrough AU and the samples per channel it carries, which is what the
+/// track's frame count advances by.
+pub fn syncframe(encoding: i32, au: &[u8]) -> Option<(i32, i64)> {
+    match encoding {
+        ENCODING_AC3 => Some((ac3_rate(au)?, AC3_FRAMES)),
+        ENCODING_E_AC3 => eac3(au),
+        ENCODING_DTS => dts(au),
         _ => None,
     }
+}
+
+/// An E-AC3 AU can hold several syncframes. Only independent frames of substream 0 carry the
+/// programme's time; dependent frames add channels to the frame before them.
+fn eac3(au: &[u8]) -> Option<(i32, i64)> {
+    let mut at = 0;
+    let mut rate = None;
+    let mut frames = 0;
+    while let Some(h) = au.get(at..at + 5).filter(|h| h[0] == 0x0b && h[1] == 0x77) {
+        let code = usize::from((h[4] >> 4) & 3);
+        let (frame_rate, blocks) = match h[4] >> 6 {
+            3 => (*[24_000, 22_050, 16_000].get(code)?, 6),
+            fscod => (AC3_RATES[usize::from(fscod)], [1, 2, 3, 6][code]),
+        };
+        if h[2] >> 6 != 1 && (h[2] >> 3) & 7 == 0 {
+            rate.get_or_insert(frame_rate);
+            frames += blocks * 256;
+        }
+        at += ((usize::from(h[2] & 7) << 8 | usize::from(h[3])) + 1) * 2;
+    }
+    Some((rate?, frames))
+}
+
+/// A DTS core frame (the engine strips DTS-HD extensions): NBLKS + 1 blocks of 32 samples.
+fn dts(au: &[u8]) -> Option<(i32, i64)> {
+    if au.len() < 9 || !au.starts_with(&[0x7f, 0xfe, 0x80, 0x01]) {
+        return None;
+    }
+    let blocks = (i64::from(au[4] & 1) << 6 | i64::from(au[5] >> 2)) + 1;
+    let rate = match (au[8] >> 2) & 0x0f {
+        1 => 8_000,
+        2 => 16_000,
+        3 => 32_000,
+        6 => 11_025,
+        7 => 22_050,
+        8 => 44_100,
+        11 => 12_000,
+        12 => 24_000,
+        13 => 48_000,
+        _ => return None,
+    };
+    Some((rate, blocks * 32))
 }
 
 #[derive(Debug, PartialEq)]
@@ -82,6 +131,12 @@ pub fn adts(au: &[u8]) -> Option<Adts> {
     (au.len() >= header_len).then_some(Adts { header_len, rate, channels, csd })
 }
 
+/// Whether `au` carries an AAC config other than `csd`. HLS rungs can differ in channel layout,
+/// and a decoder opened for one layout gives silence for another, with no error.
+pub fn config_changes(csd: [u8; 2], au: &[u8]) -> bool {
+    adts(au).is_some_and(|adts| adts.csd != csd)
+}
+
 /// Which stream time each frame written to the track carries: the PTS of every AU or decoded
 /// buffer at the frame count where its first frame went in, counted from the track's start.
 pub struct Timeline {
@@ -108,6 +163,35 @@ impl Timeline {
     pub fn pts_at(&self, frame: i64) -> Option<i64> {
         let &(start, pts) = self.marks.iter().rev().find(|(start, _)| *start <= frame)?;
         Some(pts + (frame - start) * 1_000_000_000 / self.rate)
+    }
+}
+
+/// When the track runs: while the sink plays and no preroll mute stands. A mute keeps the track
+/// stopped rather than quieting it, because `setVolume` cannot quiet a passthrough track, and the
+/// audio already fed then plays from the picture's own time when the viewer resumes.
+#[derive(Default)]
+pub struct Transport {
+    playing: bool,
+    muted: bool,
+}
+
+impl Transport {
+    pub fn runs(&self) -> bool {
+        self.playing && !self.muted
+    }
+
+    /// `Some(whether the track should now run)` when that changed.
+    pub fn set_playing(&mut self, playing: bool) -> Option<bool> {
+        let before = self.runs();
+        self.playing = playing;
+        (self.runs() != before).then_some(self.runs())
+    }
+
+    /// `Some(whether the track should now run)` when that changed.
+    pub fn set_muted(&mut self, muted: bool) -> Option<bool> {
+        let before = self.runs();
+        self.muted = muted;
+        (self.runs() != before).then_some(self.runs())
     }
 }
 
@@ -160,8 +244,8 @@ mod tests {
     fn the_payload_picks_how_audio_is_played() {
         assert_eq!(plan(PAYLOAD), Plan::Passthrough { encoding: ENCODING_AC3 });
         assert_eq!(plan(&PAYLOAD.replace("AC3", "AAC")), Plan::Aac);
-        assert_eq!(plan(&PAYLOAD.replace("AC3", "AC3 PLUS")), Plan::NotPlayed { encoding: ENCODING_E_AC3 });
-        assert_eq!(plan(&PAYLOAD.replace("AC3", "DTS")), Plan::NotPlayed { encoding: ENCODING_DTS });
+        assert_eq!(plan(&PAYLOAD.replace("AC3", "AC3 PLUS")), Plan::Passthrough { encoding: ENCODING_E_AC3 });
+        assert_eq!(plan(&PAYLOAD.replace("AC3", "DTS")), Plan::Passthrough { encoding: ENCODING_DTS });
         assert_eq!(plan(&PAYLOAD.replace("AC3", "OPUS")), Plan::None);
         assert_eq!(plan(""), Plan::None);
     }
@@ -173,6 +257,72 @@ mod tests {
         assert_eq!(ac3_rate(&[0x0b, 0x77, 0, 0, 0xd4]), None);
         assert_eq!(ac3_rate(&[0x0b, 0x76, 0, 0, 0x14]), None);
         assert_eq!(ac3_rate(&[0x0b, 0x77]), None);
+    }
+
+    #[test]
+    fn an_ac3_au_is_one_syncframe_of_1536_samples() {
+        assert_eq!(syncframe(ENCODING_AC3, &[0x0b, 0x77, 0, 0, 0x14]), Some((48_000, AC3_FRAMES)));
+        assert_eq!(syncframe(ENCODING_AC3, &[0x0b, 0x76, 0, 0, 0x14]), None);
+    }
+
+    /// An E-AC3 syncframe header of `words` 16-bit words, 5.1 with LFE, bsid 16.
+    fn eac3(strmtyp: u8, substream: u8, words: u16, fscod: u8, blocks: u8) -> Vec<u8> {
+        let frmsiz = words - 1;
+        let mut frame = vec![
+            0x0b,
+            0x77,
+            (strmtyp << 6) | (substream << 3) | (frmsiz >> 8) as u8,
+            frmsiz as u8,
+            (fscod << 6) | (blocks << 4) | (7 << 1) | 1,
+            16 << 3,
+        ];
+        frame.resize(usize::from(words) * 2, 0);
+        frame
+    }
+
+    #[test]
+    fn an_eac3_au_counts_the_blocks_of_its_independent_frames() {
+        assert_eq!(syncframe(ENCODING_E_AC3, &eac3(0, 0, 768, 0, 3)), Some((48_000, 1536)));
+        assert_eq!(syncframe(ENCODING_E_AC3, &eac3(0, 0, 128, 0, 0)), Some((48_000, 256)));
+        assert_eq!(syncframe(ENCODING_E_AC3, &eac3(0, 0, 128, 1, 1)), Some((44_100, 512)));
+        // fscod 3 halves the rate and fixes six blocks; the two bits then pick the rate.
+        assert_eq!(syncframe(ENCODING_E_AC3, &eac3(0, 0, 128, 3, 0)), Some((24_000, 1536)));
+    }
+
+    #[test]
+    fn a_dependent_frame_in_the_same_au_adds_no_samples() {
+        // 7.1: the 5.1 independent frame, then the dependent frame with the extra channels.
+        let mut au = eac3(0, 0, 768, 0, 3);
+        au.extend(eac3(1, 0, 256, 0, 3));
+        assert_eq!(syncframe(ENCODING_E_AC3, &au), Some((48_000, 1536)));
+        // Two independent frames of three blocks each.
+        let mut au = eac3(0, 0, 384, 0, 2);
+        au.extend(eac3(0, 0, 384, 0, 2));
+        assert_eq!(syncframe(ENCODING_E_AC3, &au), Some((48_000, 1536)));
+    }
+
+    #[test]
+    fn an_eac3_au_with_no_syncword_is_refused() {
+        assert_eq!(syncframe(ENCODING_E_AC3, &[0x0b, 0x76, 0, 0, 0]), None);
+        assert_eq!(syncframe(ENCODING_E_AC3, &[0x0b, 0x77]), None);
+        assert_eq!(syncframe(ENCODING_E_AC3, &eac3(0, 0, 128, 3, 3)), None, "reserved fscod2");
+    }
+
+    #[test]
+    fn a_dts_core_frame_names_its_rate_and_block_count() {
+        // FTYPE 1, SHORT 31, NBLKS 15, FSIZE 2012, AMODE 9, SFREQ 13 (48 kHz).
+        let core = [0x7f, 0xfe, 0x80, 0x01, 0xfc, 0x3c, 0x7d, 0xc2, 0x74];
+        assert_eq!(syncframe(ENCODING_DTS, &core), Some((48_000, 512)));
+        let mut cd = core;
+        cd[8] = (1 << 6) | (8 << 2);
+        assert_eq!(syncframe(ENCODING_DTS, &cd), Some((44_100, 512)));
+        let mut short = core;
+        short[5] = (7 << 2) | (short[5] & 3);
+        assert_eq!(syncframe(ENCODING_DTS, &short), Some((48_000, 256)));
+        assert_eq!(syncframe(ENCODING_DTS, &core[..8]), None);
+        let mut reserved = core;
+        reserved[8] = 0;
+        assert_eq!(syncframe(ENCODING_DTS, &reserved), None);
     }
 
     /// The header `ff.rs`'s `adts_header` writes, for LC with no CRC.
@@ -198,6 +348,15 @@ mod tests {
         assert_eq!(adts.csd, [0x13, 0x38]);
         let stereo = super::adts(&header(3, 2, 10)).unwrap();
         assert_eq!((stereo.rate, stereo.channels, stereo.csd), (48_000, 2, [0x11, 0x90]));
+    }
+
+    #[test]
+    fn a_new_channel_layout_mid_stream_needs_a_new_decoder() {
+        let stereo = adts(&header(3, 2, 10)).unwrap().csd;
+        assert!(!config_changes(stereo, &header(3, 2, 10)));
+        assert!(config_changes(stereo, &header(3, 6, 10)), "a 5.1 rung after a stereo one");
+        assert!(config_changes(stereo, &header(4, 2, 10)), "a new rate");
+        assert!(!config_changes(stereo, &[0x21, 0x10, 0x04, 0x60, 0x8c, 0x1c, 0]), "a frame with no header keeps the decoder");
     }
 
     #[test]
@@ -241,6 +400,38 @@ mod tests {
         let mut position = Position::default();
         assert_eq!(position.sample(None, 0, 9600, 1_000), None);
         assert_eq!(position.sample(None, 480, 9600, 2_000), Some((480, 2_000, Source::Head)));
+    }
+
+    #[test]
+    fn a_muted_play_leaves_the_track_stopped_until_the_mute_lifts() {
+        let mut transport = Transport::default();
+        assert_eq!(transport.set_muted(true), None);
+        assert_eq!(transport.set_playing(true), None, "the preroll's Play must not sound");
+        assert!(!transport.runs());
+        assert_eq!(transport.set_muted(false), Some(true), "the viewer resumed during the preroll");
+        assert!(transport.runs());
+    }
+
+    #[test]
+    fn a_preroll_paused_again_before_the_mute_lifts_waits_for_the_next_play() {
+        let mut transport = Transport::default();
+        transport.set_muted(true);
+        transport.set_playing(true);
+        assert_eq!(transport.set_playing(false), None);
+        assert_eq!(transport.set_muted(false), None, "still paused: no sound yet");
+        assert!(!transport.runs());
+        assert_eq!(transport.set_playing(true), Some(true));
+    }
+
+    #[test]
+    fn the_track_changes_only_when_what_it_should_do_changes() {
+        let mut transport = Transport::default();
+        assert_eq!(transport.set_playing(true), Some(true));
+        assert_eq!(transport.set_playing(true), None);
+        assert_eq!(transport.set_muted(true), Some(false));
+        transport.set_muted(false);
+        assert_eq!(transport.set_playing(false), Some(false));
+        assert_eq!(transport.set_playing(false), None);
     }
 
     #[test]

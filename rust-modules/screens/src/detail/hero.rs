@@ -787,7 +787,7 @@ mod tests {
     // shape written for the old crate-global statics. A thread-confined store (same pattern as
     // `screens::detail::tests`'s `TEST_METADATA`) gives them a real, per-owner `MetadataStore`
     // without threading one through every helper here.
-    thread_local! {
+    plx_base::tls! {
         static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
             std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
     }

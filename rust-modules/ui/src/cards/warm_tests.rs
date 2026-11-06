@@ -40,7 +40,7 @@ struct Log {
     first_draw_held: Vec<(usize, bool)>,
 }
 
-thread_local! {
+plx_base::tls! {
     static LOG: RefCell<Log> = RefCell::new(Log::default());
 }
 

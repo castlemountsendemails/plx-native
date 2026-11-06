@@ -337,7 +337,7 @@ owner_declarations() {
       }
 
       function opens_thread_local(s) {
-        return s ~ /(^|[^[:alnum:]_])thread_local[[:space:]]*![[:space:]]*\{[[:space:]]*$/
+        return s ~ /(^|[^[:alnum:]_])(thread_local|tls)[[:space:]]*![[:space:]]*\{[[:space:]]*$/
       }
 
       BEGIN { raw=-1 }
@@ -393,7 +393,7 @@ owner_declarations() {
 
         # Assemble declarations from code tokens, not physical lines. `module_decl` sees only
         # depth-zero text, so attributes/modifiers may span lines while methods inside impls stay
-        # invisible. The sole nested exception is a module-level thread_local! body, where only
+        # invisible. The sole nested exception is a module-level thread_local!/tls! body, where only
         # the retired selector spellings are inspected at the macro body direct depth.
         hit=0; level=before
         for (j=1; j <= length(code); j++) {

@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 // `TEST_METADATA` for the same reasoning) — reached only through the real, non-test accessors
 // (`current`, `land_detail`, the `MetadataState`/`MetadataAdapter` fields), never a second
 // mechanism.
-thread_local! {
+plx_base::tls! {
     static TEST_STATE: std::cell::UnsafeCell<MetadataState> =
         std::cell::UnsafeCell::new(MetadataState::default());
     static TEST_ADAPTER: std::cell::UnsafeCell<std::sync::Arc<MetadataAdapter>> =

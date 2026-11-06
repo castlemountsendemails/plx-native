@@ -7199,7 +7199,7 @@ latched_flag!(
 /// The memo's key is the generation AND the captured faces; `CString`s are kept beside them because
 /// paint hands `TabPill` a raw pointer into them.
 type TabMetrics = (u32, Vec<TabFace>, Vec<std::ffi::CString>, Vec<f32>);
-thread_local! {
+plx_base::tls! {
     static TAB_CACHE: std::cell::RefCell<Option<TabMetrics>> = const { std::cell::RefCell::new(None) };
 }
 

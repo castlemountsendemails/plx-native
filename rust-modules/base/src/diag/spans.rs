@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 static ON: AtomicBool = AtomicBool::new(false);
 
-thread_local! {
+crate::tls! {
     /// This frame's spans in first-seen order, summed by name.
     static SPANS: RefCell<Vec<(&'static str, u32, f64)>> = const { RefCell::new(Vec::new()) };
 }

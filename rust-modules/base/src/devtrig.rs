@@ -270,7 +270,7 @@ mod private {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    thread_local! {
+    crate::tls! {
         static ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     }
 

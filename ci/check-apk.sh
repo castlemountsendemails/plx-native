@@ -38,13 +38,18 @@ for lib in avutil avcodec avformat; do
   check "armeabi-v7a lib$lib-plx.so" has "$files" "^lib/armeabi-v7a/lib$lib-plx\\.so\$"
 done
 check "armeabi-v7a libcurl-plx.so" has "$files" '^lib/armeabi-v7a/libcurl-plx\.so$'
+check "armeabi-v7a libass-plx.so" has "$files" '^lib/armeabi-v7a/libass-plx\.so$'
 # What PlxActivity copies to the files folder, where `net` reads the CA files and `text` the fonts.
 for asset in cacert.pem le-roots.pem appfont.ttf appfont-bold.ttf appfont-emoji.ttf appfont-cjk.ttf; do
   check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
 done
+# The subtitle faces PlxActivity copies to the files folder: libass finds a script's face by family name.
+check "assets/fonts/subs/manifest.json" has "$files" '^assets/fonts/subs/manifest[.]json$'
+check "assets/fonts/subs has Noto faces" has "$files" '^assets/fonts/subs/NotoSans[A-Za-z]+-Bold[.]ttf$'
 # The notice and the licence texts it names, which the CI step copies into the assets.
 for asset in THIRD-PARTY-NOTICES-FIRETV.md licenses/LGPL-2.1.txt licenses/Zlib.txt licenses/FreeType.txt licenses/OFL.txt \
-  licenses/Apache-2.0.txt licenses/curl.txt licenses/MPL-2.0.txt; do
+  licenses/Apache-2.0.txt licenses/curl.txt licenses/MPL-2.0.txt licenses/libass-ISC.txt \
+  licenses/HarfBuzz-Old-MIT.txt licenses/libunibreak-Zlib.txt; do
   check "assets/$asset" has "$files" "^assets/${asset//./[.]}\$"
 done
 check "minSdk 25" has "$badging" "^(min)?[sS]dkVersion:'25'$"

@@ -512,7 +512,7 @@ fn cold_start_keeps_intended_audio_and_draws_the_subtitle() {
     for d in transcode_decisions(&r.requests) {
         assert!(!d.contains("subtitles=burn"), "{d}");
     }
-    assert_eq!(selection_subtitles(&r.requests), vec!["9"], "an admitted embedded track stays the selection: {:?}", r.requests);
+    assert_eq!(selection_subtitles(&r.requests), vec!["0"], "PMS would burn an admitted embedded track the reader draws: {:?}", r.requests);
     plx_plex::plex::reset_servers_for_test();
 }
 
@@ -529,6 +529,7 @@ fn cold_reresolve_of_a_drawn_embedded_track_burns_where_the_reader_is_not_admitt
         (Some(0), 0, plx_plex::plex::probe::Location::Local, true),
         (Some(0), 7_400, plx_plex::plex::probe::Location::Remote, true),
         (Some(-1), 40_000, plx_plex::plex::probe::Location::Local, false),
+        (Some(0), 7_400, plx_plex::plex::probe::Location::Local, false),
     ] {
         let mut ps = PlaybackSession::IDLE;
         let _g = fresh_registry(&mut ps);
@@ -550,6 +551,10 @@ fn cold_reresolve_of_a_drawn_embedded_track_burns_where_the_reader_is_not_admitt
         } else {
             assert_eq!(wire, Some("none"), "{drawn:?} {kbps} {link:?}: {}", r.plan.url);
         }
+        // Only an embedded track the reader draws is PUT as 0 (PMS would burn it, M8).
+        let put = if !burns && drawn.is_some_and(|ord| ord >= 0) { "0" } else { "77" };
+        let subs = selection_subtitles(&r.requests);
+        assert!(!subs.is_empty() && subs.iter().all(|s| *s == put), "{drawn:?} {kbps} {link:?}: {subs:?}");
         plx_plex::plex::reset_servers_for_test();
     }
 }

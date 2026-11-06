@@ -2192,7 +2192,7 @@ impl HealBudget {
 // non-test build, and every test that never pushes) falls straight through to the real clock, so
 // this changes no production behaviour.
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static TEST_ELAPSED: std::cell::RefCell<std::collections::VecDeque<std::time::Duration>> =
         std::cell::RefCell::new(std::collections::VecDeque::new());
 }

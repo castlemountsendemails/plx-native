@@ -263,7 +263,7 @@ fn key_at_or_above_the_ceiling_asserts() {
     t.set(f, None);
 }
 
-thread_local! { static CMP: Cell<usize> = const { Cell::new(0) }; }
+plx_base::tls! { static CMP: Cell<usize> = const { Cell::new(0) }; }
 
 /// An id whose every comparison is counted.
 #[derive(Clone, Debug)]

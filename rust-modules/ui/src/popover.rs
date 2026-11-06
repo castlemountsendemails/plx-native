@@ -57,7 +57,7 @@
 use crate::{theme, Painter, Rect, Spring};
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
-thread_local! {
+plx_base::tls! {
     /// Does the opener lift own the card the press is moving? Set by a card section that left the
     /// lifted element out of the page pass, cleared when the dispatcher sees the lifted element
     /// change. Per thread: the loop draws and ticks on one thread, and a test must not see another
@@ -914,7 +914,7 @@ pub mod host {
         Ground(crate::frame::backdrop::Z),
     }
 
-    thread_local! {
+    plx_base::tls! {
         /// The one snapshot. Render-thread only, like the `gfx` resource it holds.
         ///
         /// **One, shared, rather than one per popover**, and the memory is the smaller half of the

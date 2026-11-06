@@ -348,7 +348,7 @@ fn now_ms() -> i64 {
 pub(super) mod pinned_clock {
     use std::cell::Cell;
 
-    thread_local! {
+    plx_base::tls! {
         static PINNED: Cell<Option<i64>> = const { Cell::new(None) };
     }
 

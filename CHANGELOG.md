@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.2.30] - 2026-11-05
+
+### Fixed
+- Fire TV: the app could close by itself during a session, most likely the first time subtitles appeared after it had been running a while. Android lets an app keep only a small number of per-thread memory slots, and the app was spending one on each of over a hundred internal values until none were left. It now keeps all of them in a single slot, and its log notes how many slots are in use at launch and at each film. Not yet tried on any stick. Shared code: the LG app builds those values exactly as before.
+
+## [0.2.29] - 2026-11-05
+
+### Fixed
+- Fire TV: pressing Home during a film could close the debug app, so coming back started it fresh at Home instead of in the film. Leaving playback froze the app for up to two seconds, and the debug build's freeze check stopped it at two. The app now shuts down the picture and sound decoders and the audio output in the background, and the next film waits for that to finish before it starts. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
+## [0.2.28] - 2026-11-04
+
+### Fixed
+- Fire TV: sound vanished partway through some server-converted films on Auto quality, and came back only after a seek. When the stream stepped up to a quality whose sound has a different channel layout (stereo below, 5.1 above), the app kept decoding it as the old layout and played silence. The app now restarts its sound decoder on such a change. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
+## [0.2.27] - 2026-11-04
+
+### Fixed
+- Subtitles drawn twice when the server converts a film's sound (Fire TV HD with AC-3; the LG with TrueHD or DTS). With an embedded subtitle picked, the server burned it into the picture while the app also drew it, so two lines showed and Off left the burned one on screen. While the app draws the subtitle, the server is now told it's Off, and your pick goes back to the server when playback stops. If the app is force-closed mid-film, that film's subtitle reads Off next time. Passed on the Fire TV HD and Stick 4K; not yet tried on the LG. Shared code: the LG app changes too.
+
+## [0.2.26] - 2026-11-03
+
+### Added
+- Fire TV: the app now carries the subtitle renderer (libass, built with the Android toolkit) and the subtitle fonts for every script, so text subtitles have something to draw with. A test start with `--es ass check` lays out one SRT line and reports whether it drew. Nothing plays subtitles yet, and this is not yet tried on any stick. Shared code: the subtitle renderer's library-name list gains one more name, tried last; the LG already finds its own and is unchanged.
+
+## [0.2.25] - 2026-11-03
+
+### Added
+- Fire TV: when the TV drops the HDMI link (some TVs do on an input switch), playback now parks at the same spot and frees the audio. Any button press brings it back, and Play resumes it. The app also re-reads what the TV accepts when you return to a parked movie, from Home or after the link drop. If the TV no longer takes the movie's sound (for example, Surround Sound was set to PCM while you were away), the app asks the server again at the same spot. Not yet tried on any stick. Shared code: the LG reads its codec file once at boot, so it never sees a change, and the LG app is unchanged.
+
+## [0.2.24] - 2026-11-02
+
+### Added
+- Fire TV: E-AC3 (Dolby Digital Plus, Atmos included) and DTS audio now play, sent to the TV as they are when the TV takes them, where before the picture played in silence. A TV that can't take them gets its audio converted by the server. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
+## [0.2.23] - 2026-11-02
+
+### Added
+- Fire TV: a movie whose sound runs on past its last picture now ends and returns to the app, instead of stopping on a black screen just short of its length. Fire TV only: the LG app is unchanged.
+
+## [0.2.22] - 2026-11-01
+
+### Added
+- Fire TV: a paused seek now shows its one picture in silence, on passthrough and PCM alike, and the sound starts from that picture when you press Play. The real app's video can also show through the UI, as the test harness's could, and a decoder that fails before the first picture now shows the error screen instead of spinning. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
+## [0.2.21] - 2026-11-01
+
+### Added
+- Fire TV: the app now reads each stick's own video decoders and its TV's audio formats (AC-3, E-AC3, DTS) instead of assuming the LG's. This lets the server transcode 4K for the HD and 3rd gen, and convert audio a TV can't take. It re-reads at every Play and when the app returns from the background. Playback isn't wired up on Fire TV yet, so nothing visible changes today. `--es caps dump` logs what each stick reports. Shared code: the LG app keeps reading its own codec file once at boot and is unchanged.
+
 ## [0.2.20] - 2026-10-30
 
 ### Fixed

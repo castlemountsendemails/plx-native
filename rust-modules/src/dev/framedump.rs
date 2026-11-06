@@ -538,7 +538,7 @@ pub(crate) fn active() -> bool {
     ACTIVE.load(Ordering::Relaxed)
 }
 
-thread_local! {
+plx_base::tls! {
     /// The `dt` the idle gate judged the last NEW virtual frame with.
     static IDLE_DT: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
 }
@@ -592,7 +592,7 @@ struct Dump {
     extras_run: u32,
 }
 
-thread_local! {
+plx_base::tls! {
     static DUMP: RefCell<Option<Dump>> = const { RefCell::new(None) };
 }
 

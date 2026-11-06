@@ -1262,7 +1262,7 @@ pub fn settled_top_for(r: usize, focus: Option<usize>, pitch_fixed: f32, band_op
 // shelf's focused label block owns its own clock there.
 use crate::marquee::{self, TITLE as MARQUEE};
 
-thread_local! {
+plx_base::tls! {
     /// The focused tile's label-block marquee clock (title AND caption, keyed by the block).
     /// Only one tile holds focus app-wide, so one clock; a popover menu's focused row has its own
     /// (`table`), so the two never restart each other.
@@ -3070,7 +3070,7 @@ mod tests {
 
     // ---- a credit label is one name line and one role line, in every state -------------------
 
-    thread_local! {
+    plx_base::tls! {
         static CREDIT_CLOCK: marquee::Clock = const { marquee::Clock::new() };
     }
 

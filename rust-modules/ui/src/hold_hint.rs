@@ -171,7 +171,7 @@ pub const READ_MS: u32 = 1000;
 // the way `plx_platform::i18n` is handed its saved preference. After a relaunch on a taught install
 // `LEARNED` is false again, so a held OK shows the capsule's fill (progress feedback) but nothing
 // self-appears.
-thread_local! {
+plx_base::tls! {
     static LEARNED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Which surfaces have had their one showing read (bit per [`Surface`]) on this install.
     static SHOWN: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
@@ -658,7 +658,7 @@ struct Layout {
     width: f32,
 }
 
-thread_local! {
+plx_base::tls! {
     /// The last resolved layout and what it depended on: the locale context it was resolved under
     /// (a `&'static`, so its address names the language) and the cap's measured width, a probe that
     /// changes whenever the measurer or the cap metrics do. The sentence and its measures are
@@ -729,7 +729,7 @@ mod tests {
 
     const DT: f32 = 1.0 / 60.0;
 
-    thread_local! {
+    plx_base::tls! {
         /// The tests' tick clock: frames stepped on this thread so far (one test, one thread).
         static FRAME: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }

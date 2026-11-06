@@ -3332,7 +3332,7 @@ pub fn drain_refresh_for_test() {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     /// `peek_at` advances this clock explicitly; ordinary `peek` still measures real read time.
     static CACHE_NOW_FOR_TEST: std::cell::Cell<Option<std::time::Instant>> = const {
         std::cell::Cell::new(None)
@@ -4749,7 +4749,7 @@ fn parent_stat(path: &std::path::Path) -> Option<ParentStat> {
     Some(ParentStat { uid: meta.uid(), gid: meta.gid(), mode: meta.mode() & 0o7777 })
 }
 
-thread_local! {
+plx_base::tls! {
     // This write's bounded errno projection only: paths, identities and modes stay local.
     static CANDIDATE_ERRNOS: std::cell::Cell<[Option<i32>; 8]> = const { std::cell::Cell::new([None; 8]) };
 }
@@ -5309,7 +5309,7 @@ fn neutralize_session_candidate(path: &std::path::Path) -> std::io::Result<()> {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-std::thread_local! {
+plx_base::tls! {
     static RETIRE_PARENT_SYNC_FOR_TEST: std::cell::Cell<Option<fn() -> Option<i32>>> =
         const { std::cell::Cell::new(None) };
 }
@@ -5529,7 +5529,7 @@ pub fn reset_last_write_authority_for_test() {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     /// Test-only witness of how many times [`read_live_locked`] actually ran, on THIS thread — the
     /// number [`CACHE`] exists to keep flat across repeated per-frame [`peek`] calls with no
     /// intervening write. Every real read (`peek`, `update`, `clear`'s own re-read, …) funnels

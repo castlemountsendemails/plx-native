@@ -91,7 +91,7 @@ pub fn reset_for_test() {
 
 // Synthetic LS2 transport for host persistence tests; never compiled into a device build.
 #[cfg(any(test, feature = "test-support"))]
-std::thread_local! {
+plx_base::tls! {
     pub static RPC_FOR_TEST: std::cell::Cell<Option<fn(&str, &str) -> Result<String, ()>>> =
         const { std::cell::Cell::new(None) };
 }

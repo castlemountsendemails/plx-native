@@ -2506,7 +2506,7 @@ pub(crate) mod pinned_pause_clock {
     use std::cell::Cell;
     use std::time::{Duration, Instant};
 
-    thread_local! {
+    plx_base::tls! {
         static PINNED: Cell<Option<Instant>> = const { Cell::new(None) };
     }
 

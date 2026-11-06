@@ -13,7 +13,7 @@ use plx_machine::machine::PosterKey;
 use crate::tex::{Decoded, PosterReady, Source, Warm};
 use std::cell::Cell;
 
-thread_local! {
+plx_base::tls! {
     /// Does the source hand the cache's key for the art yet?
     static LANDED: Cell<bool> = const { Cell::new(false) };
 }

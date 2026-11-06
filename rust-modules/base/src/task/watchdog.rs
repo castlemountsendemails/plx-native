@@ -150,7 +150,7 @@ impl Signals {
 
 static SIGNALS: Signals = Signals::new();
 
-thread_local! {
+crate::tls! {
     /// Other workers may enter blocking scopes, but cannot publish the frame thread's label.
     static WATCHED: Cell<Option<&'static Signals>> = const { Cell::new(None) };
     static LABEL: Cell<&'static BlockingLabel> = const { Cell::new(&UNLABELED) };

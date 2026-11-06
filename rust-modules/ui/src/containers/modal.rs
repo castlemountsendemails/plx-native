@@ -259,7 +259,7 @@ pub fn style_caches_host(style: Style) -> bool {
 /// of a 30% dim is below what the panel can show.
 pub const CLOSING_GONE: f32 = 0.02;
 
-thread_local! {
+plx_base::tls! {
     /// The most opaque surface over the page after this frame's surface step ([`set_veil`]).
     pub(crate) static VEIL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
 }

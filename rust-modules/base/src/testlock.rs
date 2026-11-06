@@ -71,7 +71,7 @@ const NOBODY: u64 = 0;
 /// from a counter on first use and kept for the thread's life.
 fn ticket() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
-    thread_local! {
+    crate::tls! {
         static MINE: u64 = NEXT.fetch_add(1, Ordering::Relaxed);
     }
     MINE.with(|mine| *mine)
@@ -113,7 +113,7 @@ pub fn serial() -> Serial {
     Serial(guard)
 }
 
-thread_local! {
+crate::tls! {
     /// Set by [`adopt_current_thread`]; see its doc.
     static ADOPTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

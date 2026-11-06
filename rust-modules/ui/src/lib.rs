@@ -313,7 +313,7 @@ fn recorded_text_width(s: *const c_char, sz: c_int, bold: c_int) -> f32 {
 pub mod draw_census {
     use super::Rect;
     use std::cell::RefCell;
-    thread_local! {
+    plx_base::tls! {
         static LOG: RefCell<Option<Vec<(u64, Rect)>>> = const { RefCell::new(None) };
     }
     pub fn note(tag: u64, r: Rect) {
@@ -329,7 +329,7 @@ pub mod draw_census {
         LOG.with(|l| l.borrow_mut().take()).unwrap_or_default()
     }
 
-    thread_local! {
+    plx_base::tls! {
         static TEXT: RefCell<Option<Vec<(String, Rect)>>> = const { RefCell::new(None) };
     }
     /// A recorded text run: WHAT it says and where (`rect` is the run's anchor and measured width).
@@ -348,7 +348,7 @@ pub mod draw_census {
         TEXT.with(|l| l.borrow_mut().take()).unwrap_or_default()
     }
 
-    thread_local! {
+    plx_base::tls! {
         static MARKS: RefCell<Option<Vec<Rect>>> = const { RefCell::new(None) };
     }
     /// A recording painter was asked for the amber play mark that leads a caption line
@@ -393,7 +393,7 @@ pub mod draw_census {
         /// without a list of words to look for or a style to recognise them by.
         pub label: bool,
     }
-    thread_local! {
+    plx_base::tls! {
         static LABEL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static RUNS: RefCell<Option<Vec<Run>>> = const { RefCell::new(None) };
         static CLIP: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
@@ -450,7 +450,7 @@ pub mod draw_census {
         RUNS.with(|l| l.borrow_mut().take()).unwrap_or_default()
     }
 
-    thread_local! {
+    plx_base::tls! {
         static TEX: RefCell<Option<Vec<(u32, Rect, f32)>>> = const { RefCell::new(None) };
     }
     /// A recorded textured quad: WHICH texture, where, at what cascaded alpha.
@@ -507,7 +507,7 @@ pub struct Painter {
     /// [`text_lift::draw`]; `Zoom::NONE` for every ordinary painter.
     zoom: Zoom,
 }
-thread_local! {
+plx_base::tls! {
     static RECORD_WALK: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static OUTPUT_GAIN: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
 }

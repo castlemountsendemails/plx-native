@@ -100,6 +100,7 @@ pub fn activation_failure(stage: &str, code: Option<i32>) -> Detail {
     }, code)
 }
 
+// std's macro, not `plx_base::tls!`: this file is also built into the storage helper, which has no plx_base.
 thread_local! {
     static LAST: std::cell::Cell<Option<HelperFailure>> = const { std::cell::Cell::new(None) };
 }

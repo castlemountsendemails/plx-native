@@ -119,7 +119,7 @@ impl Drop for Reader {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     // The GLES renderer and profiler are main-thread-only. A thread-local keeps that invariant
     // safe without turning the reader's mmap pointer into a process-wide `static mut`.
     static READER: RefCell<Option<Reader>> = const { RefCell::new(None) };

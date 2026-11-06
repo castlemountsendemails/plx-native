@@ -282,7 +282,7 @@ pub fn saved_preference_for_test(value: Preference) -> Preference {
     previous
 }
 
-thread_local! {
+plx_base::tls! {
     static THREAD_LOCALE: std::cell::Cell<Option<&'static LocaleContext>> = const { std::cell::Cell::new(None) };
 }
 

@@ -1,7 +1,7 @@
 //! Main-thread checker read-out, drawn only by the frame thread, above every route.
 use super::{consts::SAFE, label::Label, theme, Painter, Rect};
 use std::{cell::Cell, ffi::CString};
-thread_local! { static WAS_VISIBLE: Cell<bool> = const { Cell::new(false) }; }
+plx_base::tls! { static WAS_VISIBLE: Cell<bool> = const { Cell::new(false) }; }
 pub fn update(controlled: bool) {
     // The app supplies its bootstrap predicate. Wall-clock diagnostics must not affect a
     // controlled run's per-frame present grade; checker logging and fatal policy stay active.

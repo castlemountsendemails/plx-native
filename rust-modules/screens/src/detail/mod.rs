@@ -409,7 +409,7 @@ struct LayoutCache {
 // How many episodes [`LayoutStamp::of`] has hashed on this thread: the per-walk cost a test
 // can read without a clock.
 #[cfg(test)]
-thread_local! {
+plx_base::tls! {
     pub(super) static STAMPED_EPISODES: Cell<usize> = const { Cell::new(0) };
 }
 

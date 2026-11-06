@@ -408,7 +408,7 @@ pub struct PageImage {
     last: Option<PagePaint>,
 }
 
-thread_local! {
+plx_base::tls! {
     /// The page was shown as a held image on the last frame the dispatcher painted.
     static PAGE_IMAGE_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

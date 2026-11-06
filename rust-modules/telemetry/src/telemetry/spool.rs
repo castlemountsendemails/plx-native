@@ -178,7 +178,7 @@ fn append_guarded(r: &Record, allowed: impl FnOnce() -> bool, tenure: Option<u64
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     // A deterministic scheduler boundary: the spool lock is released, but its caller has not
     // resumed. A flush can already read and settle the appended record at this point.
     static AFTER_APPEND: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };

@@ -2,7 +2,7 @@
 use super::schema::DiagEvent;
 use std::cell::RefCell;
 
-thread_local! {
+plx_base::tls! {
     static EVENTS: RefCell<Option<Vec<DiagEvent>>> = const { RefCell::new(None) };
 }
 

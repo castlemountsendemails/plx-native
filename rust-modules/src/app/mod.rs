@@ -282,6 +282,9 @@ pub(crate) struct App {
     /// The playing session is parked because the pipeline took its video decoder back, not
     /// because the app left the screen; the next press restores it (`run::park_on_decoder_release`).
     decoder_parked: bool,
+    /// The device table changed when a parked session was claimed; its launch asks the server again
+    /// if the route no longer fits (`run::finish_foreground_launch`).
+    caps_changed: bool,
     pub(crate) ok_armed: bool,
     last_route_reported: &'static str,
     pub(crate) ptr: Pointer,

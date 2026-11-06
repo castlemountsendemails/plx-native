@@ -1,7 +1,7 @@
-//! The Fire TV audio sink: the engine's audio AUs played by an `AudioTrack`, AC-3 as it is (HDMI
-//! passthrough) and AAC after a `MediaCodec` decodes it to PCM. `feed` queues AUs on the engine
-//! thread; a writer thread moves them into the track without blocking and publishes which stream
-//! time the track is playing, which the video drain times its frames against.
+//! The Fire TV audio sink: the engine's audio AUs played by an `AudioTrack`, AC-3, E-AC3 and DTS as
+//! they are (HDMI passthrough) and AAC after a `MediaCodec` decodes it to PCM. `feed` queues AUs on
+//! the engine thread; a writer thread moves them into the track without blocking and publishes which
+//! stream time the track is playing, which the video drain times its frames against.
 
 use std::collections::VecDeque;
 use std::ffi::c_char;
@@ -11,7 +11,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::amediacodec::{now_ns, FEED_FULL, FEED_OK};
-use crate::audio::{self, Plan, Position, Source, Timeline, AC3_FRAMES, ENCODING_AC3, ENCODING_DTS, ENCODING_E_AC3, ENCODING_PCM_FLOAT};
+use crate::audio::{self, Plan, Position, Source, Timeline, Transport, AC3_FRAMES, ENCODING_AC3, ENCODING_DTS, ENCODING_E_AC3, ENCODING_PCM_FLOAT};
 use crate::harness::Span;
 use crate::jni::{self, Codec, Input, Output, Track};
 use crate::entry::{log, LOG_ERROR, LOG_INFO};
@@ -24,8 +24,8 @@ const POLL_NS: i64 = 20_000_000;
 const LOG_EVERY_NS: i64 = 5_000_000_000;
 /// The first few position readings after each play are logged, to show how the track's clock starts.
 const LOG_FIRST_POLLS: u32 = 6;
-/// AC-3 is opened as 5.1; Java falls back to stereo if the track refuses that.
-const AC3_CHANNELS: i32 = 6;
+/// Passthrough tracks are opened as 5.1; Java falls back to stereo if the track refuses that.
+const PASSTHROUGH_CHANNELS: i32 = 6;
 
 static OUT: Mutex<Option<Out>> = Mutex::new(None);
 /// The stream time the track plays and the `CLOCK_MONOTONIC` time it plays it.
@@ -55,12 +55,16 @@ struct Chunk {
     at: usize,
     pts: i64,
     marked: bool,
+    /// Samples per channel a passthrough AU carries; 0 for PCM, which is counted in bytes.
+    frames: i64,
 }
 
 struct Out {
     plan: Plan,
     decoder: Option<Codec>,
-    /// The encoding, rate and channels of the track, from the first AC-3 AU or the decoder's output.
+    /// The AAC config the decoder was opened with.
+    csd: [u8; 2],
+    /// The encoding, rate and channels of the track, from the first passthrough AU or the decoder's output.
     format: Option<(i32, i32, i32)>,
     track: Option<Track>,
     queue: VecDeque<(Vec<u8>, i64)>,
@@ -69,9 +73,11 @@ struct Out {
     /// Frames written since the track was opened; for PCM, `bytes` over the frame size.
     frames: i64,
     bytes: i64,
+    /// Samples per channel of the last passthrough AU whose header was read, for one that cannot be.
+    au_frames: i64,
     position: Position,
     source: Option<Source>,
-    playing: bool,
+    transport: Transport,
     polls: u32,
     polled_ns: i64,
     logged_ns: i64,
@@ -82,6 +88,7 @@ impl Out {
         Self {
             plan,
             decoder: None,
+            csd: [0; 2],
             format: None,
             track: None,
             queue: VecDeque::new(),
@@ -89,9 +96,10 @@ impl Out {
             timeline: Timeline::new(1),
             frames: 0,
             bytes: 0,
+            au_frames: AC3_FRAMES,
             position: Position::default(),
             source: None,
-            playing: false,
+            transport: Transport::default(),
             polls: 0,
             polled_ns: 0,
             logged_ns: 0,
@@ -142,7 +150,7 @@ impl Out {
             }
         }
         let wrote = self.write();
-        if self.playing && now - self.polled_ns >= POLL_NS {
+        if self.transport.runs() && now - self.polled_ns >= POLL_NS {
             self.poll(now);
         }
         busy || wrote
@@ -155,19 +163,33 @@ impl Out {
         let Some((data, pts)) = self.queue.pop_front() else {
             return false;
         };
+        let header = audio::syncframe(encoding, &data);
         if self.format.is_none() {
-            let rate = audio::ac3_rate(&data).unwrap_or_else(|| {
-                log(LOG_ERROR, "audio: the first AU is not an AC-3 syncframe; opening the track at 48 kHz");
-                48_000
-            });
-            self.format = Some((encoding, rate, AC3_CHANNELS));
+            let rate = header.map_or_else(
+                || {
+                    log(LOG_ERROR, &format!("audio: the first AU is not an {} syncframe; opening the track at 48 kHz", encoding_name(encoding)));
+                    48_000
+                },
+                |(rate, _)| rate,
+            );
+            self.format = Some((encoding, rate, PASSTHROUGH_CHANNELS));
         }
-        self.chunk = Some(Chunk { data, at: 0, pts, marked: false });
+        if let Some((_, frames)) = header {
+            self.au_frames = frames;
+        }
+        self.chunk = Some(Chunk { data, at: 0, pts, marked: false, frames: self.au_frames });
         true
     }
 
     /// Feeds queued AUs to the AAC decoder and takes its next decoded buffer.
     fn decode(&mut self) -> Result<bool, &'static str> {
+        // A new config drops the old decoder with the few AUs still inside it; the new one's
+        // output format then reopens the track.
+        if self.decoder.is_some() && self.queue.front().is_some_and(|(au, _)| audio::config_changes(self.csd, au)) {
+            if let Some(decoder) = self.decoder.take() {
+                decoder.close();
+            }
+        }
         if self.decoder.is_none() {
             let Some((au, _)) = self.queue.front() else {
                 return Ok(false);
@@ -176,12 +198,16 @@ impl Out {
             let decoder = Codec::open_aac(adts.rate, adts.channels, &adts.csd).ok_or("no AAC decoder opened")?;
             log(LOG_INFO, &format!("audio: {} started for {adts:?}", decoder.name));
             self.decoder = Some(decoder);
+            self.csd = adts.csd;
         }
         let Some(decoder) = self.decoder.as_ref() else {
             return Ok(false);
         };
         let mut busy = false;
         while let Some((au, pts)) = self.queue.front() {
+            if audio::config_changes(self.csd, au) {
+                break;
+            }
             let raw = audio::adts(au).map_or(&au[..], |adts| &au[adts.header_len..]);
             match decoder.queue(raw, pts / 1_000, false).ok_or("the AAC decoder failed")? {
                 Input::Queued => {}
@@ -212,7 +238,7 @@ impl Out {
                 let data = decoder.output(index);
                 decoder.release(index, None).ok_or("the AAC decoder failed")?;
                 if let Some(data) = data.filter(|data| !data.is_empty() && !end) {
-                    self.chunk = Some(Chunk { data, at: 0, pts: pts_us * 1_000, marked: false });
+                    self.chunk = Some(Chunk { data, at: 0, pts: pts_us * 1_000, marked: false, frames: 0 });
                 }
                 busy = true;
             }
@@ -222,11 +248,11 @@ impl Out {
 
     fn open(&mut self, encoding: i32, rate: i32, channels: i32) {
         let Some(track) = Track::open(encoding, rate, channels) else {
-            let why = if encoding == ENCODING_AC3 { "the AC-3 track did not open" } else { "the PCM track did not open" };
-            self.fail(why);
+            let kind = if self.plan == Plan::Aac { "PCM" } else { encoding_name(encoding) };
+            self.fail(&format!("the {kind} track did not open"));
             return;
         };
-        if self.playing {
+        if self.transport.runs() {
             track.play();
         }
         self.track = Some(track);
@@ -270,11 +296,29 @@ impl Out {
             return n > 0;
         }
         if !pcm {
-            self.frames += AC3_FRAMES;
+            self.frames += chunk.frames;
         }
         self.chunk = None;
         WRITTEN.fetch_add(1, Relaxed);
         true
+    }
+
+    fn follow(&mut self, runs: Option<bool>) {
+        let Some(runs) = runs else {
+            return;
+        };
+        if runs {
+            self.position.reset();
+            self.polls = 0;
+        }
+        if let Some(track) = self.track.as_ref() {
+            if runs {
+                track.play();
+            } else {
+                track.pause();
+            }
+        }
+        publish(None);
     }
 
     fn poll(&mut self, now: i64) {
@@ -361,9 +405,6 @@ pub fn load(payload: &str) {
             }
         }
         Plan::Aac => "AAC to PCM".into(),
-        Plan::NotPlayed { encoding } => {
-            format!("{} not played (HDMI lists it: {})", encoding_name(encoding), listed(jni::sink_takes(encoding)))
-        }
         Plan::None => "none".into(),
     };
     log(LOG_INFO, &format!("audio: {status}"));
@@ -403,24 +444,26 @@ pub fn feed(data: &[u8], pts: i64) -> c_char {
 
 pub fn play() {
     if let Some(out) = lock(&OUT).as_mut() {
-        out.playing = true;
-        out.position.reset();
-        out.polls = 0;
-        if let Some(track) = out.track.as_ref() {
-            track.play();
-        }
+        let runs = out.transport.set_playing(true);
+        out.follow(runs);
     }
-    publish(None);
 }
 
 pub fn pause() {
     if let Some(out) = lock(&OUT).as_mut() {
-        out.playing = false;
-        if let Some(track) = out.track.as_ref() {
-            track.pause();
-        }
+        let runs = out.transport.set_playing(false);
+        out.follow(runs);
     }
-    publish(None);
+}
+
+/// A paused preroll's picture: the track stays stopped, and frames run on their own clock, since
+/// no audio clock will start for them to wait on.
+pub fn set_muted(muted: bool) {
+    if let Some(out) = lock(&OUT).as_mut() {
+        EXPECTED.store(!muted && out.playable(), Relaxed);
+        let runs = out.transport.set_muted(muted);
+        out.follow(runs);
+    }
 }
 
 /// Drops everything queued and the track itself, which the writer opens again for the next AU:

@@ -139,7 +139,7 @@ mod imp {
     use plx_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
     use std::cell::Cell;
 
-    thread_local! {
+    plx_base::tls! {
         /// Bit per class, then (from bit `NCLASS`) bit per [`CardPart`]: refuse every draw of that
         /// class, or that part of the card class's work. Zero = the shipped picture.
         static MASK: Cell<u32> = const { Cell::new(0) };

@@ -126,7 +126,7 @@ static DUMP: AtomicBool = AtomicBool::new(false);
 // Thread-local, unlike the switch: only the loop's own thread reads or writes it, and a host test
 // that sets it must not leak a "this is a repeat" into a concurrent test's page dip.
 #[cfg(any(feature = "hostsim", feature = "test-support", test))]
-thread_local! {
+plx_base::tls! {
     static REPEAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set by the host-test [`Armed`] guard and read by [`armed`] alongside [`DUMP`]. Per thread,
     /// so a test that arms the dump cannot flip a concurrent test's `PageImage::plan` (or any other

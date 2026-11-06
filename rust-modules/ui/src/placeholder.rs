@@ -279,7 +279,7 @@ impl Frame {
 /// memory of a screen that draws a hundred skeletons.
 pub const ENTRY_CAP: usize = 64;
 
-thread_local! {
+plx_base::tls! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
     static FRAME: RefCell<Frame> = RefCell::new(Frame::default());
 }

@@ -35,7 +35,7 @@ impl Host for TestHost {
 // `MetadataStore` gained real owned fields in Stage B, so the old unit-struct `static` no
 // longer compiles, and every helper below needs a real, per-owner store rather than a second
 // mechanism.
-thread_local! {
+plx_base::tls! {
     static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
         std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
 }

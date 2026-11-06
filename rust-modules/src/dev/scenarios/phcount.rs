@@ -21,7 +21,7 @@ enum State {
     On { at: u32, prev: Stats },
 }
 
-thread_local! { static STATE: Cell<State> = const { Cell::new(State::Unchecked) }; }
+plx_base::tls! { static STATE: Cell<State> = const { Cell::new(State::Unchecked) }; }
 
 /// Called once per loop iteration on the UI thread with the frame clock.
 pub(crate) fn tick(now: u32) {

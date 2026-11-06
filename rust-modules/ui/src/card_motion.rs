@@ -223,13 +223,13 @@ fn parse_limit(text: &str) -> Option<f32> {
     text.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0)
 }
 
-thread_local! {
+plx_base::tls! {
     static HISTORY: RefCell<History> = RefCell::new(History::default());
     static FRAME_MS: Cell<u32> = const { Cell::new(0) };
     static ADMISSION: Cell<Option<Verdict>> = const { Cell::new(None) };
 }
 #[cfg(any(test, feature = "test-support"))]
-thread_local! { static ENFORCE_FOR_TEST: Cell<Option<bool>> = const { Cell::new(None) }; }
+plx_base::tls! { static ENFORCE_FOR_TEST: Cell<Option<bool>> = const { Cell::new(None) }; }
 
 /// The actual loop timestamp (or replay timestamp), before spring integration
 /// clamps its dt. Pixel speed must not inherit the spring's 50ms stall clamp.

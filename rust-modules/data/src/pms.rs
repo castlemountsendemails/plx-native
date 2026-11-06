@@ -1922,7 +1922,7 @@ impl<'a> Projection<'a> {
 
 // The most cards a refresh has held at once, as a test reads it back.
 #[cfg(test)]
-thread_local! { pub(crate) static PEAK_CARDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+plx_base::tls! { pub(crate) static PEAK_CARDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 // ---- the merge: every source, one Home ----------------------------------------------------------
 
@@ -2986,7 +2986,7 @@ pub fn spawn_fetch(adapter: &Arc<PmsAdapter>, request: HubRequest) -> bool {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static LATE_FETCH_FOR_TEST: std::cell::Cell<Option<(u32, usize)>> = const { std::cell::Cell::new(None) };
 }
 
@@ -3016,7 +3016,7 @@ fn late_build_for_test(adapter: &PmsAdapter, takes_at_spawn: u32, extra: u32, it
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static REFUSE_FETCH_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

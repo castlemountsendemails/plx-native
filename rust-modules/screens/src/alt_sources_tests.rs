@@ -9,7 +9,7 @@ use plx_data::stores::metadata::MetadataCmd;
 // TEST ONLY: see `screens::detail::tests`'s `TEST_METADATA` for why the owner lives here,
 // thread-confined, rather than being threaded through every call site in this file. Reached only
 // through `MetadataStore::run`/`state_mut`/`view` (the sole owner API).
-thread_local! {
+plx_base::tls! {
     static TEST_METADATA: std::cell::UnsafeCell<plx_data::stores::metadata::MetadataStore> =
         std::cell::UnsafeCell::new(plx_data::stores::metadata::MetadataStore::default());
 }

@@ -261,7 +261,7 @@ pub struct InkClip {
     pub shapes: [Option<InkShape>; 2],
 }
 
-thread_local! {
+plx_base::tls! {
     static INK_CLIP: std::cell::Cell<Option<InkClip>> = const { std::cell::Cell::new(None) };
 }
 
@@ -423,7 +423,7 @@ struct WarmKey {
     bold: c_int,
 }
 
-thread_local! {
+plx_base::tls! {
     /// Main-render-thread only, like the glyph cache itself. A queue instead of eager work is the
     /// boundary that lets `PageDip` spend a fixed slice of each outgoing frame.
     static PREWARM: RefCell<VecDeque<WarmKey>> = const { RefCell::new(VecDeque::new()) };
@@ -693,7 +693,7 @@ const WARM_CHUNK: usize = 19;
 const WARM_CHUNKS: usize = WARM_GLYPHS.len().div_ceil(WARM_CHUNK);
 const WARM_JOBS: usize = WARM_SIZES.len() * 2 * WARM_CHUNKS;
 
-thread_local! {
+plx_base::tls! {
     /// The next [`warm_job`] to run. Main-render-thread only, like the faces it warms.
     static WARM_NEXT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -1723,7 +1723,7 @@ impl plx_machine::machine::Measure for TtfMeasure {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     /// [`elide`]'s memo: (text, budget, size, weight, continuation) hashed to the elided string.
     /// Per thread because it owns `String`s that a full memo frees wholesale; see [`elide`].
     static ELIDE_MEMO: RefCell<HashMap<u64, String>> = RefCell::default();
@@ -1740,7 +1740,7 @@ struct MeasuredBound {
     bounds: (f32, f32),
 }
 
-thread_local! {
+plx_base::tls! {
     static MEASURED_BOUNDS: std::cell::RefCell<MeasuredBounds> = Default::default();
     static NATIVE_WIDTH_FAILURES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -1859,7 +1859,7 @@ struct FittedLine {
 
 // Only the native capability owns this memo. A recording/replay capability must issue its own
 // metric queries even when an identical string was already fitted against a live font.
-thread_local! {
+plx_base::tls! {
     static FITTED_LINES: std::cell::RefCell<FittedLines> = Default::default();
 }
 

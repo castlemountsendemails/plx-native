@@ -45,7 +45,7 @@ impl Host for TestHost {
     type Memory = PageMemory;
 }
 
-thread_local! {
+plx_base::tls! {
     // TEST ONLY. This file drives one screen per test through free helper fns (`install`,
     // `step`, `apply_metadata`, ...) that pre-date per-owner `MetadataStore`s, so — unlike
     // `stores/person.rs`'s tests, which thread an owned `PersonStore` through every call

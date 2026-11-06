@@ -167,7 +167,7 @@ pub fn record(observation: Observation) {
 // sees exactly the labels the native backend would be handed. The same thread-local discipline as
 // the other test-support captures; production builds carry none of it.
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     static RECORDED: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 

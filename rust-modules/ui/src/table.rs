@@ -13,7 +13,7 @@ use crate::theme;
 use crate::{Painter, Rect, Spring};
 use std::ffi::CString;
 
-thread_local! {
+plx_base::tls! {
     /// The focused menu row's marquee clock ([`crate::marquee`]). One list holds focus at a time;
     /// a shelf's focused tile title keeps its own clock (`card_row`), so a popover over a shelf
     /// never restarts either.

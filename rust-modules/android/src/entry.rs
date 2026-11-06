@@ -1,5 +1,5 @@
 //! SDLActivity enters `SDL_main` here on its SDL thread. With no harness argument it installs the
-//! Fire TV port and runs the app. With `secure=`, `net=` or `clip=` it runs that harness instead and
+//! Fire TV port and runs the app. With `secure=`, `net=`, `caps=`, `ass=` or `clip=` it runs that harness instead and
 //! draws its lines with SDL2_ttf until SDL quits; a clip plays first and its label replaces the
 //! lines until BACK stops it. Everything logs to logcat under the tag `PlxNative`.
 
@@ -7,6 +7,8 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::ptr::{null, null_mut};
 use std::path::PathBuf;
 
+use crate::asscheck;
+use crate::caps;
 use crate::clip;
 use crate::harness::{self, Harness};
 use crate::jni;
@@ -108,6 +110,18 @@ pub fn log(prio: c_int, message: &str) {
     unsafe { __android_log_write(prio, c"PlxNative".as_ptr(), text.as_ptr()) };
 }
 
+/// Bionic hands out the lowest free pthread key, so at least this many of the process's 128 are in
+/// use. A count that climbs across Loads is a key leak heading for std's "out of TLS keys" abort.
+pub fn log_free_pthread_key(when: &str) {
+    let mut key: libc::pthread_key_t = 0;
+    if unsafe { libc::pthread_key_create(&mut key, None) } != 0 {
+        log(LOG_ERROR, &format!("tls: no free pthread key {when}"));
+        return;
+    }
+    unsafe { libc::pthread_key_delete(key) };
+    log(LOG_INFO, &format!("tls: lowest free pthread key {} {when}", key & 0x7fff_ffff));
+}
+
 fn sdl_error(call: &str) -> String {
     let detail = unsafe { CStr::from_ptr(SDL_GetError()) };
     format!("{call} failed: {}", detail.to_string_lossy())
@@ -123,16 +137,23 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         .collect();
     // The engine's socket sends without MSG_NOSIGNAL; a reset peer must not kill the process.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+    // An alpha channel that SurfaceFlinger honours, so the video SurfaceView under this one
+    // shows wherever the UI clears to transparent.
+    unsafe { SDL_SetHint(c"SDL_VIDEO_EGL_ALLOW_TRANSPARENCY".as_ptr(), c"1".as_ptr()) };
     if let Some(files) = files_dir() {
         plx_base::paths::set_android_files_dir(files);
     } else {
         log(LOG_ERROR, "SDL_AndroidGetInternalStoragePath failed; app files are looked for nowhere");
     }
     let arg = |key: &str| args.iter().find_map(|arg| arg.strip_prefix(key)?.strip_prefix('='));
-    let lines = match (arg("secure"), arg("net")) {
-        (Some(mode), _) => Some(secure::harness(mode)),
-        (None, Some(_)) => Some(netcheck::harness(arg("server"))),
-        (None, None) => None,
+    plx_platform::devcaps::set_source(caps::source);
+    log_free_pthread_key("at launch");
+    let lines = match (arg("secure"), arg("net"), arg("caps"), arg("ass")) {
+        (Some(mode), ..) => Some(secure::harness(mode)),
+        (None, Some(_), ..) => Some(netcheck::harness(arg("server"))),
+        (None, None, Some(mode), _) => Some(caps::harness(mode)),
+        (None, None, None, Some(mode)) => Some(asscheck::harness(mode)),
+        (None, None, None, None) => None,
     };
     let clip = clip::parse(args.iter().map(String::as_str));
     if clip.is_none() && lines.is_none() {
@@ -179,9 +200,6 @@ fn run(clip: Option<clip::Clip>, harness_lines: Option<Vec<String>>) -> Result<(
         if TTF_Init() != 0 {
             return Err(sdl_error("TTF_Init"));
         }
-        // An alpha channel that SurfaceFlinger honours, so the video SurfaceView under this one
-        // shows wherever the UI clears to transparent.
-        SDL_SetHint(c"SDL_VIDEO_EGL_ALLOW_TRANSPARENCY".as_ptr(), c"1".as_ptr());
         SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
         // Android sizes the window to the surface, which PlxActivity fixes at 1920x1080.
         let window = SDL_CreateWindow(

@@ -41,7 +41,7 @@ struct Entry {
 }
 // A `thread_local!`: the diagnostic is armed and drawn on the render thread, and its heap-backed
 // history must not be shared with whichever other thread (a host test's) happens to probe.
-thread_local! {
+plx_base::tls! {
     static ENTRIES: RefCell<Vec<Entry>> = const { RefCell::new(Vec::new()) };
 }
 

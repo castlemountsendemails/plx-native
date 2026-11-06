@@ -1592,6 +1592,9 @@ fn start_bufferfeed_inner(
     // spawned: the demuxer reads `side_subs_owner` once, as it opens the stream, and must never
     // also open subtitle decoders or ASS sources the reader replaces.
     let side_target = if stream { crate::route::side_reader_target(ps) } else { None };
+    if side_target.is_some() {
+        crate::route::note_side_reader_start(ps);
+    }
 
     if stream {
         let su = plx_plex::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
@@ -2553,7 +2556,7 @@ fn lane_starved(priming: bool, max_fed: i64, seek_base: i64, prime_ns: i64, pres
 }
 
 #[cfg(any(test, feature = "test-support"))]
-thread_local! {
+plx_base::tls! {
     /// The test feed clock: each read advances it by `FEED_TEST_CLOCK_STEP_US`, which is 0 unless
     /// a test sets it. At 0, the host seam's near-free `sf_feed` never runs out the slice, so a
     /// slow or preempted test machine cannot change what one tick feeds.

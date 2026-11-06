@@ -79,7 +79,7 @@ impl State {
     }
 }
 
-thread_local! {
+plx_base::tls! {
     static STATE: RefCell<State> = const { RefCell::new(State::new()) };
 }
 
