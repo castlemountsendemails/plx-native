@@ -1,0 +1,30 @@
+--- a/org/libsdl/app/SDLActivity.java
++++ b/org/libsdl/app/SDLActivity.java
+@@ -41,6 +41,8 @@
+ import android.view.WindowManager;
+ import android.view.inputmethod.BaseInputConnection;
+ import android.view.inputmethod.EditorInfo;
++import android.view.inputmethod.ExtractedText;
++import android.view.inputmethod.ExtractedTextRequest;
+ import android.view.inputmethod.InputConnection;
+ import android.view.inputmethod.InputMethodManager;
+ import android.widget.Button;
+@@ -1965,6 +1967,18 @@
+         return mEditText.getEditableText();
+     }
+ 
++    // Probe stub (Stage 7 ticket 09): fixed text, to see whether the IME's box shows it.
++    @Override
++    public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
++        Log.v("PlxProbe", "getExtractedText flags=" + flags);
++        ExtractedText et = new ExtractedText();
++        et.text = "abc";
++        et.startOffset = 0;
++        et.selectionStart = 3;
++        et.selectionEnd = 3;
++        return et;
++    }
++
+     @Override
+     public boolean sendKeyEvent(KeyEvent event) {
+         /*
