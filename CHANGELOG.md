@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.32] - 2026-11-06
+
+### Changed
+- Fire TV: the app's log file no longer grows without limit. Each launch starts a new file and keeps the previous launch's beside it; each stops at 1 MB with a final "log truncated" line. The log still goes to logcat in full. "Delete all local data" removes both files. Not yet tried on any stick. Shared code: the LG app writes its log exactly as before; only the delete list gains the new file name.
+
 ## [0.2.31] - 2026-11-06
 
 ### Added
