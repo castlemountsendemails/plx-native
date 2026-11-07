@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.31] - 2026-11-06
+
+### Added
+- Fire TV: the diagnostics panel and the support lines now name the stick and its Android version ("Android 9 · api 28", "AFTSS · mt8695") instead of "unknown OS" and "unknown device". Not yet tried on any stick. Shared code: the LG app prints exactly what it did before.
+- Fire TV: the app now follows the stick's language and 12/24-hour clock setting instead of falling back to English. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+- Fire TV: the wrong-clock notice now appears as an on-screen pop-up message, as it does on the LG. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.30] - 2026-11-05
 
 ### Fixed
