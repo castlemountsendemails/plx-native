@@ -254,9 +254,12 @@ pub fn normalize(s: &str) -> Option<String> {
 /// `webOS 4.10.2`, or the English "webOS unknown" read-out when the firmware file could not
 /// be read — the release is the one field a stranger's report needs, and "unknown" is the honest
 /// reading of an empty one rather than a plausible default. Shared by the support lines of the
-/// failure read-out and of the sign-in report.
+/// failure read-out and of the sign-in report. On Android `major` stays 0, so a known release
+/// prints under the probe's own name instead (`Android 9`).
 pub fn webos_release_line(info: &crate::tv::device::Info) -> String {
-    if info.major == 0 {
+    if cfg!(target_os = "android") && !info.release.is_empty() {
+        format!("{} {}", info.name, info.release)
+    } else if info.major == 0 {
         msg::browse_diagnostics_unknown_os().to_string()
     } else {
         format!("webOS {}", info.release)
