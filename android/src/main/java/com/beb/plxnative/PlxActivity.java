@@ -254,6 +254,13 @@ public class PlxActivity extends SDLActivity {
     // Activity. Unmapped keys (volume, ...) take SDL's and Android's usual path.
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // Throwaway probe for ticket 14: replaced by the filter once the flags are read.
+        if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER || event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            Log.i(TAG, "keyprobe code=" + event.getKeyCode() + " action=" + event.getAction()
+                + " flags=0x" + Integer.toHexString(event.getFlags())
+                + " dev=" + event.getDeviceId() + " src=0x" + Integer.toHexString(event.getSource())
+                + " t=" + event.getEventTime());
+        }
         if (!mBrokenLibraries && nativeKey(event.getKeyCode(), event.getAction(), event.getRepeatCount())) {
             return true;
         }
