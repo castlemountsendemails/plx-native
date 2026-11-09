@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.34] - 2026-11-09
+
+### Changed
+- Fire TV: BACK on a top-level screen now opens the Exit/Cancel prompt; before, it did nothing. Exit closes the app completely, so the next launch from the tile starts fresh; Home still leaves the app running in the background. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.33] - 2026-11-09
 
 ### Fixed

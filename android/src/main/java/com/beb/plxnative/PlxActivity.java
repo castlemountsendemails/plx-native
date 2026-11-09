@@ -18,6 +18,7 @@ import android.media.MediaFormat;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.security.keystore.KeyGenParameterSpec;
@@ -133,6 +134,9 @@ public class PlxActivity extends SDLActivity {
             mHdmiPlug = null;
         }
         super.onDestroy();
+        // SDL's onDestroy has joined its thread, so native code is done. The Rust side keeps
+        // process-wide statics and cannot start twice in one process, so each launch gets a new one.
+        Process.killProcess(Process.myPid());
     }
 
     private static native void nativeHdmiUnplugged();

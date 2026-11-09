@@ -1,8 +1,9 @@
 //! The Fire TV port table, installed before the app or the clip harness runs. Every entry but the
-//! device probe, the locale, the toast, the sink and the sealed-secret trio answers as a television
-//! with no platform services.
+//! device probe, the locale, the toast, the root press, the sink and the sealed-secret trio answers
+//! as a television with no platform services.
 
 use std::ffi::{c_char, CStr};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use plx_platform::tv::{device, sandbox, toast, LocaleReply, Port};
 
@@ -46,6 +47,10 @@ fn deliver_toast(message: &str, _identity: toast::Identity) -> toast::Sent {
     toast::Sent { reply: None, outcome }
 }
 
+/// A root BACK opens the exit confirm rather than leaving for the Fire launcher: `go_home` raises
+/// this and the frame thread's `poll_home` takes it.
+static HOME_QUIT: AtomicBool = AtomicBool::new(false);
+
 pub static PORT: Port = Port {
     probe_device,
     start_capability_probe: nothing,
@@ -54,8 +59,8 @@ pub static PORT: Port = Port {
     open: secure::open,
     remove: secure::remove,
     system_locale: || jni::system_locale().map_or(LocaleReply::Unavailable, LocaleReply::Reply),
-    go_home: nothing,
-    poll_home: || false,
+    go_home: || HOME_QUIT.store(true, Ordering::Release),
+    poll_home: || HOME_QUIT.swap(false, Ordering::AcqRel),
     deliver_toast,
     bind_window: |_| {},
     grab_surface: |_| {},
