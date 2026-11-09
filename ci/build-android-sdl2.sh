@@ -31,8 +31,6 @@ cmake --install "$WORK/build"
 rm -rf "$PREFIX/java"
 mkdir -p "$PREFIX/java"
 cp -R "$SRC/android-project/app/src/main/java/org" "$PREFIX/java/"
-# A bump of the SDL pin that moves the patched lines fails here, not silently.
-git -C "$PREFIX/java" apply --verbose "$ROOT/ci/sdl2-extracted-text.patch"
 
 # The loader resolves DT_NEEDED by file name; a versioned SONAME would never be found in the APK.
 soname=$(readelf -d "$PREFIX/lib/libSDL2.so" | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p')
