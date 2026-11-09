@@ -254,12 +254,13 @@ public class PlxActivity extends SDLActivity {
     // Activity. Unmapped keys (volume, ...) take SDL's and Android's usual path.
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        // Throwaway probe for ticket 14: replaced by the filter once the flags are read.
-        if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER || event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
-            Log.i(TAG, "keyprobe code=" + event.getKeyCode() + " action=" + event.getAction()
-                + " flags=0x" + Integer.toHexString(event.getFlags())
-                + " dev=" + event.getDeviceId() + " src=0x" + Integer.toHexString(event.getSource())
-                + " t=" + event.getEventTime());
+        // The Fire keyboard sends an editor-action Enter after BACK has already closed it; passed on,
+        // it reads as OK on the search field and raises the keyboard again. Its own Enter key sends
+        // the same flags, but only while the keyboard is still shown.
+        if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                && (event.getFlags() & KeyEvent.FLAG_EDITOR_ACTION) != 0 && !mScreenKeyboardShown) {
+            Log.i(TAG, "keyboard: dropped the soft Enter sent after it closed (action=" + event.getAction() + ")");
+            return true;
         }
         if (!mBrokenLibraries && nativeKey(event.getKeyCode(), event.getAction(), event.getRepeatCount())) {
             return true;
