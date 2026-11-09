@@ -466,6 +466,23 @@ pub fn show_toast(message: &str) -> Option<bool> {
     })
 }
 
+/// `SDLActivity.mirrorTextInput` (patched in by `ci/sdl2-extracted-text.patch`), reached through
+/// `PlxActivity` because a native thread's `FindClass` cannot see SDL's classes.
+pub fn mirror_text_input(text: &str, caret: i32) {
+    if let Some(class) = activity() {
+        with_env("mirror the search field", |env| {
+            let text = env.new_string(text)?;
+            env.call_static_method(
+                class,
+                "mirrorTextInput",
+                "(Ljava/lang/String;I)V",
+                &[JValue::Object(&text), JValue::Int(caret)],
+            )
+            .map(drop)
+        });
+    }
+}
+
 /// `PlxActivity.sealSecret`: the Keystore IV (12 bytes) followed by ciphertext + tag.
 pub fn seal_secret(alias: &str, plain: &[u8]) -> Option<Vec<u8>> {
     let class = activity()?;

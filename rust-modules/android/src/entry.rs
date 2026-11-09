@@ -161,7 +161,7 @@ pub extern "C" fn SDL_main(argc: c_int, argv: *mut *mut c_char) -> c_int {
         if plx_platform::tv::install(&crate::port::PORT).is_err() {
             log(LOG_ERROR, "a port was already installed");
         }
-        return plxnative_modules::run_android(push_presses);
+        return plxnative_modules::run_android(push_presses, jni::mirror_text_input);
     }
     match run(clip, lines) {
         Ok(()) => 0,

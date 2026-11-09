@@ -694,6 +694,14 @@ pub(crate) unsafe fn ingest(app: &mut App, fr: &mut Frame) {
             if let Some(frame) = super::ANDROID_FRAME.get() {
                 frame();
             }
+            let search = app.pages.top_screen().and_then(|screen| screen.as_any())
+                .and_then(|screen| screen.downcast_ref::<plx_screens::search::SearchScreen>());
+            if let (Some(search), Some(push)) = (search, super::ANDROID_FIELD.get()) {
+                let (query, caret) = search.field();
+                if let Some(caret) = crate::textinput::mirror_field(query, caret) {
+                    push(query, caret);
+                }
+            }
             if crate::textinput::take_sdl_dismissal() {
                 app.inputs.push(plx_machine::machine::InputEvent {
                     at: plx_machine::machine::Tick { ms: clock::now(), dt_us: 0 },

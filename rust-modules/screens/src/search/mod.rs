@@ -551,6 +551,8 @@ impl SearchScreen {
     }
 
     pub fn is_editing(&self) -> bool { self.editing }
+    /// The query as drawn in the field, and its caret in bytes.
+    pub fn field(&self) -> (&str, usize) { (self.draft.query(), self.draft.caret()) }
 
     /// How many recent terms are shown — the legacy `clear_index()`'s value
     /// (`recents::count().min(MAX_RECENTS)`). This model's `recents` vec is built from the same

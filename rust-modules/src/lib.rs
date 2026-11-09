@@ -77,10 +77,12 @@ pub use app::synthetic_home_initial;
 
 /// The Fire TV entry, which installs its own port first. The PMS address is the C shim's
 /// placeholder: the boot reads it unconditionally, and only a dev-token boot uses it.
-/// `frame` runs on the SDL thread at the start of every frame's input.
+/// `frame` runs on the SDL thread at the start of every frame's input; `field` gets the search
+/// field's text and UTF-16 caret there whenever they change.
 #[cfg(target_os = "android")]
-pub fn run_android(frame: fn()) -> std::os::raw::c_int {
+pub fn run_android(frame: fn(), field: fn(&str, i32)) -> std::os::raw::c_int {
     let _ = app::ANDROID_FRAME.set(frame);
+    let _ = app::ANDROID_FIELD.set(field);
     app::run_application(c"YOUR_PMS_HOST".as_ptr(), 32400)
 }
 

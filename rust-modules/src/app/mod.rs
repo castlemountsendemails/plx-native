@@ -589,6 +589,10 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
 #[cfg(target_os = "android")]
 pub(crate) static ANDROID_FRAME: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 
+/// Hands the search field's text and UTF-16 caret to the Fire TV keyboard's own text box.
+#[cfg(target_os = "android")]
+pub(crate) static ANDROID_FIELD: std::sync::OnceLock<fn(&str, i32)> = std::sync::OnceLock::new();
+
 /// The ten-line public skeleton: preflight/construction, then the ordinary loop and teardown.
 pub(crate) fn run_application(pms_host: *const c_char, pms_port: c_int) -> c_int {
     let mut app = match enter_application(pms_host,pms_port) { Ok(app) => app, Err(code) => return code };

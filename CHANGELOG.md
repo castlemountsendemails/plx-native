@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.33] - 2026-11-09
+
+### Fixed
+- Fire TV: in search, BACK closed the keyboard and it came straight back. The Fire keyboard sends an Enter as it closes, which the search field took as OK. That Enter is now ignored; the keyboard's own Enter key still closes it and saves the search. Tried on the HD and the Stick 4K. Fire TV only: the LG app is unchanged.
+- Fire TV: the text box at the top of the Fire keyboard stayed empty while typing a search. It now shows the search field as it is: each letter as it is typed, a deleted letter gone, and the current search when the keyboard opens again, after picking a recent search, or after coming back from a result. Not yet tried on any stick. Shared code: the LG app's search field is unchanged; the code that reads it for the Fire keyboard is built only for Fire TV.
+
 ## [0.2.32] - 2026-11-06
 
 ### Changed

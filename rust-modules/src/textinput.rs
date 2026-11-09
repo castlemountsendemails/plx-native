@@ -165,6 +165,21 @@ plx_base::tls! {
     /// aborted `plx_ui` in libmalloc (2026-10-20). `STARTED` and `WIN` below are plain `Copy` data
     /// that free nothing, so they stay statics.
     static PENDING: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The search field and caret (bytes) last given to [`mirror_field`]'s caller.
+    static MIRRORED: std::cell::RefCell<Option<(String, usize)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The caret in UTF-16 units when the search field differs from the one last mirrored, so Android's
+/// keyboard box is told only of changes. The frame thread calls it once per frame.
+pub(crate) fn mirror_field(query: &str, caret: usize) -> Option<i32> {
+    MIRRORED.with(|sent| {
+        let mut sent = sent.borrow_mut();
+        if sent.as_ref().is_some_and(|(q, c)| q == query && *c == caret) {
+            return None;
+        }
+        *sent = Some((query.to_owned(), caret));
+        Some(query.get(..caret).map_or(0, |head| head.encode_utf16().count()) as i32)
+    })
 }
 
 /// Whether WE have asked for the panel. Our own edge, deliberately not `SDL_IsTextInputActive`:
@@ -828,6 +843,19 @@ mod tests {
                 assert!(drain().is_empty());
             }
         });
+    }
+
+    /// Android's keyboard box is told the field only when it changed, and its caret is counted in
+    /// Java's UTF-16 units, not the field's bytes.
+    #[test]
+    fn the_field_is_mirrored_once_per_change_with_a_utf16_caret() {
+        assert_eq!(mirror_field("star", 4), Some(4), "the first field is always sent");
+        assert_eq!(mirror_field("star", 4), None, "an unchanged field is not sent again");
+        assert_eq!(mirror_field("star", 2), Some(2), "a caret move alone is sent");
+        assert_eq!(mirror_field("stars", 5), Some(5));
+        assert_eq!(mirror_field("", 0), Some(0), "a cleared field is sent");
+        assert_eq!(mirror_field("Amélie", "Amél".len()), Some(4));
+        assert_eq!(mirror_field("🎬star", "🎬star".len()), Some(6), "an emoji is two UTF-16 units");
     }
 
     /// The leak bound holds, and holds the RECENT end. Nothing drains on Home, and on a desktop
