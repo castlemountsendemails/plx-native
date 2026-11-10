@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.35] - 2026-11-10
+
+### Changed
+- Search: the empty search page now looks like stock Plex's. The search box is a box with a thin grey outline that reads "Search", with its text the same size as the chips under it. Recent searches are one row of up to four chips ending in "Clear Search History", with "You can search titles, people, collections and more…" under them. The "Searching <server>" line, the RECENT SEARCHES heading and "Nothing searched yet" are gone, and so is the warning that named a server that couldn't be reached. Tried on the HD, except the box, which is not yet tried on any stick. Shared code: the LG app gets the same page.
+
 ## [0.2.34] - 2026-11-09
 
 ### Changed

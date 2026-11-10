@@ -297,10 +297,9 @@ pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_
 
 /// The Search query field's **editing** ink — the bright endpoint of the `hot` cross-fade in
 /// `search::field::draw` (idle end: `TEXT_SECONDARY`) while the television's keyboard is up. Its own
-/// role because it names the JOB: the design system's `SearchField` contract forbids a rim or rule
-/// on this control, so ink is the only focus signal editing ever gets, and one stop (`TEXT_HEADING`)
-/// was too little from the couch (owner feedback, 2026-09-02). Lands on `TEXT_PRIMARY`, the
-/// brightest ink stop short of pure white.
+/// role because it names the JOB: the field's box never changes with focus, so ink is the only
+/// focus signal editing ever gets, and one stop (`TEXT_HEADING`) was too little from the couch.
+/// Lands on `TEXT_PRIMARY`, the brightest ink stop short of pure white.
 ///
 /// **Until 2026-09-04 this was also the ink for focused-but-not-editing** — first alone, then (for
 /// one day, issue 22) behind a flat [`ACCENT`]/[`ACCENT_INK`] plate that the owner rejected on sight
@@ -318,6 +317,11 @@ pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
 /// `ink_target` is the one place that picks between this and [`FIELD_EDITING_INK`], on `editing`
 /// alone — never a second spring.
 pub const FIELD_WAITING_INK: [f32; 4] = WHITE;
+
+/// The Search field's box: a faint fill inside a thin grey rule, so the field reads as an input on
+/// the dark page the way stock Plex's does. Dim on purpose: a bright plate here read as a button.
+pub const FIELD_FILL: [f32; 4] = with_a(WHITE, 0.08);
+pub const FIELD_RULE: [f32; 4] = with_a(WHITE, 0.30);
 
 /// Idle (unfocused) control disc/pill fill — solid dark, faintly translucent.
 pub const CONTROL_IDLE_FILL: [f32; 4] = with_a(NEUTRAL_650, 0.92);

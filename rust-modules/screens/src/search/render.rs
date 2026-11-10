@@ -13,6 +13,11 @@ const CARET_GAP: f32 = 8.0;
 const GHOST_GAP: f32 = theme::size::BODY as f32;
 const COUNT_GAP: f32 = theme::space::SM;
 const SOURCE_PAD: f32 = theme::space::XS;
+/// The field's type: the recent-search chips' own, so the box and the row under it read as one set.
+const FIELD_TEXT: c_int = layout::CHIP_SIZE;
+const FIELD_PAD: f32 = theme::space::MD;
+const FIELD_RAD: f32 = 8.0;
+const FIELD_RULE_W: f32 = 1.5;
 
 #[derive(Default)]
 pub(super) struct Resources {
@@ -51,11 +56,11 @@ impl Resources {
             };
             let (_, head) = run_and_head(q, caret);
             self.head = cstring(head);
-            self.run_w = cx.measure.width(&self.run, theme::size::HERO, true);
+            self.run_w = cx.measure.width(&self.run, FIELD_TEXT, true);
             self.head_w = if q.trim().is_empty() {
                 0.0
             } else {
-                cx.measure.width(&self.head, theme::size::HERO, true)
+                cx.measure.width(&self.head, FIELD_TEXT, true)
             };
         }
         let keys = count_keys(H::search(cx).shelves());
@@ -151,12 +156,14 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
 
 fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let data = &screen.render;
-    let rect = Rect::new(
+    let frame = Rect::new(
         layout::FIELD.x,
         layout::FIELD.y - screen.stack.scroll(),
         layout::FIELD.w,
         layout::FIELD.h,
     );
+    p.rect_rimmed_w(frame, FIELD_RAD, theme::FIELD_FILL, theme::FIELD_FILL, theme::FIELD_RULE, 0.0, FIELD_RULE_W);
+    let rect = Rect::new(frame.x + FIELD_PAD, frame.y, frame.w - 2.0 * FIELD_PAD, frame.h);
     let blank = data.query.trim().is_empty();
     let hot = screen.hot.pos;
     let ink = if blank {
@@ -170,19 +177,19 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         rect.w,
         screen.editing,
     );
-    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(theme::size::HERO, 1);
+    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(FIELD_TEXT, 1);
     let pad = descent_pad(
         rect.h,
-        plx_gfx::text::text_height(theme::size::HERO, 1),
+        plx_gfx::text::text_height(FIELD_TEXT, 1),
         cap_top,
         cap_base,
     );
     {
         let _clip = f.clip(p, Rect::new(rect.x, rect.y, rect.w, rect.h + pad));
-        Label::new(data.run.as_ptr(), theme::size::HERO, ink)
+        Label::new(data.run.as_ptr(), FIELD_TEXT, ink)
             .bold()
             .draw(p, Rect::new(rect.x + run_dx, rect.y, rect.w, rect.h));
-        let text_y = plx_gfx::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
+        let text_y = plx_gfx::text::text_vcenter_y(FIELD_TEXT, 1, rect.cy());
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
@@ -198,7 +205,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
         if ghost_shown(&data.query) {
-            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
+            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, FIELD_TEXT, 1, text_y);
             p.text(
                 plx_platform::i18n::msg::browse_search_one_more_c().as_ptr(),
                 rect.x + caret_dx + CARET_W + GHOST_GAP,
