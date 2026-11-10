@@ -668,6 +668,16 @@ mod tests {
         assert_eq!(msg::browse_search_placeholder_c_in(&be).to_str().unwrap(), "Пошук у вашай бібліятэцы");
     }
 
+    #[test]
+    fn the_empty_page_reads_like_stock_plex() {
+        use plx_platform::i18n::{LocaleContext, Preference, msg};
+        let en = LocaleContext::resolve(Preference::En, None, None, None, None);
+        assert_eq!(msg::browse_search_placeholder_in(&en), "Search");
+        assert_eq!(msg::browse_search_clear_in(&en), "Clear Search History");
+        assert_eq!(empty_state(State::Idle, false), None, "no query draws no statement, only the hint");
+        assert_eq!(empty_state(State::Ready, false), Some(EmptyState::NoResults));
+    }
+
     use plx_data::search::{Item, Kind, State};
 
     fn own(name: &str) -> ScopeSource {

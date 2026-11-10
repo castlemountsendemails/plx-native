@@ -428,6 +428,57 @@ fn the_recents_cursor_stops_on_the_clear_control() {
     drop(session);
 }
 
+/// The recent terms are one row of chips with Clear as its last chip, as on stock Plex: ▼ from the
+/// field always lands on the first chip, ◀/▶ walk the row and hold at Clear, ▲ returns to the field.
+/// ◀ on the first chip is the rail's: the row's Left edge is a `Stop`, which the strip links.
+#[test]
+fn the_recents_are_one_row_of_chips_that_ends_in_clear() {
+    let _serial = plx_base::testlock::serial();
+    let session = remembering("owned-search-chips", &["gromit", "wallace", "preston"]);
+    let fixture = Fixture::new();
+    let mut screen = fixture.screen();
+    let mut engine = seated(&screen, &fixture);
+    let chips: Vec<u32> = screen.recents.iter().copied().chain([CLEAR]).collect();
+    assert_eq!(chips.len(), 4);
+
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down).map(|k| k.elem), Some(chips[0]));
+    let mut walked = Vec::new();
+    for _ in 0..5 { walked.push(step_dir(&mut screen, &fixture, &mut engine, Dir::Right).unwrap().elem); }
+    assert_eq!(walked, [chips[1], chips[2], CLEAR, CLEAR, CLEAR], "▶ walks the row and holds on Clear");
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Left).map(|k| k.elem), Some(chips[2]));
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down).map(|k| k.elem), Some(chips[2]),
+        "nothing focusable sits under the row");
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Up), Some(screen.key(FIELD)));
+    assert_eq!(step_dir(&mut screen, &fixture, &mut engine, Dir::Down).map(|k| k.elem), Some(chips[0]),
+        "▼ from the field lands on the first chip, not the one last left");
+
+    let cx = fixture.cx(Some(screen.key(chips[0])));
+    let rects: Vec<Rect> = chips.iter().map(|elem|
+        <SearchScreen as Focusable<HostFixture>>::place(&screen, elem, &cx, At::Drawn).unwrap().rect).collect();
+    for pair in rects.windows(2) {
+        assert_eq!(pair[0].y, pair[1].y, "one row");
+        assert!(pair[1].x >= pair[0].x + pair[0].w, "left to right, no overlap");
+    }
+    assert!(rects[3].x + rects[3].w <= layout::FIELD.x + layout::FIELD.w, "the row fits under the field");
+
+    let mut groups = Vec::new();
+    <SearchScreen as Focusable<HostFixture>>::groups(&screen, &cx, &mut groups);
+    let row = groups.iter().find(|g| g.id == RECENTS_GROUP).unwrap();
+    assert!(matches!(row.kind, GroupKind::Row { wrap: false }), "one row: {:?}", row.kind);
+    assert_eq!((row.len, row.edge[2], row.edge[3]), (4, EdgeRule::Stop, EdgeRule::Stop),
+        "◀ off the first chip goes to the rail");
+
+    let on_clear = Some(screen.key(CLEAR));
+    let (_, out, _) = deliver(&mut screen, &fixture, on_clear, ScreenEvent::Activate(CLEAR));
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(
+        ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(key) }))) if key.elem == FIELD)),
+        "Clear puts focus in the field");
+    let mut groups = Vec::new();
+    <SearchScreen as Focusable<HostFixture>>::groups(&screen, &fixture.cx(Some(screen.key(FIELD))), &mut groups);
+    assert_eq!(groups.iter().map(|g| g.id.0).collect::<Vec<_>>(), [FIELD_GROUP.0], "only the field is left");
+    drop(session);
+}
+
 /// Stock Plex opens Search on an empty field with the recent terms under it. A press of the
 /// rail's Search item while the page is open used to keep the old query and its results.
 #[test]
