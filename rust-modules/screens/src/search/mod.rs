@@ -36,7 +36,6 @@ const FIELD: u32 = 1;
 const CLEAR: u32 = 2;
 const FIELD_GROUP: GroupId = GroupId(0x5345_4100);
 const RECENTS_GROUP: GroupId = GroupId(0x5345_4101);
-const CLEAR_GROUP: GroupId = GroupId(0x5345_4102);
 const STRIP: GroupId = plx_ui::containers::tabs::STRIP;
 /// The alpha at or under which the owner annotation is invisible: the renderer draws no run
 /// below it, and the instance swaps the word it holds only there — so a handle never changes
@@ -68,7 +67,7 @@ struct Row { kind: Kind, group: GroupId, elems: Vec<u32> }
 /// The sections of the page, top to bottom. A result row's key carries the page's `rows_gen`: a
 /// row the page wiped and rebuilt is a new section with a new shelf, as a wiped row always was.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Sec { Head, Recents, Clear, Row(Kind, u32) }
+pub enum Sec { Head, Recents, Row(Kind, u32) }
 
 pub struct SearchScreen {
     entry: EntryId,
@@ -87,6 +86,9 @@ pub struct SearchScreen {
     next_elem: u32,
     rows: Vec<Row>,
     recents: Vec<u32>,
+    /// The recents chips then Clear, with their labels: `layout::chips` of the terms shown, kept
+    /// beside `recents` because it measures text. Not part of the state hash.
+    chips: Vec<(Rect, std::ffi::CString)>,
     query_gen: u32,
     recent_clear_pending: bool,
     publication: Option<plx_data::search::view::SearchSnapshot>,
@@ -115,7 +117,7 @@ impl SearchScreen {
     pub fn new(entry: EntryId, instance: InstanceId) -> Self {
         Self { entry, instance, draft: Draft::new(0, ""), mounted: false, editing: false,
             blink_us: 0, hot: Spring::at(1.0), stack: new_stack(entry), rows_gen: 0,
-            keys: Vec::new(), next_elem: 10, rows: Vec::new(), recents: Vec::new(), query_gen: 0,
+            keys: Vec::new(), next_elem: 10, rows: Vec::new(), recents: Vec::new(), chips: Vec::new(), query_gen: 0,
             recent_clear_pending: false, publication: None, content_dirty: true,
             fade: plx_ui::xfade::Xfade::new(), ground: plx_ui::widgets::PageGround::new(),
             owner_row: None, owner: String::new(), owner_alpha: Spring::at(0.0), restored: None, render: Default::default(),
@@ -196,7 +198,7 @@ impl SearchScreen {
         } else if self.draft.observe(profile, view.query(), notified) {
             self.keyboard(false, false, fx);
             self.keys.clear();
-            self.wipe_rows(); self.recents.clear();
+            self.wipe_rows(); self.recents.clear(); self.chips.clear();
             self.stack.jump_to(0.0);
             self.recent_clear_pending = false;
             self.content_dirty = true;
@@ -221,10 +223,16 @@ impl SearchScreen {
             self.keys.retain(|key| matches!(key.identity, Identity::Recent(_)));
         }
         self.recents.clear();
+        self.chips.clear();
         if !self.real_query() && !self.recent_clear_pending {
-            for (slot, term) in view.recents().terms().iter().enumerate() {
+            let terms = view.recents().terms();
+            for (slot, term) in terms.iter().enumerate() {
                 let elem = self.intern(Identity::Recent(term.clone()), RECENTS_GROUP, slot);
                 self.recents.push(elem);
+            }
+            if !terms.is_empty() {
+                self.chips = layout::chips(terms, cx.measure).into_iter()
+                    .map(|(rect, label)| (rect, std::ffi::CString::new(label).unwrap_or_default())).collect();
             }
         }
         if self.draft.pending() || !self.real_query() {
@@ -272,6 +280,14 @@ impl SearchScreen {
                     None => return Handled::No,
                 },
             };
+            if matches!(request, SearchReq::Tab(HomeTab::Search)) {
+                // Stock Plex opens Search empty, recents under the field.
+                if let Some(query) = self.draft.replace("") {
+                    self.store(SearchCmd::SetQueryScoped { profile_generation: self.draft.profile(), query }, fx);
+                }
+                self.wipe_rows();
+                self.content_dirty = true;
+            }
             self.keyboard(false, true, fx);
             fx.push(Fx::App(AppFx::Search(request)));
             return Handled::Yes;
@@ -282,7 +298,7 @@ impl SearchScreen {
         }
         if elem == CLEAR && !self.recents.is_empty() {
             self.store(SearchCmd::ClearRecents { profile_generation: self.draft.profile() }, fx);
-            self.recent_clear_pending = true; self.recents.clear();
+            self.recent_clear_pending = true; self.recents.clear(); self.chips.clear();
             self.content_dirty = true;
             self.reseat(FocusTarget::Elem(self.key(FIELD)), fx);
             return Handled::Yes;
@@ -296,7 +312,7 @@ impl SearchScreen {
                     self.store(SearchCmd::SetQueryScoped { profile_generation: self.draft.profile(), query }, fx);
                 }
                 self.remember(fx);
-                self.wipe_rows(); self.recents.clear();
+                self.wipe_rows(); self.recents.clear(); self.chips.clear();
                 self.content_dirty = true;
                 self.reseat(FocusTarget::Elem(self.key(FIELD)), fx);
             }
@@ -507,12 +523,8 @@ impl SearchScreen {
     /// (`app::chrome::ChromeSnapshot::focus`) and found focus `Away` from the chip/strip, i.e.
     /// actually resting somewhere on this page.
     ///
-    /// Mirrors the deleted legacy `ui::search::Zone` naming (`Field`/`Recents`/`Results`)
-    /// verbatim, and ADDS `Clear`: the legacy zone folded the Clear control into `Recents` (its
-    /// `View::recent == clear_index()` was the only tell), because a single global cursor was the
-    /// zone's only address space. The owned model gives Clear its own [`GroupId`]
-    /// (`CLEAR_GROUP`), so the zone can just say so instead of asking a reader to compare two
-    /// numbers to reconstruct a fact the model already has.
+    /// Zones are `Field`, `Recents`, `Clear` (the chip row's last chip, named so a reader need not
+    /// compare its index with the term count) and `Results`.
     ///
     /// `row`/`col`/`recent` read `-1` off their own zone, the convention
     /// `screens::library::LibraryScreen::probe_viewport` already uses for "not there" — not a
@@ -551,12 +563,19 @@ impl SearchScreen {
     }
 
     pub fn is_editing(&self) -> bool { self.editing }
+    /// The query as drawn in the field, and its caret in bytes.
+    pub fn field(&self) -> (&str, usize) { (self.draft.query(), self.draft.caret()) }
 
     /// How many recent terms are shown — the legacy `clear_index()`'s value
     /// (`recents::count().min(MAX_RECENTS)`). This model's `recents` vec is built from the same
     /// capped source (`search::recents::CAP`), so it already holds no more than that, and no
     /// `.min` is needed to reproduce the number.
     pub fn recents_shown(&self) -> usize { self.recents.len() }
+
+    /// Chip `n`'s rect on a row whose top is at `y`.
+    fn chip_rect(&self, n: usize, y: f32) -> Rect {
+        self.chips.get(n).map_or(Rect::new(layout::FIELD.x, y, 0.0, layout::CHIP_H), |(rect, _)| Rect { y, ..*rect })
+    }
 
     fn first_content(&self) -> Option<GroupId> {
         if !self.recents.is_empty() { Some(RECENTS_GROUP) } else { self.rows.first().map(|row| row.group) }
@@ -655,10 +674,7 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
     fn sections(&self, _cx: &Cx<'_, H>, out: &mut Vec<SectionSpec<Sec>>) {
         out.push(SectionSpec::new(Sec::Head, plx_ui::cards::Kind::Custom { height: layout::CONTENT_TOP, focusable: true }, FIELD_GROUP));
         if !self.recents.is_empty() {
-            let shown = self.recents.len().min(layout::RECENT_CAP) as f32;
-            out.push(SectionSpec::new(Sec::Recents, plx_ui::cards::Kind::Custom {
-                height: plx_ui::table::HDR_H + shown * plx_ui::table::ROW_H, focusable: true }, RECENTS_GROUP));
-            out.push(SectionSpec::new(Sec::Clear, plx_ui::cards::Kind::Custom { height: 0.0, focusable: true }, CLEAR_GROUP));
+            out.push(SectionSpec::new(Sec::Recents, plx_ui::cards::Kind::Custom { height: layout::CHIP_H, focusable: true }, RECENTS_GROUP));
         }
         for row in &self.rows {
             let elem = if matches!(row.kind, Kind::Movie | Kind::Show | Kind::Episode) { ElemKind::Card } else { ElemKind::Bare };
@@ -688,46 +704,45 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         matches!(self.selected_item(Some(key), cx), Some(Item::Media(media)) if crate::registry::item_has_menu(media))
     }
     fn elem_of(&self, k: Sec) -> Option<u32> {
-        match k { Sec::Head => Some(FIELD), Sec::Clear if !self.recents.is_empty() => Some(CLEAR), _ => None }
+        match k { Sec::Head => Some(FIELD), _ => None }
     }
     fn plain_len(&self, k: Sec) -> usize {
-        match k { Sec::Recents => self.recents.len(), Sec::Head => 1, Sec::Clear => (!self.recents.is_empty()) as usize, Sec::Row(..) => 0 }
+        match k { Sec::Recents if !self.recents.is_empty() => self.recents.len() + 1, Sec::Recents | Sec::Row(..) => 0, Sec::Head => 1 }
     }
     fn plain_elem(&self, k: Sec, n: usize) -> Option<u32> {
-        match k { Sec::Recents => self.recents.get(n).copied(), _ => if n == 0 { StackPage::<H>::elem_of(self, k) } else { None } }
+        match k {
+            // Clear is the row's last chip.
+            Sec::Recents => self.recents.get(n).copied().or((n == self.recents.len() && n > 0).then_some(CLEAR)),
+            _ => if n == 0 { StackPage::<H>::elem_of(self, k) } else { None },
+        }
     }
     fn plain_step(&self, k: Sec, at: usize, dir: Dir) -> Option<usize> {
         match (k, dir) {
-            (Sec::Recents, Dir::Up) => at.checked_sub(1),
-            (Sec::Recents, Dir::Down) => at.checked_add(1),
+            (Sec::Recents, Dir::Left) => at.checked_sub(1),
+            (Sec::Recents, Dir::Right) => Some(at + 1).filter(|next| *next <= self.recents.len()),
             _ => None,
         }
     }
-    fn focus_rect(&self, cx: &Cx<'_, H>, k: Sec, section: Rect) -> Rect {
+    fn focus_rect(&self, _cx: &Cx<'_, H>, k: Sec, section: Rect) -> Rect {
         match k {
-            Sec::Recents => layout::recent(0, layout::CONTENT_TOP - section.y),
-            Sec::Clear => layout::clear_below(section.y, cx.measure),
+            Sec::Recents => self.chip_rect(0, section.y),
             _ => Rect::new(layout::FIELD.x, layout::FIELD.y + section.y, layout::FIELD.w, layout::FIELD.h),
         }
     }
     fn element_rect(&self, cx: &Cx<'_, H>, k: Sec, n: usize, section: Rect) -> Rect {
-        if k == Sec::Recents { layout::recent(n, layout::CONTENT_TOP - section.y) } else { self.focus_rect(cx, k, section) }
+        if k == Sec::Recents { self.chip_rect(n, section.y) } else { self.focus_rect(cx, k, section) }
     }
     fn plain_group(&self, _cx: &Cx<'_, H>, k: Sec, id: GroupId, extent: Rect) -> GroupSpec {
         match k {
-            Sec::Recents => group(id, GroupKind::Column, self.recents.len(), extent, ElemKind::Bare, Seat::Remembered),
-            Sec::Clear => {
-                let mut clear = group(id, GroupKind::Row { wrap: false }, 1, extent, ElemKind::Control, Seat::First);
-                clear.edge[1] = EdgeRule::Stop;
-                clear
-            }
+            Sec::Recents => group(id, GroupKind::Row { wrap: false }, StackPage::<H>::plain_len(self, k), extent, ElemKind::Bare, Seat::First),
             _ => group(id, GroupKind::Row { wrap: false }, 1, extent, ElemKind::Bare, Seat::First),
         }
     }
-    /// Entered from the field, a group takes the card focus last left on in it, else its first.
+    /// Entered from the field, a result row takes the card focus last left on in it, else its
+    /// first; the chips always start at the first.
     fn seat_override(&self, cx: &Cx<'_, H>, k: Sec, _from: Placed) -> Option<u32> {
         if !cx.focus.current.is_some_and(|key| key.elem == FIELD) { return None; }
-        let group = match k { Sec::Recents => RECENTS_GROUP, Sec::Clear => CLEAR_GROUP, Sec::Head => FIELD_GROUP, Sec::Row(kind, _) => layout::group(kind) };
+        let group = match k { Sec::Recents => return StackPage::<H>::plain_elem(self, k, 0), Sec::Head => FIELD_GROUP, Sec::Row(kind, _) => layout::group(kind) };
         let valid = |elem: &u32| match k {
             Sec::Row(kind, _) => self.rows.iter().any(|row| row.kind == kind && row.elems.contains(elem)),
             _ => (0..StackPage::<H>::plain_len(self, k)).any(|n| StackPage::<H>::plain_elem(self, k, n) == Some(*elem)),
@@ -738,8 +753,8 @@ impl<H: SearchLike> StackPage<H> for SearchScreen {
         };
         Some(cx.focus.remembered(group).filter(valid).or(first).unwrap_or(FIELD))
     }
-    /// Recents and the Clear control are part of the head's block: the page rests at its top.
-    fn reveal_with(&self, k: Sec) -> Option<Sec> { matches!(k, Sec::Recents | Sec::Clear).then_some(Sec::Head) }
+    /// The chips are part of the head's block: the page rests at its top.
+    fn reveal_with(&self, k: Sec) -> Option<Sec> { (k == Sec::Recents).then_some(Sec::Head) }
     fn reveal_margin(&self, _k: Sec) -> f32 { layout::CONTENT_TOP }
     fn shelf_foot(&self, _cx: &Cx<'_, H>, _k: Sec) -> f32 { plx_ui::consts::UNDER_LABEL_AIR }
     fn wide_extent(&self, _k: Sec) -> bool { false }
@@ -790,10 +805,6 @@ impl<H: SearchLike> Screen<H> for SearchScreen {
         if let Some(first) = self.first_content() {
             out.push(Link { from: FIELD_GROUP, dir: Dir::Down, to: first });
             out.push(Link { from: first, dir: Dir::Up, to: FIELD_GROUP });
-        }
-        if !self.recents.is_empty() {
-            out.push(Link { from: RECENTS_GROUP, dir: Dir::Down, to: CLEAR_GROUP });
-            out.push(Link { from: CLEAR_GROUP, dir: Dir::Up, to: RECENTS_GROUP });
         }
         for pair in self.rows.windows(2) {
             out.push(Link { from: pair[0].group, dir: Dir::Down, to: pair[1].group });

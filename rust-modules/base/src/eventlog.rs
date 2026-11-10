@@ -262,8 +262,108 @@ pub fn log(m: &str) {
     crate::eventlog::ring::record(&line);
     // An Android app has no `/tmp` to append to; its log is read with logcat.
     #[cfg(target_os = "android")]
-    logcat::write(&line);
+    {
+        logcat::write(&line);
+        let _ = append_capped(&p, &line, ANDROID_CAP, &ANDROID_FULL);
+    }
+    #[cfg(not(target_os = "android"))]
     let _ = append_record(&p, &line);
+}
+
+/// Each Android event-log file stops at this size, its last line [`TRUNCATED`].
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+const ANDROID_CAP: u64 = 1 << 20;
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+const TRUNCATED: &str = "log truncated";
+#[cfg(target_os = "android")]
+static ANDROID_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Start a fresh Android event log, keeping the last run's as the previous one. Call before the
+/// first [`log`] of the run.
+#[cfg(target_os = "android")]
+pub fn rotate() {
+    let _ = rotate_in(crate::paths::runtime_dir());
+    ANDROID_FULL.store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn rotate_in(dir: &std::path::Path) -> std::io::Result<()> {
+    use crate::paths::runtime_file::{EVENTS, EVENTS_PREVIOUS};
+    match std::fs::rename(dir.join(EVENTS), dir.join(EVENTS_PREVIOUS)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// [`append_record`] that keeps room for one final [`TRUNCATED`] line within `cap`, then drops
+/// every later line once `full` is set.
+// ponytail: the size check and the write are not atomic, so two threads near the cap can each
+// append one line past it; a per-file lock would make the cap exact.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn append_capped(path: &std::path::Path, line: &str, cap: u64,
+    full: &std::sync::atomic::AtomicBool) -> std::io::Result<()> {
+    use std::sync::atomic::Ordering::Relaxed;
+    if full.load(Relaxed) {
+        return Ok(());
+    }
+    let mut file = open_log_append(path)?;
+    let len = file.metadata()?.len();
+    let room_for_marker = TRUNCATED.len() as u64 + 1;
+    if len + line.len() as u64 + 1 + room_for_marker <= cap {
+        return write_log_line(&mut file, line);
+    }
+    if full.swap(true, Relaxed) {
+        return Ok(());
+    }
+    write_log_line(&mut file, TRUNCATED)
+}
+
+#[cfg(test)]
+mod android_log_tests {
+    use super::{append_capped, rotate_in, TRUNCATED};
+    use crate::paths::runtime_file::{EVENTS, EVENTS_PREVIOUS};
+    use std::sync::atomic::AtomicBool;
+
+    fn fresh_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("plx-android-log-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn rotation_keeps_only_the_last_run_as_previous() {
+        let dir = fresh_dir("rotate");
+        std::fs::write(dir.join(EVENTS_PREVIOUS), b"two runs ago").unwrap();
+        std::fs::write(dir.join(EVENTS), b"last run").unwrap();
+        rotate_in(&dir).unwrap();
+        assert_eq!(std::fs::read(dir.join(EVENTS_PREVIOUS)).unwrap(), b"last run");
+        assert!(!dir.join(EVENTS).exists(), "this run starts with no file");
+
+        rotate_in(&dir).unwrap();
+        assert_eq!(std::fs::read(dir.join(EVENTS_PREVIOUS)).unwrap(), b"last run",
+            "a run that never logged does not wipe the previous log");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_full_log_ends_with_one_truncated_line_within_the_cap() {
+        let dir = fresh_dir("cap");
+        let path = dir.join(EVENTS);
+        let full = AtomicBool::new(false);
+        let cap = 64;
+        for _ in 0..20 {
+            append_capped(&path, "0123456789", cap, &full).unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.len() as u64 <= cap, "{} bytes over a {cap}-byte cap", text.len());
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.last(), Some(&TRUNCATED));
+        assert_eq!(lines.iter().filter(|l| **l == TRUNCATED).count(), 1);
+        assert!(lines[..lines.len() - 1].iter().all(|l| *l == "0123456789"));
+        assert_eq!(lines.len(), 5, "every line that fits beside the marker is kept");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 /// `__android_log_write` comes from `liblog`, which the Android `libmain.so` links.

@@ -84,14 +84,14 @@ graded rather than described.
 That is also why **nothing scrolls while the panel is up**: the result set has to be stable under
 the user's eyes while they are still typing.
 
-`search::recents::CAP` is **four, not five**, for the same reason — with the keyboard raised the header, the
-rows and the Clear control all have to finish above its edge. The fifth is *dropped*, not scrolled.
-Recents are the user's own typing, not content, so the cap hides nothing they could not retype, and
-four rows fit above the raised keyboard.
+`search::recents::CAP` is **four**: the chips and Clear share one row under the field, elided so the
+row fits its width, and the hint line under them has to finish above the raised keyboard. The fifth
+is *dropped*, not scrolled. Recents are the user's own typing, not content, so the cap hides nothing
+they could not retype.
 
 ### The caret and the one-character hint stay in the field
 
-`screens/search/render.rs` states it: the caret is 5px wide, one HERO cap band tall and **blinks** in
+`screens/search/render.rs` states it: the caret is 5px wide, one cap band of the field's text tall and **blinks** in
 530ms phases while the television's keyboard is up. That is intentional device feedback: the
 solid bar specified by the design component read on the couch as a field that was not accepting
 input. The implementation still obeys `ui::idle` — the whole-frame present gate cannot see a clock
@@ -104,7 +104,11 @@ placeholder is chrome nobody is editing, so it supplies no insertion point of it
 (owner-reported 2026-09-03; `field.rs`'s blank branch feeds `run_layout` a `caret_w` of zero rather
 than the placeholder's own measured width).
 
-### Focus is ink only — two bright endpoints, never a fill
+### The box is fixed; focus is ink only
+
+The field is a box like stock Plex's: a faint fill inside a thin grey rule (`theme::FIELD_FILL`,
+`theme::FIELD_RULE`), with its text at the recent-search chips' own size. The box never changes with
+focus; only the ink does, as below.
 
 For one day (2026-09-03, issue 22) the field had THREE visual states, not two: idle and editing
 drew no plate, but **focused-but-not-yet-editing** lit up with a flat `theme::ACCENT`/
@@ -119,8 +123,7 @@ proof that no fill can ever reappear under a different name or shape — the act
 plain-English one above, upheld by review and device/simulator verification each time this control
 changes.
 
-Focus is carried by **ink alone**, permanently — the design system's `SearchField` contract, which
-forbids a rim, rule or capsule OUTLINE and was never actually license for a fill either. What
+Focus is carried by **ink alone**: the box stays dim in every state, so a bright plate never returns. What
 answers the couch-legibility problem the plate was trying to solve is two DIFFERENT bright ink
 endpoints instead of one, picked by `editing` alone (`field::draw`'s `ink_target`, never a second
 spring, riding the field's existing `hot` spring either way): **focused, not yet editing** — no
@@ -132,9 +135,8 @@ the open keyboard already carry that state's own signal. Both ride the same wide
 feedback, 2026-09-02).
 
 One character short of `MIN_QUERY`, `one more character` appears at BODY after that caret. It is
-part of the field, not a second caption above the scope line: it explains the control at the place
-the eye is already following and is consumed by the next keystroke. The scope remains one CAPTION
-line at `SCOPE_Y` in every query state.
+part of the field, not a caption elsewhere: it explains the control at the place the eye is already
+following and is consumed by the next keystroke.
 
 The practical consequence for anyone adding motion here: **a clock-driven animation must report
 only when its pixels change.** See `fps:search-idle` in §5, which is the assertion that catches an
@@ -152,9 +154,8 @@ committed query/results; the draft owns edits until the next store notice acknow
 `memory.rs` is the entry-owned `PageMemory` a return visit restores from (current focus itself
 stays in the container's `ReturnState`).
 
-Recents are rows and not a shelf (nothing there has artwork), they are the **user's own words** and
-stay editable in place, and Clear leaves the list to become a Button — a verb never sits in the same
-column as the words you searched for. They persist in the session file beside the roster behind a
+Recents are chips and not a shelf (nothing there has artwork): one row of clock-marked terms ending
+in "Clear Search History", with a hint line under them that never takes focus. They persist in the session file beside the roster behind a
 soft-failing deserializer, so a corrupt entry costs that entry and never the session.
 
 The recents data owner is now `search/recents.rs`: profile-generation cache, immutable term

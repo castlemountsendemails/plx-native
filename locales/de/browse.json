@@ -91,16 +91,13 @@
   "browse.login.slow": "Das dauert länger als üblich.",
   "browse.login.title": "Bei Plex anmelden",
   "browse.login.instructions": "Scanne den Code mit der Kamera deines Smartphones oder verknüpfe diesen Fernseher manuell über die hier angezeigte Adresse und den Code.",
-  "browse.search.placeholder": "Mediathek durchsuchen",
+  "browse.search.placeholder": "Suche",
   "browse.search.one_more": "noch ein Zeichen",
-  "browse.search.recents": "LETZTE SUCHANFRAGEN",
-  "browse.search.clear": "Letzte Suchanfragen löschen",
+  "browse.search.clear": "Suchverlauf löschen",
+  "browse.search.hint": "Du kannst nach Titeln, Personen, Sammlungen und mehr suchen…",
   "browse.search.failed": "Die Suche hat den Server nicht erreicht",
   "browse.search.failed_detail": "Mit deinen Mediatheken ist alles in Ordnung – versuche es gleich noch einmal.",
-  "browse.search.not_yet": "Noch nichts gesucht",
   "browse.search.results": "SUCHERGEBNISSE",
-  "browse.search.your_server": "dein Server",
-  "browse.search.shared_server": "ein geteilter Server",
   "browse.home.loading": "Deine Mediathek wird geladen …",
   "browse.login.failed": "Anmeldung fehlgeschlagen",
   "browse.login.finding": "Dein Server wird gesucht …",
@@ -153,18 +150,6 @@
     "other": "{count} Titel"
   },
   "browse.search.no_results": "Keine Ergebnisse für „{query}“",
-  "browse.search.join": "{first} und {last}",
-  "browse.search.shared_libraries": {
-    "one": "{count} geteilte Mediathek",
-    "other": "{count} geteilte Mediatheken"
-  },
-  "browse.search.shared_sources": {
-    "one": "{count} geteilte Quelle",
-    "other": "{count} geteilte Quellen"
-  },
-  "browse.search.searching": "Suche läuft: {sources}",
-  "browse.search.unreachable": "{sources} nicht erreichbar",
-  "browse.search.partial": "{unreachable} nicht erreichbar · nur Ergebnisse von: {available}",
   "browse.auth.timeout": "Zeitüberschreitung bei der Anmeldung – versuche es erneut.",
   "browse.auth.no_servers": "Dieses Plex-Konto hat noch keinen Server.",
   "browse.auth.no_servers_signed_in_as": "Angemeldet als {account}.\nDieses Plex-Konto hat noch keinen Server.",

@@ -16,10 +16,14 @@ import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Process;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Surface;
@@ -27,6 +31,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.widget.RelativeLayout;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -47,6 +52,8 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
 
@@ -127,9 +134,40 @@ public class PlxActivity extends SDLActivity {
             mHdmiPlug = null;
         }
         super.onDestroy();
+        // SDL's onDestroy has joined its thread, so native code is done. The Rust side keeps
+        // process-wide statics and cannot start twice in one process, so each launch gets a new one.
+        Process.killProcess(Process.myPid());
     }
 
     private static native void nativeHdmiUnplugged();
+
+    // The webOS settings-service reply the native i18n parses: Fire OS has one locale for the UI and
+    // for formats. The clock is left out before onCreate, which i18n reads as unset.
+    static String systemLocale() {
+        String tag = Locale.getDefault().toLanguageTag();
+        try {
+            JSONObject info = new JSONObject().put("locales", new JSONObject().put("UI", tag).put("FMT", tag));
+            if (sContext != null) {
+                info.put("clock", DateFormat.is24HourFormat(sContext) ? "24" : "12");
+            }
+            return new JSONObject()
+                    .put("returnValue", true)
+                    .put("settings", new JSONObject().put("localeInfo", info))
+                    .toString();
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    // Called from a native worker; a Toast must be made on the UI thread.
+    static boolean showToast(String message) {
+        Context context = sContext;
+        if (context == null) {
+            return false;
+        }
+        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, message, Toast.LENGTH_LONG).show());
+        return true;
+    }
 
     // The native side reads these from the files folder (paths::app_dir), not the APK. They are copied
     // again whenever the package's lastUpdateTime differs from the marker's, which every install and
@@ -220,6 +258,14 @@ public class PlxActivity extends SDLActivity {
     // Activity. Unmapped keys (volume, ...) take SDL's and Android's usual path.
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // The Fire keyboard sends an editor-action Enter after BACK has already closed it; passed on,
+        // it reads as OK on the search field and raises the keyboard again. Its own Enter key sends
+        // the same flags, but only while the keyboard is still shown.
+        if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                && (event.getFlags() & KeyEvent.FLAG_EDITOR_ACTION) != 0 && !mScreenKeyboardShown) {
+            Log.i(TAG, "keyboard: dropped the soft Enter sent after it closed (action=" + event.getAction() + ")");
+            return true;
+        }
         if (!mBrokenLibraries && nativeKey(event.getKeyCode(), event.getAction(), event.getRepeatCount())) {
             return true;
         }

@@ -447,6 +447,42 @@ pub fn audio_report() {
     }
 }
 
+/// `PlxActivity.systemLocale`: the locale as the webOS settings-service reply `i18n` parses.
+pub fn system_locale() -> Option<String> {
+    let class = activity()?;
+    with_env("read the system locale", |env| {
+        let reply = JString::from(env.call_static_method(class, "systemLocale", "()Ljava/lang/String;", &[])?.l()?);
+        let reply: String = env.get_string(&reply)?.into();
+        Ok(reply)
+    })
+}
+
+/// `PlxActivity.showToast`: whether the toast was posted to the UI thread.
+pub fn show_toast(message: &str) -> Option<bool> {
+    let class = activity()?;
+    with_env("show a toast", |env| {
+        let message = env.new_string(message)?;
+        env.call_static_method(class, "showToast", "(Ljava/lang/String;)Z", &[JValue::Object(&message)])?.z()
+    })
+}
+
+/// `SDLActivity.mirrorTextInput` (patched in by `ci/sdl2-extracted-text.patch`), reached through
+/// `PlxActivity` because a native thread's `FindClass` cannot see SDL's classes.
+pub fn mirror_text_input(text: &str, caret: i32) {
+    if let Some(class) = activity() {
+        with_env("mirror the search field", |env| {
+            let text = env.new_string(text)?;
+            env.call_static_method(
+                class,
+                "mirrorTextInput",
+                "(Ljava/lang/String;I)V",
+                &[JValue::Object(&text), JValue::Int(caret)],
+            )
+            .map(drop)
+        });
+    }
+}
+
 /// `PlxActivity.sealSecret`: the Keystore IV (12 bytes) followed by ciphertext + tag.
 pub fn seal_secret(alias: &str, plain: &[u8]) -> Option<Vec<u8>> {
     let class = activity()?;

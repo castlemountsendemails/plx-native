@@ -14,16 +14,16 @@ pub const FIELD: Rect = Rect {
     w: SCR_W - 2.0 * MARGIN_X,
     h: 80.0,
 };
-pub(super) const SCOPE_Y: f32 = FIELD.y + FIELD.h + 12.0;
 /// See [`FIELD`]'s doc: also reachable as `crate::search::CONTENT_TOP`. Value pinned at
 /// 300.0 — the overscan audit and the page's `Head` section height (`Stack` stacks the shelves
 /// below it) both depend on it.
 pub const CONTENT_TOP: f32 = 300.0;
 pub(super) const HEAD_TO_ROW: f32 = 60.0;
 pub(super) const KEYBOARD_H: f32 = 324.0;
-pub(super) const SCOPE_H: f32 = plx_ui::theme::size::CAPTION as f32 * 1.35;
-pub(super) const CLEAR_H: f32 = 60.0;
-pub(super) const RECENT_CAP: usize = plx_data::search::recents::CAP;
+pub(super) const CHIP_H: f32 = 60.0;
+const CHIP_GAP: f32 = plx_ui::theme::space::SM;
+pub(super) const CHIP_SIZE: i32 = plx_ui::theme::size::BODY;
+pub(super) const HINT_SIZE: i32 = plx_ui::theme::size::BODY;
 
 pub(super) fn ordinal(kind: Kind) -> u32 {
     match kind {
@@ -66,32 +66,30 @@ pub(super) fn block_h(kind: Kind, band: f32) -> f32 {
 pub(super) fn caption_band(band: f32) -> f32 {
     plx_ui::consts::UNDER_LABEL_AIR + band
 }
-pub(super) fn recent(slot: usize, scroll: f32) -> Rect {
-    Rect::new(
-        MARGIN_X,
-        CONTENT_TOP + plx_ui::table::HDR_H + slot as f32 * plx_ui::table::ROW_H - scroll,
-        820.0,
-        plx_ui::table::ROW_H,
-    )
+
+/// The recent-search chips and then Clear, left to right from the field's left edge, each with
+/// the label it draws; `y` is 0, the row's top. Terms share the width left after Clear evenly
+/// and are elided to it, so the whole row fits under the field.
+pub(super) fn chips(terms: &[String], measure: &dyn plx_machine::machine::Measure) -> Vec<(Rect, String)> {
+    let cstr = |s: &str| std::ffi::CString::new(s).unwrap_or_default();
+    let pill = |label: &str| plx_ui::widgets::Button::pill_w_measured(&cstr(label), CHIP_SIZE, true, false, measure);
+    let clear = plx_platform::i18n::msg::browse_search_clear();
+    let n = terms.len().max(1) as f32;
+    let budget = ((FIELD.w - pill(clear) - n * CHIP_GAP) / n - pill("")).max(0.0);
+    let labels = terms.iter()
+        .map(|term| plx_machine::machine::elide_by(term, budget, false, |s| measure.width(&cstr(s), CHIP_SIZE, true)))
+        .chain([clear.to_owned()]);
+    let mut x = FIELD.x;
+    labels.map(|label| {
+        let rect = Rect::new(x, 0.0, pill(&label), CHIP_H);
+        x += rect.w + CHIP_GAP;
+        (rect, label)
+    }).collect()
 }
-pub(super) fn clear(terms: usize, scroll: f32, measure: &dyn plx_machine::machine::Measure) -> Rect {
-    clear_below(recent(terms.min(RECENT_CAP), scroll).y, measure)
-}
-/// The Clear control under a recents block whose last row ends at `list_end`.
-pub(super) fn clear_below(list_end: f32, measure: &dyn plx_machine::machine::Measure) -> Rect {
-    let width = plx_ui::widgets::Button::pill_w_measured(
-        plx_platform::i18n::msg::browse_search_clear_c(),
-        plx_ui::theme::size::BODY,
-        false,
-        false,
-        measure,
-    );
-    Rect::new(
-        MARGIN_X + plx_ui::table::CONTENT_X,
-        list_end + plx_ui::theme::space::MD,
-        width,
-        CLEAR_H,
-    )
+
+/// The top of the hint line: under the chips, or where they would be when there are none.
+pub(super) fn hint_y(chips: bool) -> f32 {
+    if chips { CONTENT_TOP + CHIP_H + plx_ui::theme::space::MD } else { CONTENT_TOP }
 }
 
 pub(super) fn empty_band(editing: bool) -> Rect {
@@ -103,25 +101,26 @@ pub(super) fn empty_band(editing: bool) -> Rect {
 mod tests {
     use super::*;
 
-    struct Measure;
-    impl plx_machine::machine::Measure for Measure {
-        fn width(&self, _: &std::ffi::CStr, _: i32, _: bool) -> f32 {
-            0.0
+    #[test]
+    fn the_chip_row_fits_under_the_field_however_long_the_terms() {
+        let measure = plx_ui::fixture::FixtureMeasure;
+        let long = "a very long remembered search term that would never fit".to_owned();
+        let row = chips(&[long.clone(), long.clone(), long.clone(), long], &measure);
+        assert_eq!(row.len(), 5, "four terms and Clear");
+        assert_eq!(row[0].0.x, FIELD.x);
+        for pair in row.windows(2) {
+            assert!(pair[1].0.x > pair[0].0.x + pair[0].0.w, "left to right, apart");
         }
-        fn cap_h(&self, _: i32) -> f32 {
-            0.0
-        }
-        fn line_h(&self, _: i32) -> f32 {
-            0.0
-        }
+        assert!(row[4].0.x + row[4].0.w <= FIELD.x + FIELD.w, "Clear ends inside the field's width");
+        assert!(row[0].1.ends_with('\u{2026}'), "a long term is elided: {}", row[0].1);
+        let short = chips(&["up".to_owned()], &measure);
+        assert_eq!(short[0].1, "up", "a short term is kept whole");
     }
 
     #[test]
-    fn clear_geometry_stays_at_the_recents_cap() {
-        let measure = Measure;
-        let capped = clear(RECENT_CAP, 0.0, &measure);
-        let overlong = clear(RECENT_CAP + 1, 0.0, &measure);
-        assert_eq!(overlong.y, capped.y);
+    fn the_hint_line_sits_under_the_chips_or_takes_their_place() {
+        assert_eq!(hint_y(false), CONTENT_TOP);
+        assert!(hint_y(true) >= CONTENT_TOP + CHIP_H);
     }
 
     fn full() -> f32 {
@@ -160,13 +159,9 @@ mod tests {
         assert_eq!(floor, 756.0);
     }
 
-    /// Legacy `ui/search/mod.rs`'s `the_content_line_clears_the_documents_head`: the document's
-    /// head is the field plus its scope line, and both are measured off [`FIELD`] — so this is the
-    /// one assertion that keeps the three numbers agreeing when any of them moves. Without it
-    /// shelf 0's heading would be drawn over the scope line at rest.
     #[test]
     fn the_content_line_clears_the_documents_head() {
-        let head_bottom = SCOPE_Y + SCOPE_H;
+        let head_bottom = FIELD.y + FIELD.h;
         assert!(
             CONTENT_TOP > head_bottom,
             "content starts at {CONTENT_TOP} inside a head that ends at {head_bottom}"
@@ -174,13 +169,13 @@ mod tests {
     }
 
     #[test]
-    fn a_full_block_finishes_clear_of_the_raised_keyboard() {
+    fn the_hint_under_the_chips_finishes_clear_of_the_raised_keyboard() {
         let kbd_top = SCR_H - KEYBOARD_H;
-        let bottom = clear(RECENT_CAP, 0.0, &Measure).y + CLEAR_H;
+        let bottom = hint_y(true) + HINT_SIZE as f32 * 1.35;
         let clearance = kbd_top - bottom;
         assert!(
             clearance >= plx_ui::theme::space::LG,
-            "a full block ends at {bottom} and the keyboard starts at {kbd_top} — {clearance}px"
+            "the hint ends at {bottom} and the keyboard starts at {kbd_top} — {clearance}px"
         );
     }
 }

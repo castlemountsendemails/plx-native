@@ -3275,7 +3275,14 @@ pub(crate) fn nav_tab(
             rig.enter_library(kind);
             AppArg::Library
         }
-        HomeTab::Search => AppArg::Search,
+        HomeTab::Search => {
+            // Arriving from another page opens Search empty, as stock Plex does. BACK from a
+            // result never comes through here, so it keeps its query.
+            if d.top_arg() != Some(&AppArg::Search) {
+                rig.search_run(plx_data::stores::search::SearchCmd::SetQuery(String::new()));
+            }
+            AppArg::Search
+        }
         HomeTab::Watchlist => AppArg::Watchlist,
         HomeTab::More => {
             rig.chrome.set_more_open(!rig.chrome.more_open());

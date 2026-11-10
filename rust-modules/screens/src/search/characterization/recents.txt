@@ -1,28 +1,26 @@
 0x53454100 Row { wrap: false } seat=First edge=[Geometric, Geometric, Stop, Stop] len=1 elem=Bare extent=[96.0 138.0 1728.0 80.0]
-0x53454101 Column seat=Remembered edge=[Geometric, Geometric, Stop, Stop] len=4 elem=Bare extent=[96.0 340.0 820.0 60.0]
-0x53454102 Row { wrap: false } seat=First edge=[Geometric, Stop, Stop, Stop] len=1 elem=Control extent=[128.0 604.0 362.0 60.0]
+0x53454101 Row { wrap: false } seat=First edge=[Geometric, Geometric, Stop, Stop] len=5 elem=Bare extent=[96.0 300.0 196.2 60.0]
 --
 field: up=- down=- left=- right=-
-recent0: up=- down=recent1 left=- right=-
-recent1: up=recent0 down=recent2 left=- right=-
-recent2: up=recent1 down=recent3 left=- right=-
-recent3: up=recent2 down=- left=- right=-
-clear: up=- down=- left=- right=-
+recent0: up=- down=- left=- right=recent1
+recent1: up=- down=- left=recent0 right=recent2
+recent2: up=- down=- left=recent1 right=recent3
+recent3: up=- down=- left=recent2 right=clear
+clear: up=- down=- left=recent3 right=-
 --
 field: rect=[96.0 138.0 1728.0 80.0] rest=[96.0 138.0 1728.0 80.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
-recent0: rect=[96.0 340.0 820.0 60.0] rest=[96.0 340.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
-recent1: rect=[96.0 400.0 820.0 60.0] rest=[96.0 400.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(1)
-recent2: rect=[96.0 460.0 820.0 60.0] rest=[96.0 460.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(2)
-recent3: rect=[96.0 520.0 820.0 60.0] rest=[96.0 520.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(3)
-clear: rect=[128.0 604.0 362.0 60.0] rest=[128.0 604.0 362.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
+recent0: rect=[96.0 300.0 196.2 60.0] rest=[96.0 300.0 196.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
+recent1: rect=[308.2 300.0 210.2 60.0] rest=[308.2 300.0 210.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(1)
+recent2: rect=[534.4 300.0 210.2 60.0] rest=[534.4 300.0 210.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(2)
+recent3: rect=[760.6 300.0 224.2 60.0] rest=[760.6 300.0 224.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(3)
+clear: rect=[1000.8 300.0 392.2 60.0] rest=[1000.8 300.0 392.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(4)
 --
 field: rect=[96.0 138.0 1728.0 80.0] rest=[96.0 138.0 1728.0 80.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
-recent0: rect=[96.0 340.0 820.0 60.0] rest=[96.0 340.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
-recent1: rect=[96.0 400.0 820.0 60.0] rest=[96.0 400.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(1)
-recent2: rect=[96.0 460.0 820.0 60.0] rest=[96.0 460.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(2)
-recent3: rect=[96.0 520.0 820.0 60.0] rest=[96.0 520.0 820.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(3)
-clear: rect=[128.0 604.0 362.0 60.0] rest=[128.0 604.0 362.0 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
+recent0: rect=[96.0 300.0 196.2 60.0] rest=[96.0 300.0 196.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(0)
+recent1: rect=[308.2 300.0 210.2 60.0] rest=[308.2 300.0 210.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(1)
+recent2: rect=[534.4 300.0 210.2 60.0] rest=[534.4 300.0 210.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(2)
+recent3: rect=[760.6 300.0 224.2 60.0] rest=[760.6 300.0 224.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(3)
+clear: rect=[1000.8 300.0 392.2 60.0] rest=[1000.8 300.0 392.2 60.0] clip=[0.0 130.0 1920.0 950.0] index=Some(4)
 --
 0x53454100 -> field
 0x53454101 -> recent0
-0x53454102 -> clear

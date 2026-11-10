@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.35] - 2026-11-10
+
+### Changed
+- Search: the empty search page now looks like stock Plex's. The search box is a box with a thin grey outline that reads "Search", with its text the same size as the chips under it. Recent searches are one row of up to four chips ending in "Clear Search History", with "You can search titles, people, collections and more…" under them. The "Searching <server>" line, the RECENT SEARCHES heading and "Nothing searched yet" are gone, and so is the warning that named a server that couldn't be reached. Tried on the HD, except the box, which is not yet tried on any stick. Shared code: the LG app gets the same page.
+
+## [0.2.34] - 2026-11-09
+
+### Changed
+- Fire TV: BACK on a top-level screen now opens the Exit/Cancel prompt; before, it did nothing. Exit closes the app completely, so the next launch from the tile starts fresh; Home still leaves the app running in the background. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
+## [0.2.33] - 2026-11-09
+
+### Fixed
+- Fire TV: in search, BACK closed the keyboard and it came straight back. The Fire keyboard sends an Enter as it closes, which the search field took as OK. That Enter is now ignored; the keyboard's own Enter key still closes it and saves the search. Tried on the HD, the Stick 4K and the 3rd gen. Fire TV only: the LG app is unchanged.
+- Fire TV: the text box at the top of the Fire keyboard stayed empty while typing a search. It now shows the search field as it is: each letter as it is typed, a deleted letter gone, and the current search when the keyboard opens again, after picking a recent search, or after coming back from a result. Tried on the HD, the Stick 4K and the 3rd gen. Shared code: the LG app's search field is unchanged; the code that reads it for the Fire keyboard is built only for Fire TV.
+
+## [0.2.32] - 2026-11-06
+
+### Changed
+- Fire TV: the app's log file no longer grows without limit. Each launch starts a new file and keeps the previous launch's beside it; each stops at 1 MB with a final "log truncated" line. The log still goes to logcat in full. "Delete all local data" removes both files. Not yet tried on any stick. Shared code: the LG app writes its log exactly as before; only the delete list gains the new file name.
+
+## [0.2.31] - 2026-11-06
+
+### Added
+- Fire TV: the diagnostics panel and the support lines now name the stick and its Android version ("Android 9 · api 28", "AFTSS · mt8695") instead of "unknown OS" and "unknown device". Not yet tried on any stick. Shared code: the LG app prints exactly what it did before.
+- Fire TV: the app now follows the stick's language and 12/24-hour clock setting instead of falling back to English. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+- Fire TV: the wrong-clock notice now appears as an on-screen pop-up message, as it does on the LG. Not yet tried on any stick. Fire TV only: the LG app is unchanged.
+
 ## [0.2.30] - 2026-11-05
 
 ### Fixed

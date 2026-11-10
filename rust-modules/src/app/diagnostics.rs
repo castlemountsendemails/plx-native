@@ -472,7 +472,9 @@ impl Diagnostics {
 /// and drawn in full, so the array's length remains the semantic contract.
 fn header(ps: &plx_media::route::PlaybackSession, d: &plx_media::player::Diag, now: u32) -> [String; 2] {
     let w = plx_platform::tv::device::info();
-    let os = if w.major == 0 {
+    let os = if cfg!(target_os = "android") && !w.release.is_empty() {
+        format!("{} {} · api {}", w.name, w.release, w.api)
+    } else if w.major == 0 {
         plx_platform::i18n::msg::browse_diagnostics_unknown_os().to_string()
     } else {
         format!("webOS {} · api {}", w.release, w.api)

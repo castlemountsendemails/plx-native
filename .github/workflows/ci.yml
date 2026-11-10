@@ -715,7 +715,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.SDL_PREFIX }}
-          key: android-sdl-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('ci/build-android-sdl2.sh', 'ci/build-android-sdl2-ttf.sh', 'ci/dependencies.json') }}
+          key: android-sdl-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('ci/build-android-sdl2.sh', 'ci/build-android-sdl2-ttf.sh', 'ci/dependencies.json', 'ci/sdl2-extracted-text.patch') }}
 
       - name: Build SDL2 and SDL2_ttf with the NDK
         if: steps.sdl-cache.outputs.cache-hit != 'true'

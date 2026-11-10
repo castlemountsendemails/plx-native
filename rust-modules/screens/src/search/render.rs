@@ -1,7 +1,6 @@
 //! Paint from the instance and its retained frame views. No live Search/roster/focus reads.
 use super::*;
 use crate::registry::tile_facts;
-use plx_data::search::scope::{ScopeSource, SourceScopeSnapshot};
 use plx_ui::consts::{MARGIN_X, SCR_H};
 use plx_ui::label::{HAlign, Label, VAlign};
 use plx_ui::widgets::{Art, Button, StatusKind, StatusOverlay};
@@ -14,6 +13,11 @@ const CARET_GAP: f32 = 8.0;
 const GHOST_GAP: f32 = theme::size::BODY as f32;
 const COUNT_GAP: f32 = theme::space::SM;
 const SOURCE_PAD: f32 = theme::space::XS;
+/// The field's type: the recent-search chips' own, so the box and the row under it read as one set.
+const FIELD_TEXT: c_int = layout::CHIP_SIZE;
+const FIELD_PAD: f32 = theme::space::MD;
+const FIELD_RAD: f32 = 8.0;
+const FIELD_RULE_W: f32 = 1.5;
 
 #[derive(Default)]
 pub(super) struct Resources {
@@ -23,10 +27,6 @@ pub(super) struct Resources {
     head: CString,
     run_w: f32,
     head_w: f32,
-    scope: Option<SourceScopeSnapshot>,
-    scope_line: Option<CString>,
-    recents: Option<plx_data::search::recents::RecentsSnapshot>,
-    recent_runs: Vec<CString>,
     titles: [CString; 5],
     count_keys: [Option<(Kind, usize)>; 5],
     counts: [CString; 5],
@@ -56,50 +56,12 @@ impl Resources {
             };
             let (_, head) = run_and_head(q, caret);
             self.head = cstring(head);
-            self.run_w = cx.measure.width(&self.run, theme::size::HERO, true);
+            self.run_w = cx.measure.width(&self.run, FIELD_TEXT, true);
             self.head_w = if q.trim().is_empty() {
                 0.0
             } else {
-                cx.measure.width(&self.head, theme::size::HERO, true)
+                cx.measure.width(&self.head, FIELD_TEXT, true)
             };
-        }
-        let scope = H::search(cx).scope();
-        if self
-            .scope
-            .as_ref()
-            .is_none_or(|old| !old.same_publication(scope))
-        {
-            self.scope_line = scope_text(scope.sources()).map(|line| {
-                cstring(&elide(
-                    &line,
-                    layout::FIELD.w,
-                    theme::size::CAPTION,
-                    false,
-                    cx.measure,
-                ))
-            });
-            self.scope = Some(scope.clone());
-        }
-        let recents = H::search(cx).recents();
-        if self
-            .recents
-            .as_ref()
-            .is_none_or(|old| !old.same_publication(recents))
-        {
-            self.recent_runs = recents
-                .terms()
-                .iter()
-                .map(|term| {
-                    cstring(&elide(
-                        term,
-                        820.0 - 2.0 * plx_ui::table::CONTENT_X,
-                        theme::size::HEADLINE,
-                        true,
-                        cx.measure,
-                    ))
-                })
-                .collect();
-            self.recents = Some(recents.clone());
         }
         let keys = count_keys(H::search(cx).shelves());
         for (i, kind) in plx_data::search::KINDS.iter().enumerate() {
@@ -139,7 +101,7 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
     screen.ground.draw(p, Rect::FULL);
     field(screen, f, p);
     let p = p.alpha(screen.fade.alpha());
-    if !screen.recents.is_empty() {
+    if !screen.real_query() {
         recents(screen, f, p);
     } else if screen.rows.is_empty() {
         empty(screen, f, p);
@@ -194,12 +156,14 @@ pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '
 
 fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let data = &screen.render;
-    let rect = Rect::new(
+    let frame = Rect::new(
         layout::FIELD.x,
         layout::FIELD.y - screen.stack.scroll(),
         layout::FIELD.w,
         layout::FIELD.h,
     );
+    p.rect_rimmed_w(frame, FIELD_RAD, theme::FIELD_FILL, theme::FIELD_FILL, theme::FIELD_RULE, 0.0, FIELD_RULE_W);
+    let rect = Rect::new(frame.x + FIELD_PAD, frame.y, frame.w - 2.0 * FIELD_PAD, frame.h);
     let blank = data.query.trim().is_empty();
     let hot = screen.hot.pos;
     let ink = if blank {
@@ -213,19 +177,19 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         rect.w,
         screen.editing,
     );
-    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(theme::size::HERO, 1);
+    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(FIELD_TEXT, 1);
     let pad = descent_pad(
         rect.h,
-        plx_gfx::text::text_height(theme::size::HERO, 1),
+        plx_gfx::text::text_height(FIELD_TEXT, 1),
         cap_top,
         cap_base,
     );
     {
         let _clip = f.clip(p, Rect::new(rect.x, rect.y, rect.w, rect.h + pad));
-        Label::new(data.run.as_ptr(), theme::size::HERO, ink)
+        Label::new(data.run.as_ptr(), FIELD_TEXT, ink)
             .bold()
             .draw(p, Rect::new(rect.x + run_dx, rect.y, rect.w, rect.h));
-        let text_y = plx_gfx::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
+        let text_y = plx_gfx::text::text_vcenter_y(FIELD_TEXT, 1, rect.cy());
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
@@ -241,7 +205,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
         if ghost_shown(&data.query) {
-            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
+            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, FIELD_TEXT, 1, text_y);
             p.text(
                 plx_platform::i18n::msg::browse_search_one_more_c().as_ptr(),
                 rect.x + caret_dx + CARET_W + GHOST_GAP,
@@ -253,83 +217,24 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
     }
-    if let Some(line) = &data.scope_line {
-        Label::new(line.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY).draw(
-            p,
-            Rect::new(
-                rect.x,
-                layout::SCOPE_Y - screen.stack.scroll(),
-                rect.w,
-                layout::SCOPE_H,
-            ),
-        );
-    }
     stop(screen, FIELD, ElemKind::Bare, f, p);
 }
 
 fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let env = Env::inert();
-    Label::new(
-        plx_platform::i18n::msg::browse_search_recents_c().as_ptr(),
-        theme::size::CAPTION,
-        theme::TEXT_TERTIARY,
-    )
-    .draw(
-        p,
-        Rect::new(
-            MARGIN_X + plx_ui::table::CONTENT_X,
-            layout::CONTENT_TOP - screen.stack.scroll(),
-            0.0,
-            plx_ui::table::HDR_H,
-        ),
-    );
-    let shown = screen.recents.len().min(layout::RECENT_CAP);
-    for (index, elem) in screen.recents.iter().take(shown).enumerate() {
-        let Some(key) = screen.keys.iter().find(|key| key.elem == *elem) else {
-            continue;
-        };
-        let Identity::Recent(_) = &key.identity else {
-            continue;
-        };
-        let rect = layout::recent(index, screen.stack.scroll());
-        let focused = f.cx.focus.current == Some(screen.key(*elem));
-        if focused {
-            p.rrect(
-                Rect::new(
-                    rect.x + plx_ui::table::SIDE,
-                    rect.y + plx_ui::table::PILL_INSET,
-                    rect.w - 2.0 * plx_ui::table::SIDE,
-                    rect.h - 2.0 * plx_ui::table::PILL_INSET,
-                ),
-                plx_ui::table::PILL_RAD,
-                plx_ui::table::PILL_RAD,
-                theme::ACCENT,
-            );
-        }
-        let Some(run) = screen.render.recent_runs.get(index) else {
-            continue;
-        };
-        Label::new(
-            run.as_ptr(),
-            theme::size::HEADLINE,
-            if focused {
-                theme::ACCENT_INK
-            } else {
-                theme::TEXT_PRIMARY
-            },
-        )
-        .bold()
-        .draw(
-            p,
-            Rect::new(rect.x + plx_ui::table::CONTENT_X, rect.y, 0.0, rect.h),
-        );
-        stop(screen, *elem, ElemKind::Bare, f, p);
+    let y = layout::CONTENT_TOP - screen.stack.scroll();
+    let elems = screen.recents.iter().copied().chain([CLEAR]);
+    for ((rect, label), elem) in screen.chips.iter().zip(elems) {
+        let icon = if elem == CLEAR { plx_ui::icons::Icon::Close } else { plx_ui::icons::Icon::Clock };
+        Button::new(label.as_ptr(), layout::CHIP_SIZE, Rect { y, ..*rect })
+            .icon(icon)
+            .focused(f.cx.focus.current == Some(screen.key(elem)))
+            .draw(&env, p);
+        stop(screen, elem, ElemKind::Bare, f, p);
     }
-    let rect = layout::clear(shown, screen.stack.scroll(), f.cx.measure);
-    Button::new(plx_platform::i18n::msg::browse_search_clear_c().as_ptr(), theme::size::BODY, rect)
-        .focused(f.cx.focus.current == Some(screen.key(CLEAR)))
-        .draw(&env, p);
-    stop(screen, CLEAR, ElemKind::Control, f, p);
+    Label::new(plx_platform::i18n::msg::browse_search_hint_c().as_ptr(), layout::HINT_SIZE, theme::TEXT_TERTIARY)
+        .draw(p, Rect::new(MARGIN_X, layout::hint_y(!screen.chips.is_empty()) - screen.stack.scroll(), 0.0,
+            layout::HINT_SIZE as f32 * 1.35));
 }
 
 fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Painter) {
@@ -348,22 +253,17 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
             .draw(&Env::inert(), p);
         return;
     }
-    let header = header_of(empty);
-    let statement = if empty == EmptyState::NoResults {
-        let shell =
-            f.cx.measure
-                .width_str(&plx_platform::i18n::msg::browse_search_no_results(""), theme::size::TITLE, true);
-        no_results_line(&elide(
-            screen.draft.query().trim(),
-            1200.0 - shell,
-            theme::size::TITLE,
-            true,
-            f.cx.measure,
-        ))
-    } else {
-        plx_platform::i18n::msg::browse_search_not_yet().into()
-    };
-    let statement = cstring(&statement);
+    let header = plx_platform::i18n::msg::browse_search_results_c();
+    let shell =
+        f.cx.measure
+            .width_str(&plx_platform::i18n::msg::browse_search_no_results(""), theme::size::TITLE, true);
+    let statement = cstring(&no_results_line(&elide(
+        screen.draft.query().trim(),
+        1200.0 - shell,
+        theme::size::TITLE,
+        true,
+        f.cx.measure,
+    )));
     let hh = f.cx.measure.cap_h(theme::size::CAPTION);
     let sh = f.cx.measure.cap_h(theme::size::TITLE);
     let top = rect.y + (rect.h - hh - sh - theme::space::MD) * 0.5;
@@ -499,7 +399,6 @@ fn ink_target(editing: bool) -> [f32; 4] {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EmptyState {
-    NotYet,
     NoResults,
     Fault,
 }
@@ -507,17 +406,9 @@ enum EmptyState {
 fn empty_state(state: plx_data::search::State, has_shelves: bool) -> Option<EmptyState> {
     use plx_data::search::State;
     match state {
-        State::Idle => Some(EmptyState::NotYet),
-        State::Searching => None,
+        State::Idle | State::Searching => None,
         State::Ready => (!has_shelves).then_some(EmptyState::NoResults),
         State::Failed => Some(EmptyState::Fault),
-    }
-}
-
-fn header_of(state: EmptyState) -> &'static CStr {
-    match state {
-        EmptyState::NoResults => plx_platform::i18n::msg::browse_search_results_c(),
-        _ => plx_platform::i18n::msg::browse_search_recents_c(),
     }
 }
 
@@ -553,91 +444,6 @@ fn heading_flow(
     dx
 }
 
-fn source_label(source: &ScopeSource) -> String {
-    if source.household {
-        return if source.name.is_empty() {
-            plx_platform::i18n::msg::browse_search_your_server().into()
-        } else {
-            source.name.clone()
-        };
-    }
-    let named: Vec<_> = source
-        .libraries
-        .iter()
-        .filter(|name| !name.is_empty())
-        .collect();
-    if named.len() == 1 {
-        named[0].clone()
-    } else if !source.handle.is_empty() {
-        source.handle.clone()
-    } else {
-        plx_platform::i18n::msg::browse_search_shared_server().into()
-    }
-}
-fn join(names: &[String]) -> String {
-    match names {
-        [] => String::new(),
-        [one] => one.clone(),
-        [a, b] => plx_platform::i18n::msg::browse_search_join(a, b),
-        _ => plx_platform::i18n::msg::browse_search_join(&names[..names.len() - 1].join(", "), names.last().unwrap()),
-    }
-}
-fn name_set(sources: &[&ScopeSource]) -> String {
-    let shares: Vec<_> = sources.iter().filter(|source| !source.household).collect();
-    if shares.len() <= 2 {
-        return join(
-            &sources
-                .iter()
-                .map(|source| source_label(source))
-                .collect::<Vec<_>>(),
-        );
-    }
-    let libraries = shares
-        .iter()
-        .map(|source| {
-            source
-                .libraries
-                .iter()
-                .filter(|name| !name.is_empty())
-                .count()
-        })
-        .sum::<usize>();
-    let mut names: Vec<_> = sources
-        .iter()
-        .filter(|source| source.household)
-        .map(|source| source_label(source))
-        .collect();
-    names.push(if libraries > 0 {
-        plx_platform::i18n::msg::browse_search_shared_libraries(libraries as i64)
-    } else {
-        plx_platform::i18n::msg::browse_search_shared_sources(shares.len() as i64)
-    });
-    join(&names)
-}
-fn scope_text(sources: &[ScopeSource]) -> Option<String> {
-    if sources.is_empty() {
-        return None;
-    }
-    let (live, down): (Vec<_>, Vec<_>) = sources.iter().partition(|source| source.live);
-    if down.is_empty() {
-        let mut line = plx_platform::i18n::msg::browse_search_searching(&name_set(&live));
-        let mut shares = live
-            .iter()
-            .filter(|source| !source.household && !source.handle.is_empty());
-        if let (2, Some(source), None) = (live.len(), shares.next(), shares.next()) {
-            if source_label(source) != source.handle {
-                line.push_str(" · ");
-                line.push_str(&source.handle);
-            }
-        }
-        Some(line)
-    } else if live.is_empty() {
-        Some(plx_platform::i18n::msg::browse_search_unreachable(&name_set(&down)))
-    } else {
-        Some(plx_platform::i18n::msg::browse_search_partial(&name_set(&live), &name_set(&down)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,62 +468,21 @@ mod tests {
         use plx_platform::i18n::{LocaleContext, Preference, msg};
         let be = LocaleContext::resolve(Preference::Be, None, None, None, None);
         assert_eq!(msg::browse_search_no_results_in(&be, "Кіна {query}"), "Няма вынікаў для «Кіна {query}»");
-        let es = LocaleContext::resolve(Preference::Es, None, None, None, None);
-        assert_eq!(msg::browse_search_partial_in(&es, "Biblioteca A", "Servidor B"),
-            "No se puede conectar con Servidor B · solo hay resultados de Biblioteca A");
-        assert_eq!(msg::browse_search_placeholder_c_in(&be).to_str().unwrap(), "Пошук у вашай бібліятэцы");
+        assert_eq!(msg::browse_search_placeholder_c_in(&be).to_str().unwrap(), "Пошук");
+    }
+
+    #[test]
+    fn the_empty_page_reads_like_stock_plex() {
+        use plx_platform::i18n::{LocaleContext, Preference, msg};
+        let en = LocaleContext::resolve(Preference::En, None, None, None, None);
+        assert_eq!(msg::browse_search_placeholder_in(&en), "Search");
+        assert_eq!(msg::browse_search_clear_in(&en), "Clear Search History");
+        assert_eq!(empty_state(State::Idle, false), None, "no query draws no statement, only the hint");
+        assert_eq!(empty_state(State::Ready, false), Some(EmptyState::NoResults));
     }
 
     use plx_data::search::{Item, Kind, State};
 
-    fn own(name: &str) -> ScopeSource {
-        ScopeSource {
-            sid: plx_plex::plex::ServerId::UNSET,
-            name: name.into(),
-            libraries: Vec::new(),
-            handle: String::new(),
-            owned: true,
-            home: false,
-            owner_id: 0,
-            household: true,
-            live: true,
-        }
-    }
-    fn share(lib: &str, handle: &str) -> ScopeSource {
-        ScopeSource {
-            sid: plx_plex::plex::ServerId::UNSET,
-            name: "a-hostname".into(),
-            libraries: vec![lib.into()],
-            handle: handle.into(),
-            owned: false,
-            home: false,
-            owner_id: 0,
-            household: false,
-            live: true,
-        }
-    }
-    /// A managed/Guest profile's own household server: plex.tv sends it `owned: false` (the
-    /// account does not own it) but it is the viewer's own family server, not a stranger's share —
-    /// `is_household` (`plex/servers.rs:272`) is true and `owner_credit` deliberately returns no
-    /// handle for it (`plex/servers.rs:253-280`'s doc table). It must take the same branch `own`
-    /// does: named when it has a name, "your server" when it does not.
-    fn household(name: &str) -> ScopeSource {
-        ScopeSource {
-            sid: plx_plex::plex::ServerId::UNSET,
-            name: name.into(),
-            libraries: Vec::new(),
-            handle: String::new(),
-            owned: false,
-            home: true,
-            owner_id: 111_111,
-            household: true,
-            live: true,
-        }
-    }
-    fn down(mut source: ScopeSource) -> ScopeSource {
-        source.live = false;
-        source
-    }
     fn cs(s: &str) -> CString {
         CString::new(s).expect("test literal")
     }
@@ -742,8 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn the_scope_block_is_one_line_because_the_minimum_hint_lives_in_the_field() {
-        assert_eq!(layout::SCOPE_H, theme::size::CAPTION as f32 * 1.35);
+    fn the_one_more_ghost_shows_only_one_character_short() {
         assert!(ghost_shown("a"));
         assert!(!ghost_shown(""));
         assert!(!ghost_shown("ab"));
@@ -893,211 +657,17 @@ mod tests {
     }
 
     #[test]
-    fn one_source_is_named_and_only_no_source_is_silent() {
-        assert_eq!(
-            scope_text(&[own("nas-home")]).unwrap(),
-            "Searching nas-home"
-        );
-        assert_eq!(scope_text(&[own("")]).unwrap(), "Searching your server");
-        assert_eq!(
-            scope_text(&[share("Film Club", "friend")]).unwrap(),
-            "Searching Film Club"
-        );
-        assert_eq!(
-            scope_text(&[down(own("nas-home"))]).unwrap(),
-            "nas-home unreachable"
-        );
-        assert_eq!(scope_text(&[]), None);
-    }
-
-    /// A managed/Guest profile's household server was the whole bug: `source_label`/`name_set` read
-    /// raw `owned`, which plex.tv sends `false` for a household grant, so with no other source in
-    /// scope the line fell through to the library-count branch and, with an empty handle, read the
-    /// literal "a shared server" — describing the viewer's own family server as a stranger's. The
-    /// fix reads `household` instead, so a lone household source takes the same branch `own` does.
-    #[test]
-    fn a_household_profiles_only_source_is_named_not_read_as_a_shared_server() {
-        assert_eq!(
-            scope_text(&[household("nas-home")]).unwrap(),
-            "Searching nas-home"
-        );
-        assert_eq!(
-            scope_text(&[household("")]).unwrap(),
-            "Searching your server"
-        );
-    }
-
-    /// With a household source AND a genuine friend's share in scope, only the friend is a "share":
-    /// the friend keeps its handle attribution and its place in the shared-library count, while the
-    /// household source is named exactly like an owned server and never counted as shared. This is
-    /// the case the doc table at `plex/servers.rs:253-280` draws the line on — household and a
-    /// friend's share are graded differently — and the wording must not blur it.
-    #[test]
-    fn a_household_source_is_named_while_a_friends_share_stays_credited_and_counted() {
-        assert_eq!(
-            scope_text(&[household("nas-home"), share("Film Club", "friend")]).unwrap(),
-            "Searching nas-home and Film Club · friend"
-        );
-        let many = vec![
-            household("nas-home"),
-            share("A", "ann"),
-            share("B", "bob"),
-            share("C", "cat"),
-        ];
-        assert_eq!(
-            scope_text(&many).unwrap(),
-            "Searching nas-home and 3 shared libraries",
-            "the household source must not inflate — or hide inside — the shared-library count"
-        );
-    }
-
-    /// An unnamed, unhandled friend's share must still read as "a shared server" even when a
-    /// household source is also in scope — the household branch must not accidentally swallow the
-    /// external-share fallback wording.
-    #[test]
-    fn an_unnamed_friends_share_still_reads_as_a_shared_server_beside_a_household_source() {
-        assert_eq!(
-            scope_text(&[household("nas-home"), share("", "")]).unwrap(),
-            "Searching nas-home and a shared server"
-        );
-    }
-
-    #[test]
-    fn two_live_sources_name_both_and_attribute_the_share() {
-        assert_eq!(
-            scope_text(&[own("nas-home"), share("Film Club", "friend")]).unwrap(),
-            "Searching nas-home and Film Club · friend"
-        );
-    }
-
-    #[test]
-    fn a_share_is_named_by_its_library_and_never_by_its_hostname() {
-        let t = scope_text(&[own("nas-home"), share("Film Club", "friend")]).unwrap();
-        assert!(t.contains("Film Club"));
-        assert!(!t.contains("a-hostname"));
-        assert!(t.contains("nas-home"));
-        let mut two = share("Film Club", "friend");
-        two.libraries = vec!["Film Club".into(), "Archive".into()];
-        let t = scope_text(&[own("nas-home"), two]).unwrap();
-        assert_eq!(t, "Searching nas-home and friend");
-        assert_eq!(t.matches("friend").count(), 1);
-    }
-
-    #[test]
-    fn many_shares_collapse_to_a_count_rather_than_becoming_a_list() {
-        let mk = |lib: &str, handle: &str| share(lib, handle);
-        let many = vec![
-            own("nas-home"),
-            mk("A", "ann"),
-            mk("B", "bob"),
-            mk("C", "cat"),
-        ];
-        assert_eq!(
-            scope_text(&many).unwrap(),
-            "Searching nas-home and 3 shared libraries"
-        );
-        let mut blank = vec![
-            own("nas-home"),
-            share("", "ann"),
-            share("", "bob"),
-            share("", "cat"),
-        ];
-        for source in blank.iter_mut().skip(1) {
-            source.libraries.clear();
-        }
-        assert_eq!(
-            scope_text(&blank).unwrap(),
-            "Searching nas-home and 3 shared sources"
-        );
-    }
-
-    #[test]
-    fn a_share_with_no_handle_is_named_but_not_attributed() {
-        assert_eq!(
-            scope_text(&[own("nas-home"), share("Film Club", "")]).unwrap(),
-            "Searching nas-home and Film Club"
-        );
-    }
-
-    #[test]
-    fn an_unreachable_source_names_itself_and_what_is_left() {
-        assert_eq!(
-            scope_text(&[own("nas-home"), down(share("Film Club", "friend"))]).unwrap(),
-            "Film Club unreachable · results from nas-home only"
-        );
-    }
-
-    #[test]
-    fn your_own_server_going_quiet_reads_the_same_way() {
-        assert_eq!(
-            scope_text(&[down(own("nas-home")), share("Film Club", "friend")]).unwrap(),
-            "nas-home unreachable · results from Film Club only"
-        );
-    }
-
-    #[test]
-    fn with_nothing_answering_there_is_no_results_from_clause_to_write() {
-        assert_eq!(
-            scope_text(&[down(own("nas-home")), down(share("Film Club", "friend"))]).unwrap(),
-            "nas-home and Film Club unreachable"
-        );
-    }
-
-    #[test]
-    fn three_sources_list_plainly_and_attribute_none_of_them() {
-        assert_eq!(
-            scope_text(&[
-                own("nas-home"),
-                share("Film Club", "friend"),
-                share("Archive", "pal")
-            ])
-            .unwrap(),
-            "Searching nas-home, Film Club and Archive"
-        );
-    }
-
-    #[test]
-    fn two_shares_are_named_but_neither_is_attributed() {
-        assert_eq!(
-            scope_text(&[share("Film Club", "friend"), share("Archive", "pal")]).unwrap(),
-            "Searching Film Club and Archive"
-        );
-    }
-
-    #[test]
-    fn an_unnamed_source_still_produces_a_sentence() {
-        assert_eq!(
-            scope_text(&[own(""), share("Film Club", "friend")]).unwrap(),
-            "Searching your server and Film Club · friend"
-        );
-        assert_eq!(
-            scope_text(&[own("nas-home"), share("", "")]).unwrap(),
-            "Searching nas-home and a shared server"
-        );
-    }
-
-    #[test]
-    fn an_undescribed_roster_does_not_call_every_machine_yours() {
-        assert_eq!(
-            scope_text(&[own(""), share("", "")]).unwrap(),
-            "Searching your server and a shared server"
-        );
-    }
-
-    #[test]
     fn the_empty_state_preserves_state_and_region_copy() {
         assert_eq!(
             empty_state(State::Ready, false),
             Some(EmptyState::NoResults)
         );
         assert_eq!(empty_state(State::Failed, false), Some(EmptyState::Fault));
-        assert_eq!(empty_state(State::Idle, false), Some(EmptyState::NotYet));
+        assert_eq!(empty_state(State::Idle, false), None);
         assert_eq!(empty_state(State::Searching, false), None);
         assert_eq!(empty_state(State::Ready, true), None);
         assert_eq!(empty_state(State::Failed, true), Some(EmptyState::Fault));
-        assert_eq!(empty_state(State::Idle, true), Some(EmptyState::NotYet));
-        assert_eq!(header_of(EmptyState::NotYet), c"RECENT SEARCHES");
-        assert_eq!(header_of(EmptyState::NoResults), c"SEARCH RESULTS");
+        assert_eq!(empty_state(State::Idle, true), None);
     }
 
     #[test]

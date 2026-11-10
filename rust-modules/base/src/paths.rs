@@ -539,6 +539,7 @@ pub unsafe extern "C" fn plx_runtime_path(
 /// data with a stale second list.
 pub mod runtime_file {
     pub const EVENTS: &str = "plxnative-events.log";
+    pub const EVENTS_PREVIOUS: &str = "plxnative-events.previous.log";
     pub const CRASH: &str = "plxnative-crash.log";
     pub const STDERR: &str = "plxnative-stderr.log";
     pub const STORAGE_DIAGNOSTICS: &str = "plxnative-diag.log";
@@ -547,8 +548,9 @@ pub mod runtime_file {
     pub const GPU_TIME: &str = "plxnative-gputime.jsonl";
     pub const HARDWARE_COUNTERS: &str = "plxnative-hwcnt.jsonl";
 
-    pub const LOGS: [&str; 8] = [
+    pub const LOGS: [&str; 9] = [
         EVENTS,
+        EVENTS_PREVIOUS,
         CRASH,
         STDERR,
         STORAGE_DIAGNOSTICS,

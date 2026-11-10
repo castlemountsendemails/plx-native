@@ -1,0 +1,166 @@
+--- a/org/libsdl/app/SDLActivity.java
++++ b/org/libsdl/app/SDLActivity.java
+@@ -22,6 +22,7 @@
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.os.Handler;
++import android.os.Looper;
+ import android.os.Message;
+ import android.text.Editable;
+ import android.text.InputType;
+@@ -41,6 +42,8 @@
+ import android.view.WindowManager;
+ import android.view.inputmethod.BaseInputConnection;
+ import android.view.inputmethod.EditorInfo;
++import android.view.inputmethod.ExtractedText;
++import android.view.inputmethod.ExtractedTextRequest;
+ import android.view.inputmethod.InputConnection;
+ import android.view.inputmethod.InputMethodManager;
+ import android.widget.Button;
+@@ -1301,6 +1304,13 @@
+         return mSingleton.commandHandler.post(new ShowTextInputTask(x, y, w, h));
+     }
+ 
++    // The app's text field and caret (UTF-16), from any thread. The keyboard's box shows them now
++    // if it is up, and a later raise starts from them.
++    public static void mirrorTextInput(final String text, final int caret) {
++        new Handler(Looper.getMainLooper()).post(() ->
++                SDLInputConnection.mirror(text, caret, mTextEdit == null ? null : mTextEdit.ic));
++    }
++
+     public static boolean isTextInputEvent(KeyEvent event) {
+ 
+         // Key pressed with Ctrl should be sent as SDL_KEYDOWN/SDL_KEYUP and not SDL_TEXTINPUT
+@@ -1940,6 +1950,8 @@
+     @Override
+     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+         ic = new SDLInputConnection(this, true);
++        outAttrs.initialSelStart = outAttrs.initialSelEnd =
++                Selection.getSelectionStart(((SDLInputConnection) ic).getEditable());
+ 
+         outAttrs.inputType = InputType.TYPE_CLASS_TEXT |
+                              InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+@@ -1955,9 +1967,20 @@
+     protected EditText mEditText;
+     protected String mCommittedText = "";
+ 
++    // The app's field as last mirrored; each keyboard raise makes a new connection, seeded from it.
++    // Main thread only.
++    static String sText = "";
++    static int sCaret = 0;
++
++    protected View mView;
++    protected boolean mMonitored;
++    protected int mExtractToken;
++
+     public SDLInputConnection(View targetView, boolean fullEditor) {
+         super(targetView, fullEditor);
+         mEditText = new EditText(SDL.getContext());
++        mView = targetView;
++        setField(sText, sCaret);
+     }
+ 
+     @Override
+@@ -1965,6 +1988,62 @@
+         return mEditText.getEditableText();
+     }
+ 
++    static void mirror(String text, int caret, InputConnection ic) {
++        sText = text;
++        sCaret = caret;
++        if (ic instanceof SDLInputConnection) {
++            ((SDLInputConnection) ic).setField(text, caret);
++            ((SDLInputConnection) ic).report();
++        }
++    }
++
++    // Sets mCommittedText too, so the next updateText sends no scancodes for text the app already holds.
++    private void setField(String text, int caret) {
++        Editable content = getEditable();
++        if (!text.contentEquals(content)) {
++            content.replace(0, content.length(), text);
++            removeComposingSpans(content);
++        }
++        Selection.setSelection(content, Math.max(0, Math.min(caret, content.length())));
++        mCommittedText = text;
++    }
++
++    @Override
++    public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
++        if (request != null && (flags & GET_EXTRACTED_TEXT_MONITOR) != 0) {
++            mMonitored = true;
++            mExtractToken = request.token;
++        }
++        ExtractedText et = extract();
++        Log.i("SDL", "keyboard box: extract length=" + et.text.length() + " caret=" + et.selectionEnd
++                + " monitor=" + mMonitored);
++        return et;
++    }
++
++    // partialStartOffset -1 is a whole snapshot; the default 0 makes the box insert it at its start,
++    // so a second request shows the text twice.
++    private ExtractedText extract() {
++        Editable content = getEditable();
++        ExtractedText et = new ExtractedText();
++        et.text = content.toString();
++        et.partialStartOffset = -1;
++        et.partialEndOffset = -1;
++        et.selectionStart = Selection.getSelectionStart(content);
++        et.selectionEnd = Selection.getSelectionEnd(content);
++        return et;
++    }
++
++    // An IME learns of our edits only from these calls; the box keeps its own copy otherwise.
++    private void report() {
++        Editable content = getEditable();
++        InputMethodManager imm = (InputMethodManager) SDL.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
++        imm.updateSelection(mView, Selection.getSelectionStart(content), Selection.getSelectionEnd(content),
++                getComposingSpanStart(content), getComposingSpanEnd(content));
++        if (mMonitored) {
++            imm.updateExtractedText(mView, mExtractToken, extract());
++        }
++    }
++
+     @Override
+     public boolean sendKeyEvent(KeyEvent event) {
+         /*
+@@ -1994,6 +2073,7 @@
+             return false;
+         }
+         updateText();
++        report();
+         return true;
+     }
+ 
+@@ -2003,6 +2083,7 @@
+             return false;
+         }
+         updateText();
++        report();
+         return true;
+     }
+ 
+@@ -2012,10 +2093,15 @@
+             // Workaround to capture backspace key. Ref: http://stackoverflow.com/questions>/14560344/android-backspace-in-webview-baseinputconnection
+             // and https://bugzilla.libsdl.org/show_bug.cgi?id=2265
+             if (beforeLength > 0 && afterLength == 0) {
++                // The scancodes edit the app's field; the box's copy needs the same delete.
++                int deleted = beforeLength;
+                 // backspace(s)
+                 while (beforeLength-- > 0) {
+                     nativeGenerateScancodeForUnichar('\b');
+                 }
++                super.deleteSurroundingText(deleted, 0);
++                mCommittedText = getEditable().toString();
++                report();
+                 return true;
+            }
+         }
+@@ -2024,6 +2110,7 @@
+             return false;
+         }
+         updateText();
++        report();
+         return true;
+     }
+ 
