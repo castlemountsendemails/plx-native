@@ -444,7 +444,7 @@ fn a_press_of_the_rails_search_item_empties_the_field() {
     assert!(matches!(handled, Handled::Yes));
     assert_eq!(screen.field().0, "", "the field is empty at once, not when the store answers");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
-        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. })))) if query.is_empty())),
+        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. }))) if query.is_empty())),
         "the store drops the query too, so a later mount does not restore it");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Search(SearchReq::Tab(HomeTab::Search))))),
         "the app still moves focus back into the page");
