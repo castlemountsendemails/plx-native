@@ -428,6 +428,29 @@ fn the_recents_cursor_stops_on_the_clear_control() {
     drop(session);
 }
 
+/// Stock Plex opens Search on an empty field with the recent terms under it. A press of the
+/// rail's Search item while the page is open used to keep the old query and its results.
+#[test]
+fn a_press_of_the_rails_search_item_empties_the_field() {
+    let _serial = plx_base::testlock::serial();
+    let session = remembering("owned-search-fresh", &["gromit"]);
+    let mut fixture = Fixture::new();
+    fixture.query("lu");
+    let mut screen = fixture.screen();
+    assert_eq!(screen.field().0, "lu", "premise: the page opened on a query");
+
+    let rail = plx_ui::widgets::TAB_KEY_SEARCH;
+    let (handled, out, _) = deliver(&mut screen, &fixture, Some(screen.key(rail)), ScreenEvent::Activate(rail));
+    assert!(matches!(handled, Handled::Yes));
+    assert_eq!(screen.field().0, "", "the field is empty at once, not when the store answers");
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
+        StoreCmd::Search(SearchCmd::SetQueryScoped { query, .. })))) if query.is_empty())),
+        "the store drops the query too, so a later mount does not restore it");
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Search(SearchReq::Tab(HomeTab::Search))))),
+        "the app still moves focus back into the page");
+    drop(session);
+}
+
 // ---- the document's geometry, as the pointer sees it ------------------------------------------
 
 /// Legacy `results.rs`'s `a_tile_scrolled_under_the_chrome_is_not_a_pointer_target`, on the owned
