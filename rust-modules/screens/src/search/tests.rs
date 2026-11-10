@@ -440,7 +440,8 @@ fn a_press_of_the_rails_search_item_empties_the_field() {
     assert_eq!(screen.field().0, "lu", "premise: the page opened on a query");
 
     let rail = plx_ui::widgets::TAB_KEY_SEARCH;
-    let (handled, out, _) = deliver(&mut screen, &fixture, Some(screen.key(rail)), ScreenEvent::Activate(rail));
+    let on_rail = Some(screen.key(rail));
+    let (handled, out, _) = deliver(&mut screen, &fixture, on_rail, ScreenEvent::Activate(rail));
     assert!(matches!(handled, Handled::Yes));
     assert_eq!(screen.field().0, "", "the field is empty at once, not when the store answers");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
