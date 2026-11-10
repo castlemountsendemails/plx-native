@@ -272,6 +272,14 @@ impl SearchScreen {
                     None => return Handled::No,
                 },
             };
+            if matches!(request, SearchReq::Tab(HomeTab::Search)) {
+                // Stock Plex opens Search empty, recents under the field.
+                if let Some(query) = self.draft.replace("") {
+                    self.store(SearchCmd::SetQueryScoped { profile_generation: self.draft.profile(), query }, fx);
+                }
+                self.wipe_rows();
+                self.content_dirty = true;
+            }
             self.keyboard(false, true, fx);
             fx.push(Fx::App(AppFx::Search(request)));
             return Handled::Yes;
