@@ -387,47 +387,6 @@ fn an_empty_result_set_is_not_a_card() {
         "a person is not a press-and-hold card either");
 }
 
-/// Legacy `the_recents_cursor_stops_on_the_clear_control`: ▼ walks the terms that are DRAWN and
-/// then stops on Clear — never onto a row that was never drawn, and never past the control.
-#[test]
-fn the_recents_cursor_stops_on_the_clear_control() {
-    let _serial = plx_base::testlock::serial();
-    let session = remembering("owned-search-clear", &["gromit", "wallace", "preston"]);
-    let fixture = Fixture::new();
-    let mut screen = fixture.screen();
-    assert_eq!(screen.recents.len(), 3);
-    let mut engine = seated(&screen, &fixture);
-    let mut seen = Vec::new();
-    for _ in 0..10 {
-        seen.push(step_dir(&mut screen, &fixture, &mut engine, Dir::Down).unwrap().elem);
-    }
-    let expected: Vec<u32> = screen.recents.iter().copied().chain(std::iter::repeat(CLEAR)).take(10).collect();
-    assert_eq!(seen, expected, "▼ walks every drawn term and then caps on Clear");
-
-    // Clear is one row past the last term shown, and its own block is where the renderer draws it.
-    let cx = fixture.cx(Some(screen.key(CLEAR)));
-    let clear = <SearchScreen as Focusable<HostFixture>>::place(&screen, &CLEAR, &cx, At::Drawn).unwrap();
-    let last = <SearchScreen as Focusable<HostFixture>>::place(&screen, &screen.recents[2], &cx, At::Drawn).unwrap();
-    assert!(clear.rect.y >= last.rect.y + last.rect.h, "Clear sits below the last DRAWN term");
-    assert_eq!(clear.rect.y, layout::clear(3, 0.0, &fixture.measure).y);
-    assert!(step_dir(&mut screen, &fixture, &mut engine, Dir::Up).is_some_and(|k| k.elem == screen.recents[2]),
-        "…and ▲ returns to the list rather than to the field");
-
-    // Pressing it clears THIS profile's history through the store's own vocabulary, drops the rows
-    // at once rather than waiting for the write, and hands focus back to the field — the control
-    // it was standing on is the one thing that cannot survive its own press.
-    let clear_key = screen.key(CLEAR);
-    let (_, out, _) = deliver(&mut screen, &fixture, Some(clear_key), ScreenEvent::Activate(CLEAR));
-    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
-        StoreCmd::Search(SearchCmd::ClearRecents { .. }))))));
-    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(
-        ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(key) }))) if key.elem == FIELD)));
-    assert!(screen.recents.is_empty(), "the list goes now, not when the disk answers");
-    assert!(<SearchScreen as Focusable<HostFixture>>::place(&screen, &CLEAR,
-        &fixture.cx(None), At::Drawn).is_none(), "…and Clear is no longer a stop at all");
-    drop(session);
-}
-
 /// The recent terms are one row of chips with Clear as its last chip, as on stock Plex: ▼ from the
 /// field always lands on the first chip, ◀/▶ walk the row and hold at Clear, ▲ returns to the field.
 /// ◀ on the first chip is the rail's: the row's Left edge is a `Stop`, which the strip links.
@@ -470,9 +429,13 @@ fn the_recents_are_one_row_of_chips_that_ends_in_clear() {
 
     let on_clear = Some(screen.key(CLEAR));
     let (_, out, _) = deliver(&mut screen, &fixture, on_clear, ScreenEvent::Activate(CLEAR));
+    assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,
+        StoreCmd::Search(SearchCmd::ClearRecents { .. }))))));
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(
         ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(key) }))) if key.elem == FIELD)),
         "Clear puts focus in the field");
+    assert!(screen.recents.is_empty(), "the chips go now, not when the disk answers");
+    assert!(<SearchScreen as Focusable<HostFixture>>::place(&screen, &CLEAR, &fixture.cx(None), At::Drawn).is_none());
     let mut groups = Vec::new();
     <SearchScreen as Focusable<HostFixture>>::groups(&screen, &fixture.cx(Some(screen.key(FIELD))), &mut groups);
     assert_eq!(groups.iter().map(|g| g.id.0).collect::<Vec<_>>(), [FIELD_GROUP.0], "only the field is left");
@@ -1087,7 +1050,7 @@ fn park(screen: &mut SearchScreen, y: f32) {
 /// The group `elem` is in and its place there, read off the page's model.
 fn index_of(screen: &SearchScreen, elem: u32) -> Option<(GroupId, usize)> {
     if elem == FIELD { return Some((FIELD_GROUP, 0)); }
-    if elem == CLEAR && !screen.recents.is_empty() { return Some((CLEAR_GROUP, 0)); }
+    if elem == CLEAR && !screen.recents.is_empty() { return Some((RECENTS_GROUP, screen.recents.len())); }
     if let Some(i) = screen.recents.iter().position(|key| *key == elem) { return Some((RECENTS_GROUP, i)); }
     screen.rows.iter().find_map(|row| row.elems.iter().position(|key| *key == elem).map(|i| (row.group, i)))
 }
@@ -1285,7 +1248,7 @@ mod characterization {
         let from = <SearchScreen as Focusable<HostFixture>>::place(&screen, &FIELD, &fixture.cx(field), At::Drawn).unwrap();
         let got = [groups(&screen, &fixture, field), neighbours(&screen, &fixture, &elems),
             placed(&screen, &fixture, field, &elems, At::Drawn), placed(&screen, &fixture, field, &elems, At::SpringTarget),
-            seats(&screen, &fixture, field, &[FIELD_GROUP, RECENTS_GROUP, CLEAR_GROUP], from)].join("\n--\n");
+            seats(&screen, &fixture, field, &[FIELD_GROUP, RECENTS_GROUP], from)].join("\n--\n");
         assert_eq!(got, include_str!("characterization/recents.txt").trim_end());
         let mut links = links(&screen).iter().map(|l| format!("{:#x} {:?} {:#x}", l.from.0, l.dir, l.to.0)).collect::<Vec<_>>();
         links.sort();

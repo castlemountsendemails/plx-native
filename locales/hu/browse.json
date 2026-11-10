@@ -91,16 +91,13 @@
   "browse.login.slow": "Ez a szokásosnál tovább tart.",
   "browse.login.title": "Bejelentkezés a Plexbe",
   "browse.login.instructions": "Olvassa be a kódot a telefonja kamerájával, vagy párosítsa a TV-t kézzel az itt látható címmel és kóddal.",
-  "browse.search.placeholder": "Keresés a könyvtárban",
+  "browse.search.placeholder": "Keresés",
   "browse.search.one_more": "még egy karakter",
-  "browse.search.recents": "LEGUTÓBBI KERESÉSEK",
-  "browse.search.clear": "Legutóbbi keresések törlése",
+  "browse.search.clear": "Keresési előzmények törlése",
+  "browse.search.hint": "Kereshet címekre, személyekre, gyűjteményekre és még sok másra…",
   "browse.search.failed": "A keresés nem érte el a szervert",
   "browse.search.failed_detail": "A könyvtárakkal nincs baj – próbálja újra egy kicsit később.",
-  "browse.search.not_yet": "Még nem keresett semmit",
   "browse.search.results": "TALÁLATOK",
-  "browse.search.your_server": "a saját szerver",
-  "browse.search.shared_server": "egy megosztott szerver",
   "browse.home.loading": "A könyvtár betöltése…",
   "browse.login.failed": "Sikertelen bejelentkezés",
   "browse.login.finding": "A szerver keresése…",
@@ -153,18 +150,6 @@
     "other": "{count} elem"
   },
   "browse.search.no_results": "Nincs találat erre: „{query}”",
-  "browse.search.join": "{first} és {last}",
-  "browse.search.shared_libraries": {
-    "one": "{count} megosztott könyvtár",
-    "other": "{count} megosztott könyvtár"
-  },
-  "browse.search.shared_sources": {
-    "one": "{count} megosztott forrás",
-    "other": "{count} megosztott forrás"
-  },
-  "browse.search.searching": "Keresés: {sources}",
-  "browse.search.unreachable": "Nem érhető el: {sources}",
-  "browse.search.partial": "Nem érhető el: {unreachable} · csak innen vannak találatok: {available}",
   "browse.auth.timeout": "A bejelentkezés túllépte az időkorlátot – próbálja újra.",
   "browse.auth.no_servers": "Ehhez a Plex-fiókhoz még nem tartozik szerver.",
   "browse.auth.no_servers_signed_in_as": "Bejelentkezve: {account}.\nEhhez a Plex-fiókhoz még nem tartozik szerver.",

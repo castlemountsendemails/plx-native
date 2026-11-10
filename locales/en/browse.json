@@ -380,20 +380,20 @@
     "description": "browse login instructions"
   },
   "browse.search.placeholder": {
-    "value": "Search your library",
+    "value": "Search",
     "description": "browse search placeholder"
   },
   "browse.search.one_more": {
     "value": "one more character",
     "description": "browse search one_more"
   },
-  "browse.search.recents": {
-    "value": "RECENT SEARCHES",
-    "description": "browse search recents"
-  },
   "browse.search.clear": {
-    "value": "Clear recent searches",
+    "value": "Clear Search History",
     "description": "browse search clear"
+  },
+  "browse.search.hint": {
+    "value": "You can search titles, people, collections and more…",
+    "description": "Line under the empty search page's recent-search chips; not focusable."
   },
   "browse.search.failed": {
     "value": "Search didn’t reach the server",
@@ -403,21 +403,9 @@
     "value": "Your libraries are fine — try again in a moment.",
     "description": "browse search failed_detail"
   },
-  "browse.search.not_yet": {
-    "value": "Nothing searched yet",
-    "description": "browse search not_yet"
-  },
   "browse.search.results": {
     "value": "SEARCH RESULTS",
     "description": "browse search results"
-  },
-  "browse.search.your_server": {
-    "value": "your server",
-    "description": "browse search your_server"
-  },
-  "browse.search.shared_server": {
-    "value": "a shared server",
-    "description": "browse search shared_server"
   },
   "browse.home.loading": {
     "value": "Loading your library…",
@@ -623,56 +611,6 @@
       "query": "str"
     },
     "description": "browse search no_results"
-  },
-  "browse.search.join": {
-    "value": "{first} and {last}",
-    "args": {
-      "first": "str",
-      "last": "str"
-    },
-    "description": "browse search join"
-  },
-  "browse.search.shared_libraries": {
-    "value": {
-      "one": "{count} shared library",
-      "other": "{count} shared libraries"
-    },
-    "args": {
-      "count": "i64"
-    },
-    "description": "browse search shared_libraries"
-  },
-  "browse.search.shared_sources": {
-    "value": {
-      "one": "{count} shared source",
-      "other": "{count} shared sources"
-    },
-    "args": {
-      "count": "i64"
-    },
-    "description": "browse search shared_sources"
-  },
-  "browse.search.searching": {
-    "value": "Searching {sources}",
-    "args": {
-      "sources": "str"
-    },
-    "description": "browse search searching"
-  },
-  "browse.search.unreachable": {
-    "value": "{sources} unreachable",
-    "args": {
-      "sources": "str"
-    },
-    "description": "browse search unreachable"
-  },
-  "browse.search.partial": {
-    "value": "{unreachable} unreachable · results from {available} only",
-    "args": {
-      "available": "str",
-      "unreachable": "str"
-    },
-    "description": "browse search partial"
   },
   "browse.diagnostics.idle": {
     "value": "Idle",
