@@ -7,6 +7,8 @@ name: release
 on:
   push:
     tags: ['v*']
+    # Verification run from the PR branch; removed before PR 2 merges.
+    branches: [firetv-release]
   workflow_dispatch:
 
 permissions:
