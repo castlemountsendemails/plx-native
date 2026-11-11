@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.36] - 2026-11-10
+
+### Added
+- Release build: a new release workflow, run by a `v*` tag or by hand, builds the webOS package and the release-signed Fire TV app (`com.beb.plxnative`, no developer features, no telemetry) and keeps them as run artifacts; it publishes nothing. Not yet run.
+
+### Changed
+- Version bumped to 1.0.0 in the four tracked files.
+- Fire TV build: the debug and release APKs now come from one shared workflow; the Fire TV crate gets a `default` feature set so a release build can drop the developer features.
+
 ## [0.2.35] - 2026-11-10
 
 ### Changed

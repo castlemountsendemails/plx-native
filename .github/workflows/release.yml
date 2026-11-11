@@ -1,0 +1,79 @@
+name: release
+
+# Builds the 1.0.0-style release: the webOS package and the release-signed Fire TV APK, kept as run
+# artifacts. Publishes nothing. A `v*` tag push or a manual dispatch starts it; a tag must equal the
+# tracked version.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      version-code: ${{ steps.v.outputs.version-code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read and check the version
+        id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(python3 ci/bump-version.py --current)
+          if ! [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::version '$version' is not three plain integers"
+            exit 1
+          fi
+          major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
+          if [ "$major" -lt 1 ] || [ "$minor" -ge 100 ] || [ "$patch" -ge 100 ]; then
+            echo "::error::version $version needs major >= 1 and minor, patch < 100"
+            exit 1
+          fi
+          if [ "$REF_TYPE" = tag ] && [ "$REF_NAME" != "v$version" ]; then
+            echo "::error::tag $REF_NAME is not v$version"
+            exit 1
+          fi
+          code=$((major * 10000 + minor * 100 + patch))
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version-code=$code" >> "$GITHUB_OUTPUT"
+          echo "Release $version, versionCode $code" >> "$GITHUB_STEP_SUMMARY"
+
+  webos:
+    name: webos
+    needs: version
+    uses: ./.github/workflows/build-package.yml
+    with:
+      ref: ${{ github.sha }}
+      flavor: stable
+      telemetry: production
+      artifact: plxnative-${{ needs.version.outputs.version }}-webos
+      homebrew-manifest: false
+      source-asset: false
+      fwcompat: true
+      upload-debug-files: false
+      caches: false
+    secrets:
+      # Required by build-package.yml's signature but read only when upload-debug-files is true.
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN || 'unused' }}
+
+  firetv:
+    name: firetv
+    needs: version
+    uses: ./.github/workflows/build-firetv.yml
+    with:
+      artifact: plxnative-${{ needs.version.outputs.version }}-firetv
+      release: true
+      version-name: ${{ needs.version.outputs.version }}
+      version-code: ${{ needs.version.outputs.version-code }}
+    secrets: inherit
