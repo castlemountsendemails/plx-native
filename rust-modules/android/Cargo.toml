@@ -17,8 +17,12 @@ crate-type = ["cdylib"]
 [package.metadata.plx]
 mount = "android"
 
+# The same default set as plxnative-modules; a release build passes --no-default-features to drop it.
+[features]
+default = ["plxnative-modules/devtools", "plxnative-modules/devtriggers", "plxnative-modules/threadcheck"]
+
 [target.'cfg(target_os = "android")'.dependencies]
-plxnative-modules = { path = ".." }
+plxnative-modules = { path = "..", default-features = false }
 plx_base = { path = "../base" }
 plx_platform = { path = "../platform" }
 plx_data = { path = "../data" }

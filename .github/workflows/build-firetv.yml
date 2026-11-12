@@ -2,7 +2,7 @@ name: build firetv
 
 # The Fire TV APK (armeabi-v7a, minSdk 25): SDL2, SDL2_ttf, FFmpeg and libcurl built with the NDK and
 # cached, libmain.so from rust-modules/android through cargo-ndk, and the Gradle project in android/.
-# One copy of that build, called by ci.yml for the debug APK.
+# One copy of that build: ci.yml calls it for the debug APK, release.yml for the release APK.
 
 on:
   workflow_call:
@@ -11,6 +11,18 @@ on:
         description: 'upload-artifact name for the APK, the LGPL source folder and the symbol copies.'
         type: string
         required: true
+      release:
+        description: 'Build the release-signed APK (com.beb.plxnative, no default features, blank telemetry) instead of the debug one.'
+        type: boolean
+        default: false
+      version-name:
+        description: 'versionName of the release APK.'
+        type: string
+        default: ''
+      version-code:
+        description: 'versionCode of the release APK.'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -30,11 +42,37 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Derive the debug versionName
-        # What rust-modules/build.rs stamps into a non-RELEASE build: the next minor plus -dev
-        # (ci/version_rule.py), so the APK, X-Plex-Version and the diagnostics panel agree.
+      - name: Select the build identity
+        # A debug build's versionName is what rust-modules/build.rs stamps into a non-RELEASE build: the next
+        # minor plus -dev (ci/version_rule.py), so the APK, X-Plex-Version and the diagnostics panel agree.
+        env:
+          RELEASE: ${{ inputs.release }}
+          RELEASE_NAME: ${{ inputs.version-name }}
+          RELEASE_CODE: ${{ inputs.version-code }}
         run: |
-          python3 - <<'PY' >> "$GITHUB_ENV"
+          set -euo pipefail
+          if [ "$RELEASE" = true ]; then
+            [ -n "$RELEASE_NAME" ] && [ -n "$RELEASE_CODE" ] \
+              || { echo "::error::a release build needs version-name and version-code"; exit 1; }
+            {
+              echo "FIRETV_TYPE=release"
+              echo "FIRETV_PACKAGE=com.beb.plxnative"
+              echo "FIRETV_VERSION_NAME=$RELEASE_NAME"
+              echo "FIRETV_VERSION_CODE=$RELEASE_CODE"
+              echo "FIRETV_CERT_SHA256=$FIRETV_RELEASE_CERT_SHA256"
+              echo "FIRETV_DEBUGGABLE=false"
+              echo "FIRETV_APK_SUFFIX="
+            } >> "$GITHUB_ENV"
+          else
+            {
+              echo "FIRETV_TYPE=debug"
+              echo "FIRETV_PACKAGE=com.beb.plxnative.dev"
+              echo "FIRETV_VERSION_CODE=900"
+              echo "FIRETV_CERT_SHA256=$FIRETV_DEBUG_CERT_SHA256"
+              echo "FIRETV_DEBUGGABLE=true"
+              echo "FIRETV_APK_SUFFIX=-debug"
+            } >> "$GITHUB_ENV"
+            python3 - <<'PY' >> "$GITHUB_ENV"
           import subprocess, sys
           from pathlib import Path
           sys.path.insert(0, "ci")
@@ -46,6 +84,7 @@ jobs:
               sys.exit(err)
           print("FIRETV_VERSION_NAME=%d.%d.%d-dev" % triplet)
           PY
+          fi
 
       - uses: ./.github/actions/rust-toolchain
 
@@ -131,10 +170,22 @@ jobs:
       - name: Build libmain.so and stage the native libraries
         env:
           PLX_ANDROID_SDL_PREFIX: ${{ env.SDL_PREFIX }}
+          # build.rs reports the plain version for a release build; the four telemetry variables stay empty.
+          PLX_RELEASE: ${{ inputs.release && '1' || '' }}
+          PLX_SENTRY_DSN: ''
+          PLX_POSTHOG_KEY: ''
+          PLX_SENTRY_DSN_DEV: ''
+          PLX_POSTHOG_KEY_DEV: ''
         run: |
           set -euo pipefail
           libs="$RUNNER_TEMP/jniLibs"
-          (cd rust-modules && cargo "+$RUST_TOOLCHAIN" ndk -t armeabi-v7a -P 25 -o "$libs" build --release -p plx_android)
+          flags=()
+          [ "$FIRETV_TYPE" = release ] && flags+=(--no-default-features)
+          (cd rust-modules && cargo "+$RUST_TOOLCHAIN" ndk -t armeabi-v7a -P 25 -o "$libs" build --release -p plx_android "${flags[@]}")
+          if [ "$FIRETV_TYPE" = release ] && strings "$libs/armeabi-v7a/libmain.so" | grep -E 'o0\.invalid|phc_'; then
+            echo "::error::libmain.so carries telemetry credentials"
+            exit 1
+          fi
           cp "$SDL_PREFIX/lib/libSDL2.so" "$SDL_PREFIX/lib/libSDL2_ttf.so" "$libs/armeabi-v7a/"
           cp vendor/ffmpeg-prefix-android/lib/lib*-plx.so "$libs/armeabi-v7a/"
           cp vendor/curl-prefix-android/lib/libcurl-plx.so "$libs/armeabi-v7a/"
@@ -170,28 +221,36 @@ jobs:
           gradle-version: 8.14.3
           cache-provider: basic
 
-      - name: Build, sign and check the debug APK
+      - name: Build, sign and check the APK
         working-directory: android
         env:
           FIRETV_DEBUG_KEYSTORE_B64: ${{ secrets.FIRETV_DEBUG_KEYSTORE_B64 }}
           FIRETV_DEBUG_KEYSTORE_PASSWORD: ${{ secrets.FIRETV_DEBUG_KEYSTORE_PASSWORD }}
           FIRETV_DEBUG_KEY_ALIAS: ${{ secrets.FIRETV_DEBUG_KEY_ALIAS }}
           FIRETV_DEBUG_KEY_PASSWORD: ${{ secrets.FIRETV_DEBUG_KEY_PASSWORD }}
+          FIRETV_RELEASE_KEYSTORE_B64: ${{ secrets.FIRETV_RELEASE_KEYSTORE_B64 }}
+          FIRETV_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.FIRETV_RELEASE_KEYSTORE_PASSWORD }}
+          FIRETV_RELEASE_KEY_ALIAS: ${{ secrets.FIRETV_RELEASE_KEY_ALIAS }}
+          FIRETV_RELEASE_KEY_PASSWORD: ${{ secrets.FIRETV_RELEASE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          export FIRETV_DEBUG_KEYSTORE="$RUNNER_TEMP/debug.jks"
-          tr -d ' \r\n' <<<"$FIRETV_DEBUG_KEYSTORE_B64" | base64 --decode > "$FIRETV_DEBUG_KEYSTORE"
-          gradle --no-daemon assembleDebug \
+          # build.gradle.kts reads the signing config of the selected type from FIRETV_<TYPE>_*.
+          upper=${FIRETV_TYPE^^}
+          b64="FIRETV_${upper}_KEYSTORE_B64"
+          export "FIRETV_${upper}_KEYSTORE=$RUNNER_TEMP/$FIRETV_TYPE.jks"
+          tr -d ' \r\n' <<<"${!b64}" | base64 --decode > "$RUNNER_TEMP/$FIRETV_TYPE.jks"
+          gradle --no-daemon "assemble${FIRETV_TYPE^}" \
             "-Pplx.sdlJava=$SDL_PREFIX/java" \
             "-Pplx.jniLibs=$RUNNER_TEMP/jniLibs" \
             "-Pplx.assets=$RUNNER_TEMP/assets" \
+            "-Pplx.versionCode=$FIRETV_VERSION_CODE" \
             "-Pplx.versionName=$FIRETV_VERSION_NAME"
-          rm "$FIRETV_DEBUG_KEYSTORE"
+          rm "$RUNNER_TEMP/$FIRETV_TYPE.jks"
           mkdir -p "$RUNNER_TEMP/apk"
-          apk="$RUNNER_TEMP/apk/plxnative-$FIRETV_VERSION_NAME-firetv-debug.apk"
-          mv build/outputs/apk/debug/*.apk "$apk"
+          apk="$RUNNER_TEMP/apk/plxnative-$FIRETV_VERSION_NAME-firetv$FIRETV_APK_SUFFIX.apk"
+          mv build/outputs/apk/$FIRETV_TYPE/*.apk "$apk"
           unzip -l "$apk" | grep -E 'lib/|assets/|classes'
-          ../ci/check-apk.sh "$apk" com.beb.plxnative.dev 900 "$FIRETV_VERSION_NAME" "$FIRETV_DEBUG_CERT_SHA256" true
+          ../ci/check-apk.sh "$apk" "$FIRETV_PACKAGE" "$FIRETV_VERSION_CODE" "$FIRETV_VERSION_NAME" "$FIRETV_CERT_SHA256" "$FIRETV_DEBUGGABLE"
 
       # The LGPL corresponding source of the FFmpeg and (FriBidi, in libass-plx.so) the libass stack inside the APK:
       # the pinned tarballs, the patch, the facade and the scripts.
