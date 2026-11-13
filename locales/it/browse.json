@@ -82,6 +82,19 @@
   "browse.menu.go_movie": "Vai al film",
   "browse.menu.remove_deck": "Rimuovi da In coda",
   "browse.menu.delete": "Elimina",
+  "browse.menu.delete_question": "Eliminare definitivamente?",
+  "browse.menu.delete_movie": "Il film verrà eliminato dal disco del tuo server. L’operazione non può essere annullata.",
+  "browse.menu.delete_versions": {
+    "one": "Il film e tutte le sue versioni ({count}) verranno eliminati dal disco del tuo server. L’operazione non può essere annullata.",
+    "many": "Il film e tutte le sue versioni ({count}) verranno eliminati dal disco del tuo server. L’operazione non può essere annullata.",
+    "other": "Il film e tutte le sue versioni ({count}) verranno eliminati dal disco del tuo server. L’operazione non può essere annullata."
+  },
+  "browse.menu.delete_show": {
+    "one": "La serie e tutti i suoi episodi ({count}) verranno eliminati dal disco del tuo server. L’operazione non può essere annullata.",
+    "many": "La serie e tutti i suoi episodi ({count}) verranno eliminati dal disco del tuo server. L’operazione non può essere annullata.",
+    "other": "La serie e tutti i suoi episodi ({count}) verranno eliminati dal disco del tuo server. L’operazione non può essere annullata."
+  },
+  "browse.menu.delete_show_all": "La serie e tutti i suoi episodi verranno eliminati dal disco del tuo server. L’operazione non può essere annullata.",
   "browse.login.deleted": "Dati locali eliminati",
   "browse.login.deleted_detail": "Credenziali, preferenze, telemetria e dati diagnostici locali rimossi.",
   "browse.login.partial": "Disconnesso; gran parte dei dati locali eliminata",

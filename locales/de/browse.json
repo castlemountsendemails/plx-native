@@ -82,6 +82,17 @@
   "browse.menu.go_movie": "Zum Film",
   "browse.menu.remove_deck": "Aus „Als Nächstes“ entfernen",
   "browse.menu.delete": "Löschen",
+  "browse.menu.delete_question": "Endgültig löschen?",
+  "browse.menu.delete_movie": "Der Film wird von der Festplatte deines Servers gelöscht. Das lässt sich nicht rückgängig machen.",
+  "browse.menu.delete_versions": {
+    "one": "Der Film und alle seine Versionen ({count}) werden von der Festplatte deines Servers gelöscht. Das lässt sich nicht rückgängig machen.",
+    "other": "Der Film und alle seine Versionen ({count}) werden von der Festplatte deines Servers gelöscht. Das lässt sich nicht rückgängig machen."
+  },
+  "browse.menu.delete_show": {
+    "one": "Die Serie und alle ihre Episoden ({count}) werden von der Festplatte deines Servers gelöscht. Das lässt sich nicht rückgängig machen.",
+    "other": "Die Serie und alle ihre Episoden ({count}) werden von der Festplatte deines Servers gelöscht. Das lässt sich nicht rückgängig machen."
+  },
+  "browse.menu.delete_show_all": "Die Serie und alle ihre Episoden werden von der Festplatte deines Servers gelöscht. Das lässt sich nicht rückgängig machen.",
   "browse.login.deleted": "Lokale Daten gelöscht",
   "browse.login.deleted_detail": "Anmeldedaten, Einstellungen, Telemetrie und lokale Diagnosedaten wurden entfernt.",
   "browse.login.partial": "Abgemeldet, die meisten lokalen Daten gelöscht",

@@ -82,6 +82,19 @@
   "browse.menu.go_movie": "Ir a la película",
   "browse.menu.remove_deck": "Quitar de Continuar viendo",
   "browse.menu.delete": "Eliminar",
+  "browse.menu.delete_question": "¿Eliminar definitivamente?",
+  "browse.menu.delete_movie": "La película se eliminará del disco de tu servidor. No se puede deshacer.",
+  "browse.menu.delete_versions": {
+    "one": "La película y todas sus versiones ({count}) se eliminarán del disco de tu servidor. No se puede deshacer.",
+    "many": "La película y todas sus versiones ({count}) se eliminarán del disco de tu servidor. No se puede deshacer.",
+    "other": "La película y todas sus versiones ({count}) se eliminarán del disco de tu servidor. No se puede deshacer."
+  },
+  "browse.menu.delete_show": {
+    "one": "La serie y todos sus episodios ({count}) se eliminarán del disco de tu servidor. No se puede deshacer.",
+    "many": "La serie y todos sus episodios ({count}) se eliminarán del disco de tu servidor. No se puede deshacer.",
+    "other": "La serie y todos sus episodios ({count}) se eliminarán del disco de tu servidor. No se puede deshacer."
+  },
+  "browse.menu.delete_show_all": "La serie y todos sus episodios se eliminarán del disco de tu servidor. No se puede deshacer.",
   "browse.login.deleted": "Datos locales eliminados",
   "browse.login.deleted_detail": "Se han eliminado las credenciales, las preferencias, la telemetría y los diagnósticos locales.",
   "browse.login.partial": "Sesión cerrada y la mayoría de los datos locales eliminados",

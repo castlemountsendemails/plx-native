@@ -664,9 +664,8 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
         // The write is queued on the Watchlist store (the ledger flips the face at once and puts it
         // back if plex.tv refuses) and the strip's bookmark pulses: the APP owns that, not the menu.
         Action::WatchlistAdd { hex } => bridge.watchlist_add(hex),
-        // ponytail: part A of the delete build only adds the row. The confirm and the DELETE call
-        // come in parts B and C, and until then a press does nothing, so no path reaches the
-        // server's delete without passing the confirm.
+        // ponytail: the menu reports this only after its confirm was answered Delete. The DELETE
+        // call and what follows it come in part C; until then the answer does nothing.
         Action::DeleteItem(_) => {}
         // A legacy title: added once the catalog-id lookup has its id (`Bridge::watchlist_add_legacy`).
         Action::WatchlistAddLegacy { kind, guid } => {
