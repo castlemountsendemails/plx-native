@@ -661,3 +661,63 @@ fn an_offset_moves_the_loaded_item_and_the_episode_it_names_and_only_when_it_dif
     assert_eq!((d.episodes.get(0).unwrap().resume_ms, d.episodes.get(1).unwrap().resume_ms), (42_000, 6), "no other episode moved");
     clear(test_state(), test_adapter());
 }
+
+/// A deleted item leaves the Related row and the collection shelf of the loaded page, and nothing
+/// else does: the same key on another server is another item, and the page's own item stays.
+#[test]
+fn a_deleted_item_leaves_the_related_row_and_the_collection_shelf() {
+    use crate::viewstate::ViewAt;
+    let _serial = plx_base::testlock::serial();
+    set_current_for_test(test_state(), Some(Detail {
+        sid: SRV_A,
+        rk: "page".into(),
+        related: vec![related_tile(SRV_A, "r0"), related_tile(SRV_A, "r1"), related_tile(SRV_B, "r1")],
+        collection: Some(CollectionShelf {
+            members: vec![related_tile(SRV_A, "r1"), related_tile(SRV_A, "m2")],
+            count: 5,
+            ..Default::default()
+        }),
+        ..Default::default()
+    }));
+    assert!(drop_tiles(test_state(), &ViewAt::leaf(SRV_A, "r1")));
+    let d = current(test_state()).unwrap();
+    assert_eq!(d.related.iter().map(|m| (m.sid, m.rk.as_str())).collect::<Vec<_>>(),
+        [(SRV_A, "r0"), (SRV_B, "r1")], "only this server's r1 went");
+    let shelf = d.collection.as_ref().unwrap();
+    assert_eq!(shelf.members.iter().map(|m| m.rk.as_str()).collect::<Vec<_>>(), ["m2"]);
+    assert_eq!(shelf.count, 4, "the heading's count follows");
+    assert!(!drop_tiles(test_state(), &ViewAt::leaf(SRV_A, "r1")), "already gone: nothing to do");
+    clear(test_state(), test_adapter());
+}
+
+/// With a paged tail, a tile dropped from the head shortens the head and one dropped from the tail
+/// takes its position with it, so the pager's positions still line up with the cards.
+#[test]
+fn a_deleted_tile_keeps_the_related_pager_aligned() {
+    use crate::viewstate::ViewAt;
+    let _serial = plx_base::testlock::serial();
+    let tail = || RelatedTail {
+        hubs: vec![TailHub { key: "/hubs/x".into(), ..Default::default() }],
+        head: 2,
+        positions: vec![10, 11, 12],
+        ..Default::default()
+    };
+    let page = |tail| Detail {
+        sid: SRV_A,
+        rk: "page".into(),
+        related: ["h0", "h1", "t0", "t1", "t2"].iter().map(|rk| related_tile(SRV_A, rk)).collect(),
+        related_tail: tail,
+        ..Default::default()
+    };
+    set_current_for_test(test_state(), Some(page(tail())));
+    assert!(drop_tiles(test_state(), &ViewAt::leaf(SRV_A, "h1")));
+    let d = current(test_state()).unwrap();
+    assert_eq!((d.related_tail.head, d.related_tail.positions.clone()), (1, vec![10, 11, 12]), "head shrank");
+
+    set_current_for_test(test_state(), Some(page(tail())));
+    assert!(drop_tiles(test_state(), &ViewAt::leaf(SRV_A, "t1")));
+    let d = current(test_state()).unwrap();
+    assert_eq!((d.related_tail.head, d.related_tail.positions.clone()), (2, vec![10, 12]), "t1's position went");
+    assert_eq!(d.related.len(), 4);
+    clear(test_state(), test_adapter());
+}

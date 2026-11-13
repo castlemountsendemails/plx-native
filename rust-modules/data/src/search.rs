@@ -703,6 +703,11 @@ pub struct SearchState {
     /// One window per kind over that kind's hits; see [`page`]. Released by [`supersede`].
     wins: [Win; NKIND],
 
+    /// Items deleted from their server since this query began. The merge leaves them out, so a
+    /// source landing late cannot bring a deleted title back; a new query forgets them (the server
+    /// no longer lists them).
+    removed: Vec<crate::viewstate::ViewAt>,
+
     /// This owner's memo of the built [`scope::SourceScopeSnapshot`] (`search/scope.rs`). Interior
     /// mutable because `snapshot`/`snapshot_with_directory` are reached through `&self`.
     scope_cache: scope::ScopeCache,
@@ -725,6 +730,7 @@ impl Default for SearchState {
             armed: false,
             src: Vec::new(),
             wins: Default::default(),
+            removed: Vec::new(),
             scope_cache: scope::ScopeCache::default(),
             fanout: Default::default(),
         }
@@ -938,6 +944,17 @@ fn set_query_with_directory(
 fn apply_view(state: &mut SearchState, at: &crate::viewstate::ViewAt, edit: crate::viewstate::ViewEdit) -> bool {
     // A result tile has no deck: a removal from Continue Watching changes nothing here.
     if let crate::viewstate::ViewEdit::LeftDeck = edit { return false }
+    // A deleted item: remembered for this query so no merge brings it back, and off the shelves now.
+    if let crate::viewstate::ViewEdit::Removed = edit {
+        state.removed.push(at.clone());
+        let Some(shelves) = &mut state.shelves else { return false };
+        let held = |it: &Item| matches!(it, Item::Media(m) if at.covers(m));
+        if !shelves.iter().flat_map(|s| &s.items).any(held) {
+            return false;
+        }
+        drop_removed(Arc::make_mut(shelves), std::slice::from_ref(at));
+        return true;
+    }
     let mut hit = false;
     // `changes`: a press always counts, the server's `Facts`/`Offset` only where they differ, so a
     // read-back that agrees with what is drawn raises no notice and moves nothing.
@@ -1014,6 +1031,7 @@ fn supersede_with_directory(
     directory: Option<crate::stores::browse::DirectoryView<'_>>,
 ) {
     state.gen = state.gen.wrapping_add(1);
+    state.removed.clear();
     // A fresh favourite snapshot belongs to the fresh generation, and taking it HERE is what makes
     // the staleness rule need no second mailbox field: a landing projected under the old table
     // carries the old `gen`, and `pump` already discards those. One rejection rule, not two.
@@ -1264,6 +1282,19 @@ fn live_sources<'a>(state: &'a SearchState, live: &[usize]) -> Vec<&'a Source> {
     live.iter().map(|&i| source(state, i)).collect()
 }
 
+/// Leave the deleted items out of merged shelves (a show takes its episodes with it); a shelf this
+/// empties goes.
+fn drop_removed(shelves: &mut Vec<Shelf>, removed: &[crate::viewstate::ViewAt]) {
+    if removed.is_empty() {
+        return;
+    }
+    let gone = |it: &Item| matches!(it, Item::Media(m) if removed.iter().any(|at| at.covers(m)));
+    for shelf in shelves.iter_mut() {
+        shelf.items.retain(|it| !gone(it));
+    }
+    shelves.retain(|shelf| !shelf.items.is_empty());
+}
+
 /// Recompute the merged shelves from every source's last answer. The [`State`] is NOT set here —
 /// `pump` recomputes that every frame, landing or no landing (see the note there).
 fn rebuild(state: &mut SearchState) {
@@ -1271,7 +1302,8 @@ fn rebuild(state: &mut SearchState) {
     let sources = live_sources(state, &live);
     let los: [usize; NKIND] = std::array::from_fn(|k| state.wins[k].lo);
     let epochs: [u32; NKIND] = std::array::from_fn(|k| state.wins[k].committed);
-    let shelves = merge_refs(&sources, &favs(state), &los, &epochs);
+    let mut shelves = merge_refs(&sources, &favs(state), &los, &epochs);
+    drop_removed(&mut shelves, &state.removed);
     let items: usize = shelves.iter().map(|s| s.items.len()).sum();
     plx_base::eventlog::log(&format!(
         "search: q[{}ch] shelves={} items={}",

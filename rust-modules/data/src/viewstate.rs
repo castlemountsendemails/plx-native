@@ -1234,6 +1234,22 @@ mod tests {
         (stores, sid)
     }
 
+    /// A deleted show leaves Search with its episodes, whatever the pressed row was, and the same
+    /// key on another query result stays; the removal is remembered so a merge cannot bring it back.
+    #[test]
+    fn a_deleted_show_leaves_search_with_its_episodes() {
+        let _g = plx_base::testlock::serial();
+        let (mut stores, sid) = search_with_show_and_episodes();
+        let directory = crate::stores::browse::DirectorySnapshot::default();
+        assert!(stores.viewstate_run(crate::stores::viewstate::ViewStateCmd::Removed {
+            sid, rk: "S".into(), scope: Scope::Show,
+        }, directory.view()));
+        let rks: Vec<String> = search_marks(&stores).into_iter().map(|m| m.0).collect();
+        assert_eq!(rks, ["other"], "the show and its three episodes are gone; another show's episode stays");
+        drop(stores);
+        plx_plex::plex::reset_servers_for_test();
+    }
+
     /// `(rk, watched, unwatched, resume_ms)` of every Search row, in shelf order.
     fn search_marks(stores: &crate::stores::Stores) -> Vec<(String, bool, bool, i64)> {
         let directory = crate::stores::browse::DirectorySnapshot::default();
