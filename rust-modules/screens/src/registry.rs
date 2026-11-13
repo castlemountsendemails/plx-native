@@ -2107,7 +2107,7 @@ where
             AppArg::LibraryMenu(arg) => Box::new(crate::library::menu::LibraryMenu::new(entry, arg.clone())),
             AppArg::AccountMenu => Box::new(crate::account_menu::AccountMenuScreen::new(entry)),
             AppArg::ItemMenu(arg) => Box::new(
-                crate::item_menu::ItemMenuScreen::new(entry, arg.clone()).with_watchlist(arg.watchlist)),
+                crate::item_menu::ItemMenuScreen::new(entry, arg.clone()).with_watchlist(arg.watchlist.clone())),
             AppArg::WatchlistMenu(arg) => Box::new(crate::watchlist::menu::WatchlistMenuScreen::new(entry, *arg)),
             AppArg::PlayerOverlay(arg) => Box::new(
                 crate::player::overlay::PlayerOverlayScreen::new_with(

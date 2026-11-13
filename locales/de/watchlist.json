@@ -23,5 +23,6 @@
   "watchlist.empty.filtered_body": "Ändere Sortieren & Filtern, um den Rest deiner Merkliste zu sehen.",
   "watchlist.empty.unreachable": "Deine Merkliste ist nicht erreichbar",
   "watchlist.detail.trailer": "Trailer",
-  "watchlist.page.debug_write_blocked": "Debug: Schreibzugriff auf die Merkliste blockiert"
+  "watchlist.page.debug_write_blocked": "Debug: Schreibzugriff auf die Merkliste blockiert",
+  "watchlist.notice.not_in_catalog": "Nicht im Plex-Katalog"
 }

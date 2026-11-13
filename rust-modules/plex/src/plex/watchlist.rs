@@ -83,6 +83,8 @@ pub struct CatalogItem {
     pub genres: Vec<String>,
     pub content_rating: Option<String>,
     pub duration_ms: Option<i64>,
+    /// The external ids of `Guid[]` (`imdb://…`, `tmdb://…`, `tvdb://…`), in the record's order.
+    pub guids: Vec<String>,
 }
 
 /// Why a watchlist call did not produce its answer. HTTP statuses map to the named variants.
@@ -433,7 +435,24 @@ impl AccountClient {
         let item = item_from(entry, Some(hex)).ok_or(WatchlistError::Unreadable)?;
         let genres = entry.get("Genre").and_then(Value::as_array)
             .map(|g| g.iter().filter_map(|t| text(t, "tag")).collect()).unwrap_or_default();
-        Ok(CatalogItem { item, genres, content_rating: text(entry, "contentRating"), duration_ms: int(entry, "duration") })
+        let guids = entry.get("Guid").and_then(Value::as_array)
+            .map(|g| g.iter().filter_map(|t| text(t, "id")).collect()).unwrap_or_default();
+        Ok(CatalogItem { item, genres, content_rating: text(entry, "contentRating"), duration_ms: int(entry, "duration"), guids })
+    }
+
+    /// The catalog id Discover matches a legacy-agent guid to (`GET /library/metadata/matches`,
+    /// `type` 1 for a movie, 2 for a show; a wrong type answers nothing). `Ok(None)` is the
+    /// catalog's own "no match".
+    pub fn catalog_match(&self, show: bool, guid: &str, req: WatchTransport) -> Result<Option<String>, WatchlistError> {
+        if super::models::legacy_catalog_guid(guid) != Some(guid) {
+            return Err(WatchlistError::BadRequest);
+        }
+        let url = format!("{}/library/metadata/matches?type={}&guid={}", discover(), if show { 2 } else { 1 },
+            super::client::urlenc_str(guid));
+        let response = call(req, "GET", url)?;
+        let body = parse(&response)?;
+        let entries: &[Value] = container(&body)?.get("Metadata").and_then(Value::as_array).map_or(&[], Vec::as_slice);
+        Ok(entries.first().and_then(|e| item_from(e, None)).map(|item| item.hex))
     }
 
     /// `PUT /actions/addToWatchlist?ratingKey=<hex>`.
@@ -716,16 +735,37 @@ mod tests {
     #[test]
     fn catalog_item_reads_the_item_and_its_extras() {
         let body = format!(r#"{{"MediaContainer":{{"Metadata":[{{"ratingKey":"{HEX}","guid":"plex://movie/{HEX}","type":"movie",
-            "title":"A","contentRating":"PG","duration":5400000,"Genre":[{{"tag":"Drama"}},{{"tag":"Comedy"}},{{"id":3}}]}}]}}}}"#);
+            "title":"A","contentRating":"PG","duration":5400000,"Genre":[{{"tag":"Drama"}},{{"tag":"Comedy"}},{{"id":3}}],
+            "Guid":[{{"id":"imdb://tt4565380"}},{{"id":"tvdb://291866"}},{{"tag":"x"}}]}}]}}}}"#);
         let (out, seen) = run(vec![ok(&body)], |c, t| c.catalog_item(HEX, t));
         let item = out.unwrap();
         assert_eq!(seen[0].url, format!("{}/library/metadata/{HEX}", discover()));
         assert_eq!(item.item.hex, HEX);
         assert_eq!(item.genres, vec!["Drama", "Comedy"]);
+        assert_eq!(item.guids, vec!["imdb://tt4565380", "tvdb://291866"]);
         assert_eq!(item.content_rating.as_deref(), Some("PG"));
         assert_eq!(item.duration_ms, Some(5_400_000));
         let (out, _) = run(vec![ok(r#"{"MediaContainer":{"size":0}}"#)], |c, t| c.catalog_item(HEX, t));
         assert_eq!(out, Err(WatchlistError::Unreadable));
+    }
+
+    #[test]
+    fn a_legacy_guid_matches_to_the_catalog_id_of_the_first_entry() {
+        const LEGACY: &str = "com.plexapp.agents.thetvdb://291866";
+        let body = format!(r#"{{"MediaContainer":{{"size":1,"Metadata":[{{"guid":"plex://show/{HEX}","type":"show"}}]}}}}"#);
+        let (out, seen) = run(vec![ok(&body)], |c, t| c.catalog_match(true, LEGACY, t));
+        assert_eq!(out, Ok(Some(HEX.to_string())));
+        assert_eq!(seen[0].url, format!("{}/library/metadata/matches?type=2&guid=com.plexapp.agents.thetvdb%3A%2F%2F291866", discover()));
+        let (out, seen) = run(vec![ok(r#"{"MediaContainer":{"size":0}}"#)], |c, t| c.catalog_match(false, LEGACY, t));
+        assert_eq!(out, Ok(None), "the catalog's own no-match");
+        assert!(seen[0].url.contains("type=1&"));
+        let (out, _) = run(vec![status(503)], |c, t| c.catalog_match(false, LEGACY, t));
+        assert_eq!(out, Err(WatchlistError::Other(503)), "a failure is not a no-match");
+        for bad in ["local://1", "com.plexapp.agents.imdb://tt1?lang=en", "plex://movie/x"] {
+            let (out, seen) = run(vec![], |c, t| c.catalog_match(false, bad, t));
+            assert_eq!(out, Err(WatchlistError::BadRequest), "{bad}");
+            assert!(seen.is_empty());
+        }
     }
 
     #[test]
@@ -819,6 +859,7 @@ mod tests {
                 ("watchlist_released", run(vec![page(), page(), page()], |c, t| { let _ = c.watchlist_released(t); }).1),
                 ("user_state", run(vec![status(200)], |c, t| { let _ = c.user_state(HEX, t); }).1),
                 ("catalog_item", run(vec![status(200)], |c, t| { let _ = c.catalog_item(HEX, t); }).1),
+                ("catalog_match", run(vec![status(200)], |c, t| { let _ = c.catalog_match(false, "com.plexapp.agents.imdb://tt1", t); }).1),
                 ("watchlist_add", run(vec![status(200)], |c, t| { let _ = c.watchlist_add(HEX, t); }).1),
                 ("watchlist_remove", run(vec![status(200)], |c, t| { let _ = c.watchlist_remove(HEX, t); }).1),
             ];

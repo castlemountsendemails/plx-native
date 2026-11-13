@@ -485,6 +485,37 @@ pub fn catalog_hex_of_guid(guid: &str) -> Option<[u8; 12]> {
     Some(out)
 }
 
+/// The legacy-agent prefixes whose id the Plex catalog can match.
+const LEGACY_AGENTS: [(&str, &str); 3] = [
+    ("com.plexapp.agents.imdb://", "imdb://"),
+    ("com.plexapp.agents.themoviedb://", "tmdb://"),
+    ("com.plexapp.agents.thetvdb://", "tvdb://"),
+];
+
+/// A legacy-agent guid that names an IMDb, TMDB or TVDB id, with its `?lang=…` dropped (the PMS
+/// guid filter matches the bare form). `None` for `local://`, `plex://`, other agents, and an
+/// episode's `<show>/<season>/<episode>` guid.
+pub fn legacy_catalog_guid(guid: &str) -> Option<&str> {
+    let bare = guid.split('?').next()?;
+    let id = LEGACY_AGENTS.iter().find_map(|(agent, _)| bare.strip_prefix(agent))?;
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(bare)
+}
+
+/// The legacy-agent guids a server may hold a catalog title under, built from the external ids of
+/// its catalog record (`imdb://tt…`, `tmdb://…`, `tvdb://…`).
+pub fn legacy_forms(external: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in external {
+        let form = LEGACY_AGENTS.iter().find_map(|(agent, ext)| id.strip_prefix(ext).map(|rest| format!("{agent}{rest}")));
+        if let Some(form) = form.filter(|f| legacy_catalog_guid(f) == Some(f.as_str())) {
+            if !out.contains(&form) {
+                out.push(form);
+            }
+        }
+    }
+    out
+}
+
 /// WORKER. The catalog id to write to: the one the row already carries, else the one the item's own
 /// server record names. `fetch` is `|| client.metadata(rk).map(|m| m.guid)` (or `grandparent`'s
 /// `show_rk` read for an episode's show); it is not called when `known` is set, so a press from a
@@ -554,6 +585,17 @@ impl Metadata {
     pub fn show_guid_hex(&self) -> Option<[u8; 12]> {
         let guid = if self.kind == "season" { &self.parent_guid } else { &self.grandparent_guid };
         catalog_hex_of_guid(guid)
+    }
+
+    /// [`legacy_catalog_guid`] of this item's own guid.
+    pub fn legacy_guid(&self) -> Option<String> {
+        legacy_catalog_guid(&self.guid).map(str::to_owned)
+    }
+
+    /// [`legacy_catalog_guid`] of the show's guid, read as [`Self::show_guid_hex`] reads it.
+    pub fn show_legacy_guid(&self) -> Option<String> {
+        let guid = if self.kind == "season" { &self.parent_guid } else { &self.grandparent_guid };
+        legacy_catalog_guid(guid).map(str::to_owned)
     }
 
     /// Media[0].Part[0] — the primary playable part (None for a show container, which carries
@@ -1210,7 +1252,7 @@ fn de_ultrablur<'de, D: serde::Deserializer<'de>>(
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog_hex_of_guid, resolve_catalog_hex, Envelope};
+    use super::{catalog_hex_of_guid, legacy_catalog_guid, legacy_forms, resolve_catalog_hex, Envelope};
 
     const HEX: &str = "5d7768264de0ee001fcc87e4";
     const BYTES: [u8; 12] = [0x5d, 0x77, 0x68, 0x26, 0x4d, 0xe0, 0xee, 0x00, 0x1f, 0xcc, 0x87, 0xe4];
@@ -1271,6 +1313,31 @@ mod tests {
             .expect("parse")
             .media_container;
         assert_eq!((mc.metadata[0].guid_hex(), mc.metadata[0].show_guid_hex()), (None, None));
+    }
+
+    #[test]
+    fn only_imdb_tmdb_and_tvdb_legacy_guids_name_a_catalog_match() {
+        assert_eq!(legacy_catalog_guid("com.plexapp.agents.imdb://tt0075686?lang=en"), Some("com.plexapp.agents.imdb://tt0075686"));
+        assert_eq!(legacy_catalog_guid("com.plexapp.agents.thetvdb://291866"), Some("com.plexapp.agents.thetvdb://291866"));
+        assert_eq!(legacy_catalog_guid("com.plexapp.agents.themoviedb://90702?lang=es"), Some("com.plexapp.agents.themoviedb://90702"));
+        for g in [
+            "", "local://1234", "com.plexapp.agents.none://abc", "com.plexapp.agents.hama://anidb-1",
+            "com.plexapp.agents.thetvdb://291866/1/3?lang=en", "com.plexapp.agents.imdb://", "imdb://tt0075686",
+            &format!("plex://movie/{HEX}"),
+        ] {
+            assert_eq!(legacy_catalog_guid(g), None, "{g:?}");
+        }
+    }
+
+    #[test]
+    fn a_catalog_records_external_ids_become_the_legacy_forms_a_server_holds() {
+        let ids = ["imdb://tt4565380", "tmdb://69557", "tvdb://291866", "tvdb://291866", "freebase://x", "imdb://"]
+            .map(String::from);
+        assert_eq!(legacy_forms(&ids), [
+            "com.plexapp.agents.imdb://tt4565380",
+            "com.plexapp.agents.themoviedb://69557",
+            "com.plexapp.agents.thetvdb://291866",
+        ]);
     }
 
     #[test]

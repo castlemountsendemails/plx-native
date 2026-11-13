@@ -28,6 +28,7 @@ mod identity_tests;
 #[cfg(test)]
 mod placeholder_tests;
 
+use plx_data::catalog_ids::{Resolved, TitleId};
 use plx_data::metadata::{Detail, Extra, Spot};
 use crate::registry::{key_cap, unlive_excess, EvictOrder, PlayIntent};
 use plx_plex::plex::ServerId;
@@ -304,8 +305,13 @@ pub struct DetailScreen {
     /// [`plx_appkit::watchlist_disc::Disc`]'s. Render and input state only (never hashed): the
     /// Watchlist store owns the truth, this page keeps no copy of the list.
     watchlist: plx_appkit::watchlist_disc::Disc,
-    /// The loaded item's catalog id (movie or show guid, decoded once), mirrored for the app's feed.
+    /// The catalog id the disc acts on: the loaded item's own, or the one the app's lookup found
+    /// for its legacy guid. Mirrored for the app's feed and the season and episode menus.
     watchlist_hex: Option<[u8; 12]>,
+    /// The loaded item's Watchlist title ([`watchlist_title_of`]).
+    watchlist_title: Option<TitleId>,
+    /// The app's lookup answer, with the title it answers.
+    watchlist_lookup: Option<(TitleId, Resolved)>,
     season_metrics: season::Metrics,
     about_rows: about::Rows,
     /// The page's own keyed ground. Deliberately a bare [`AmbientWash`] and not the shared
@@ -503,10 +509,69 @@ impl Drop for LayoutPin<'_> {
 }
 
 impl DetailScreen {
-    /// The loaded item's catalog id, once the page has loaded one with a `plex://movie|show` guid.
-    /// The app reads it to look up the membership it hands back through [`Self::set_watchlist`].
+    /// The catalog id the disc acts on, once known. The app reads it to look up the membership it
+    /// hands back through [`Self::set_watchlist`].
     pub fn watchlist_hex(&self) -> Option<[u8; 12]> {
         self.watchlist_hex
+    }
+
+    /// The loaded item's Watchlist title: its catalog id, else an IMDb, TMDB or TVDB legacy title.
+    pub fn watchlist_title(&self) -> Option<&TitleId> {
+        self.watchlist_title.as_ref()
+    }
+
+    /// The app's feed: `resolve` answers the catalog-id lookup for the loaded title. Returns the
+    /// catalog id the disc acts on, `None` while it is waiting or when the catalog has no match
+    /// (which removes the disc).
+    pub fn resolve_watchlist(&mut self, resolve: impl FnOnce(&TitleId) -> Resolved) -> Option<[u8; 12]> {
+        let title = self.watchlist_title.as_ref()?;
+        let resolved = resolve(title);
+        if !matches!(&self.watchlist_lookup, Some((t, r)) if t == title && *r == resolved) {
+            self.watchlist_lookup = Some((title.clone(), resolved));
+            plx_machine::idle::invalidate();
+        }
+        self.watchlist_hex = match resolved {
+            Resolved::Hex(hex) => Some(hex),
+            Resolved::Waiting | Resolved::NoMatch => None,
+        };
+        self.watchlist_hex
+    }
+
+    /// Follow the loaded record's title, rebuilding it only when its guid changed (no per-frame
+    /// allocation); the disc acts on the record's own catalog id or on the lookup's.
+    fn step_watchlist_title(&mut self, meta: plx_data::metadata::MetadataView<'_>) {
+        let Some(d) = self.detail(meta) else {
+            self.watchlist_title = None;
+            self.watchlist_hex = None;
+            return;
+        };
+        let same = match &self.watchlist_title {
+            Some(TitleId::Catalog(hex)) => plx_plex::plex::catalog_hex_of_guid(&d.guid) == Some(*hex),
+            Some(TitleId::Legacy(t)) => plx_plex::plex::legacy_catalog_guid(&d.guid) == Some(t.guid.as_str()),
+            None => false,
+        };
+        if !same {
+            self.watchlist_title = watchlist_title_of(d).map(|(_, t)| t);
+        }
+        self.watchlist_hex = match &self.watchlist_title {
+            Some(TitleId::Catalog(hex)) => Some(*hex),
+            Some(title) => match &self.watchlist_lookup {
+                Some((t, Resolved::Hex(hex))) if t == title => Some(*hex),
+                _ => None,
+            },
+            None => None,
+        };
+    }
+
+    /// Does the loaded item get the disc? A title with a catalog id, or a legacy title the catalog
+    /// has not answered "no match" for. Reads the record, so it holds on the frame it loads.
+    fn disc_shown(&self, meta: plx_data::metadata::MetadataView<'_>) -> bool {
+        let Some(d) = self.detail(meta) else { return false };
+        if plx_plex::plex::catalog_hex_of_guid(&d.guid).is_some() {
+            return true;
+        }
+        let Some(bare) = plx_plex::plex::legacy_catalog_guid(&d.guid) else { return false };
+        !matches!(&self.watchlist_lookup, Some((TitleId::Legacy(t), Resolved::NoMatch)) if t.guid == bare)
     }
 
     /// The membership the bookmark disc wears: On draws the filled face, Off and Unknown the outline
@@ -579,6 +644,8 @@ impl DetailScreen {
             disc_unfurl: [Spring::at(0.0); 3],
             watchlist: plx_appkit::watchlist_disc::Disc::new(plx_data::catalog::Membership::Unknown),
             watchlist_hex: None,
+            watchlist_title: None,
+            watchlist_lookup: None,
             season_metrics: season::Metrics::new(),
             about_rows: about::Rows::new(),
             ground,
@@ -3260,6 +3327,14 @@ fn hero_blurb<'a>(
 /// The units a provider quotes its score in. `ui::fmt` formats a score from its SCALE alone, so the
 /// screen, which knows the provider, says which: IMDb is out of ten, every other badge a percentage.
 /// Exhaustive on purpose — a provider added to `RatingArt` has to choose its units here.
+/// The Watchlist title a Detail record names, and the kind its rows act on: a show page is a
+/// `Show`, anything else a `Movie` (an episode's or season's guid names no title).
+fn watchlist_title_of(d: &Detail) -> Option<(plx_data::watchlist::model::Kind, TitleId)> {
+    use plx_data::watchlist::model::Kind;
+    let kind = if d.kind == "show" { Kind::Show } else { Kind::Movie };
+    TitleId::of(kind, plx_plex::plex::catalog_hex_of_guid(&d.guid), Some(&d.guid)).map(|t| (kind, t))
+}
+
 fn rating_scale(art: plx_data::metadata::RatingArt) -> plx_ui::fmt::RatingScale {
     use plx_data::metadata::RatingArt as A;
     use plx_ui::fmt::RatingScale;
@@ -3716,7 +3791,7 @@ impl DetailScreen {
         };
         // The bookmark disc's flip, and the identity the app's feed reads. Decorative: it moves
         // no layout, so it never holds a page image.
-        self.watchlist_hex = self.detail(meta).and_then(|d| plx_plex::plex::catalog_hex_of_guid(&d.guid));
+        self.step_watchlist_title(meta);
         let watchlist_moving = self.watchlist.step(dt);
         for (i, spring) in self.disc_unfurl.iter_mut().enumerate() {
             spring.step(
@@ -4199,7 +4274,7 @@ impl DetailScreen {
             trailer: false,
             alt: self.alt_available(meta),
             mark,
-            watchlist: self.detail(meta).is_some_and(|d| plx_plex::plex::catalog_hex_of_guid(&d.guid).is_some()),
+            watchlist: self.disc_shown(meta),
         }
     }
 
@@ -4388,7 +4463,14 @@ impl DetailScreen {
             // refuses. An item with no `plex://movie|show` guid (an episode) presses nothing.
             hero::HeroCtl::Watchlist => {
                 if let Some(d) = self.detail(meta) {
-                    if let Some(act) = hero::press(&d.guid, self.watchlist.membership()).filter(|_| self.watchlist_hex.is_some()) {
+                    let title = watchlist_title_of(d);
+                    let (kind, legacy) = match &title {
+                        Some((kind, TitleId::Legacy(t))) => (*kind, Some(t)),
+                        Some((kind, TitleId::Catalog(_))) => (*kind, None),
+                        None => (plx_data::watchlist::model::Kind::Movie, None),
+                    };
+                    let hex = self.watchlist_hex.filter(|_| title.is_some());
+                    if let Some(act) = hero::press(kind, hex, legacy, self.watchlist.membership()) {
                         self.watchlist.press();
                         fx.push(Fx::App(AppFx::ItemMenu(crate::registry::ItemMenuReq {
                             act, sid: d.sid, item: None, season: None, loaded_episode: false, from_home: false,

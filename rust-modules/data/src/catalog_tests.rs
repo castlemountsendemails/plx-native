@@ -42,6 +42,7 @@ fn item(title: &str, date: Option<&str>) -> CatalogItem {
         genres: vec!["Drama".into(), "Thriller".into()],
         content_rating: None,
         duration_ms: None,
+        guids: Vec::new(),
     }
 }
 

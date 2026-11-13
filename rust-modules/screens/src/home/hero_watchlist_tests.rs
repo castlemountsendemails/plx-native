@@ -389,3 +389,54 @@ fn the_watchlist_name_changes_on_the_glyphs_flip_clock() {
         assert_eq!(only_name(caption_alphas(&s, view, Some(2))), to_name, "{to:?}: settled on the new name");
     }
 }
+
+/// One movie hero (rk 1) that its server knows only by an IMDb legacy guid.
+fn seeded_legacy() -> plx_data::pms::HubsSnapshot {
+    let mut state = plx_data::pms::PmsState::default();
+    let adapter = std::sync::Arc::new(plx_data::pms::PmsAdapter::default());
+    plx_data::pms::seed_for_test(&mut state, &adapter, 3, plx_data::pms::HubState::Ready);
+    plx_data::pms::edit_test_item(&mut state, "1", &|m| {
+        m.kind = 0;
+        m.legacy_guid = Some("com.plexapp.agents.imdb://tt0075686".into());
+    });
+    plx_data::pms::hubs_snapshot(&state)
+}
+
+/// A legacy hero draws the disc from the first frame; before its catalog id arrives the press adds
+/// through the lookup, and after it the press adds and removes by that id.
+#[test]
+fn a_legacy_hero_has_the_disc_up_front_and_presses_by_its_looked_up_id() {
+    use crate::registry::ItemMenuAction as Action;
+    use plx_data::catalog_ids::Resolved;
+    let _guard = plx_base::testlock::serial();
+    let snapshot = seeded_legacy();
+    let view = snapshot.view();
+    let mut s = screen(view);
+    tick(&mut s, view, 1);
+    assert!(disc_rect(&s, view).is_some(), "the disc is there before any answer");
+    assert_eq!((s.hero_slots(view), s.watchlist_hex()), (([0, 2, 1], 3), None));
+    let (_, out, _) = step(&mut s, view, None, &ScreenEvent::Activate(HERO_WATCHLIST_ELEM));
+    assert_eq!(item_menu_act(&out),
+        Some(Action::WatchlistAddLegacy { kind: plx_data::watchlist::model::Kind::Movie, guid: "com.plexapp.agents.imdb://tt0075686".into() }));
+    assert_eq!(s.resolve_watchlist(|_| Resolved::Hex(HEX_A)), Some(HEX_A));
+    tick(&mut s, view, 1);
+    assert_eq!(s.watchlist_hex(), Some(HEX_A));
+    s.set_watchlist(HEX_A, Membership::On);
+    let (_, out, _) = step(&mut s, view, None, &ScreenEvent::Activate(HERO_WATCHLIST_ELEM));
+    assert_eq!(item_menu_act(&out), Some(Action::WatchlistRemove(format!("plex://movie/{}", "a1".repeat(12)))));
+}
+
+/// The catalog has no match for the legacy hero: the disc goes and the row is Play and Info.
+#[test]
+fn a_legacy_hero_the_catalog_does_not_have_loses_the_disc() {
+    use plx_data::catalog_ids::Resolved;
+    let _guard = plx_base::testlock::serial();
+    let snapshot = seeded_legacy();
+    let view = snapshot.view();
+    let mut s = screen(view);
+    tick(&mut s, view, 1);
+    assert_eq!(s.resolve_watchlist(|_| Resolved::NoMatch), None);
+    tick(&mut s, view, 1);
+    assert!(disc_rect(&s, view).is_none());
+    assert_eq!(s.hero_slots(view), ([0, 1, 0], 2));
+}

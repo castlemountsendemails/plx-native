@@ -664,6 +664,12 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
         // The write is queued on the Watchlist store (the ledger flips the face at once and puts it
         // back if plex.tv refuses) and the strip's bookmark pulses: the APP owns that, not the menu.
         Action::WatchlistAdd { hex } => bridge.watchlist_add(hex),
+        // A legacy title: added once the catalog-id lookup has its id (`Bridge::watchlist_add_legacy`).
+        Action::WatchlistAddLegacy { kind, guid } => {
+            if let Some(title) = plx_data::catalog_ids::LegacyTitle::of(kind, &guid) {
+                bridge.watchlist_add_legacy(title);
+            }
+        }
         // The hold menu's Go to row: the catalog page of the title, by the identity captured when
         // the menu opened (a guid with no catalog id has no page).
         Action::GoToCatalog(guid) => {

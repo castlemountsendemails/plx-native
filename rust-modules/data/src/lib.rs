@@ -14,6 +14,7 @@
 
 pub mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
 pub mod catalog; // the catalog page's discover record, Membership and Load (plan W6)
+pub mod catalog_ids; // a legacy-agent title to its catalog id, and a catalog id to the legacy forms a server holds
 pub mod collection; // collection page model: tag resolution, header metadata and paged members
 pub mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
 pub mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media

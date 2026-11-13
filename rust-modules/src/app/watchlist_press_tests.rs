@@ -8,6 +8,9 @@
 use super::*;
 use super::test_support::tick;
 use plx_data::catalog::{CatalogIo, Load, Membership};
+use plx_data::catalog_ids::{LegacyTitle, Resolved, TitleId};
+use plx_data::stores::catalog_ids::CatalogIdStore;
+use plx_screens::item_menu::watchlist::Subject;
 use plx_data::stores::catalog::CatalogStore;
 use plx_data::stores::watchlist::WatchlistStore;
 use plx_data::watchlist::ledger::Intent;
@@ -44,6 +47,9 @@ pub(super) struct Script {
     records: Mutex<HashMap<(ServerId, String), String>>,
     /// Record reads made (a hex the row already carried costs none).
     record_reads: AtomicU32,
+    /// Discover's `matches` answers, front first; empty = no answer (a failed lookup).
+    matches: Mutex<Vec<Result<Option<[u8; 12]>, WatchlistError>>>,
+    match_asks: AtomicU32,
 }
 
 impl Script {
@@ -80,6 +86,8 @@ impl Script {
             facts: AtomicU32::new(1),
             records: Mutex::new(HashMap::new()),
             record_reads: AtomicU32::new(0),
+            matches: Mutex::new(Vec::new()),
+            match_asks: AtomicU32::new(0),
         })
     }
 }
@@ -142,6 +150,11 @@ impl WatchlistIo for Script {
     fn today(&self) -> Option<String> {
         Some("2026-10-15".into())
     }
+    fn catalog_match(&self, _: &WatchlistAuth, _: &LegacyTitle) -> Result<Option<[u8; 12]>, WatchlistError> {
+        self.match_asks.fetch_add(1, Ordering::SeqCst);
+        let mut answers = self.matches.lock().unwrap();
+        if answers.is_empty() { Err(WatchlistError::Transport) } else { answers.remove(0) }
+    }
 }
 
 /// A scripted discover service for the catalog page: one title, released later than "today".
@@ -171,6 +184,7 @@ impl CatalogIo for Discover {
             genres: vec!["Drama".into()],
             content_rating: None,
             duration_ms: None,
+            guids: Vec::new(),
         })
     }
     fn today(&self) -> Option<String> {
@@ -209,6 +223,7 @@ pub(super) fn rig_over(script: &Arc<Script>) -> (Dispatcher<AppHost>, Bridge) {
     let mut rig = Bridge::for_test(|| 0);
     *rig.watchlist_for_test() = WatchlistStore::with_io(script.clone()).with_spawn_for_test(inline);
     rig.stores.catalog = CatalogStore::with_io(Arc::new(Discover)).with_spawn_for_test(inline);
+    rig.stores.catalog_ids = CatalogIdStore::with_io(script.clone()).with_spawn_for_test(inline);
     super::nav_root(&mut d, AppArg::Home);
     super::frame(&mut d, &mut rig, tick(0), vec![]);
     (d, rig)
@@ -276,7 +291,7 @@ fn the_state_by_press_table_holds_and_opens_the_right_thing_in_all_six_states() 
             assert!(matches!(arg.kind, ItemMenuKind::Catalog { .. }), "{state:?}: the catalog rows");
             assert_eq!((arg.sid, arg.rk.as_str()), (ServerId::UNSET, ""), "{state:?}: no PMS identity");
             let face = arg.watchlist.unwrap_or_else(|| panic!("{state:?}: the Remove face"));
-            assert_eq!((face.hex, face.member), (hex, Membership::On), "{state:?}: the tile is on the list");
+            assert_eq!((face.subject, face.member), (Subject::Hex(hex), Membership::On), "{state:?}: the tile is on the list");
             assert_eq!(arg.catalog.as_ref().map(|c| c.guid.clone()), Some(guid(2)), "{state:?}");
             // OK on such a tile pushes the catalog page of the same id.
             super::open_catalog(&mut d, hex, None);
@@ -397,9 +412,9 @@ fn the_menu_face_carries_the_title_identity_and_the_membership_read_at_open() {
     assert_eq!(unread.member, Membership::Unknown, "wears the Add face");
     read_list(&mut d, &mut rig);
     let on = rig.watchlist_card_face(&movie).unwrap();
-    assert_eq!((on.hex, on.member, on.kind, on.from_episode), ([1; 12], Membership::On, Kind::Movie, false));
+    assert_eq!((on.subject, on.member, on.kind, on.from_episode), (Subject::Hex([1; 12]), Membership::On, Kind::Movie, false));
     let ep = rig.watchlist_card_face(&episode).unwrap();
-    assert_eq!((ep.hex, ep.member, ep.kind, ep.from_episode), ([2; 12], Membership::On, Kind::Show, true),
+    assert_eq!((ep.subject, ep.member, ep.kind, ep.from_episode), (Subject::Hex([2; 12]), Membership::On, Kind::Show, true),
         "an episode acts on its SHOW");
     let off = rig.watchlist_card_face(&plx_data::pms::PmsMovie { kind: 1, guid: Some([6; 12]), ..Default::default() }).unwrap();
     assert_eq!(off.member, Membership::Off);
@@ -511,9 +526,9 @@ fn a_card_row_with_no_guid_resolves_through_its_record_and_the_press_writes_it()
     settle(&mut d, &mut rig, 10);
     assert_eq!(script.record_reads.load(Ordering::SeqCst), 3, "one record read per title, the episode's SHOW record");
     let face = rig.watchlist_card_face(&movie).expect("the movie now offers the row");
-    assert_eq!((face.hex, face.kind, face.from_episode), (hex, Kind::Movie, false));
+    assert_eq!((face.subject.clone(), face.kind, face.from_episode), (Subject::Hex(hex), Kind::Movie, false));
     let face_ep = rig.watchlist_card_face(&episode).expect("the episode offers its show");
-    assert_eq!((face_ep.hex, face_ep.kind, face_ep.from_episode), (show_hex, Kind::Show, true));
+    assert_eq!((face_ep.subject, face_ep.kind, face_ep.from_episode), (Subject::Hex(show_hex), Kind::Show, true));
     assert!(rig.watchlist_card_face(&local).is_none(), "a record with no portable id offers no row");
     settle(&mut d, &mut rig, 20);
     assert_eq!(script.record_reads.load(Ordering::SeqCst), 3, "an answered title is not asked again");
@@ -525,7 +540,7 @@ fn a_card_row_with_no_guid_resolves_through_its_record_and_the_press_writes_it()
     assert_eq!(*script.writes.lock().unwrap(), vec![(hex, Intent::Add)]);
     // A row that already carries its id costs no record read.
     let carried = plx_data::pms::PmsMovie { sid, rk: "11".into(), kind: 0, guid: Some([3; 12]), ..Default::default() };
-    assert_eq!(rig.watchlist_card_face(&carried).map(|f| f.hex), Some([3; 12]));
+    assert_eq!(rig.watchlist_card_face(&carried).map(|f| f.subject), Some(Subject::Hex([3; 12])));
     assert_eq!(script.record_reads.load(Ordering::SeqCst), 3);
 }
 
@@ -645,4 +660,97 @@ fn a_matched_titles_caption_reads_its_copys_facts_under_every_details_pick() {
         set(&mut w, false, details);
         assert_eq!(w.drawn().caption_lines(), [want.to_string()], "{details:?}");
     }
+}
+
+const ANNIE_HALL: &str = "com.plexapp.agents.imdb://tt0075686?lang=en";
+
+fn annie_hall() -> LegacyTitle {
+    LegacyTitle::of(Kind::Movie, ANNIE_HALL).unwrap()
+}
+
+/// A card that names a legacy IMDb title offers the Add row on the first open, before any lookup
+/// has answered; its press waits for the catalog id and the write then goes out for that id.
+#[test]
+fn a_legacy_cards_first_menu_offers_add_and_the_press_waits_for_its_id() {
+    let _serial = plx_base::testlock::serial();
+    let script = Script::new(&[1]);
+    script.matches.lock().unwrap().push(Ok(Some([7; 12])));
+    let (mut d, mut rig) = rig_over(&script);
+    read_list(&mut d, &mut rig);
+    let card = plx_data::pms::PmsMovie {
+        sid: ServerId::from_raw(1), rk: "71261".into(), kind: 0, legacy_guid: Some("com.plexapp.agents.imdb://tt0075686".into()),
+        ..Default::default()
+    };
+    let face = rig.watchlist_card_face(&card).expect("the row is offered on the first open");
+    assert_eq!((face.subject.clone(), face.member), (Subject::Waiting(annie_hall()), Membership::Unknown));
+    let (_, action, _) = plx_screens::item_menu::watchlist::face_row(&face);
+    assert_eq!(action, plx_screens::item_menu::Action::WatchlistAddLegacy { kind: Kind::Movie, guid: annie_hall().guid });
+    rig.watchlist_add_legacy(annie_hall());
+    assert!(script.writes().is_empty(), "nothing is written before the id is known");
+    settle(&mut d, &mut rig, 40);
+    assert_eq!(script.writes(), vec![([7; 12], Intent::Add)], "the waiting press added the looked-up id");
+    assert_eq!(script.match_asks.load(Ordering::SeqCst), 1);
+    let face = rig.watchlist_card_face(&card).unwrap();
+    assert_eq!((face.subject, face.member), (Subject::Hex([7; 12]), Membership::On));
+}
+
+/// The catalog has no such title: the waiting press writes nothing and says so once, and the
+/// title then offers no row.
+#[test]
+fn a_no_match_answer_ends_the_waiting_press_with_the_notice() {
+    let _serial = plx_base::testlock::serial();
+    let script = Script::new(&[1]);
+    script.matches.lock().unwrap().push(Ok(None));
+    let (mut d, mut rig) = rig_over(&script);
+    read_list(&mut d, &mut rig);
+    rig.watchlist_add_legacy(annie_hall());
+    settle(&mut d, &mut rig, 40);
+    assert!(script.writes().is_empty());
+    assert_eq!(rig.watchlist_notices_for_test(), 1);
+    assert_eq!(plx_platform::i18n::msg::watchlist_notice_not_in_catalog(), "Not in the Plex catalog");
+    let card = plx_data::pms::PmsMovie { kind: 0, legacy_guid: Some(annie_hall().guid), ..Default::default() };
+    assert!(rig.watchlist_card_face(&card).is_none(), "no row for a title the catalog does not have");
+    rig.watchlist_add_legacy(annie_hall());
+    assert_eq!(rig.watchlist_notices_for_test(), 2, "a later press is answered from memory");
+    assert_eq!(script.match_asks.load(Ordering::SeqCst), 1);
+}
+
+/// A failed lookup ends the waiting press as a refused add does (no write, no notice) and is not
+/// stored: the next press asks again.
+#[test]
+fn a_failed_lookup_drops_the_press_and_the_next_press_asks_again() {
+    let _serial = plx_base::testlock::serial();
+    let script = Script::new(&[1]);
+    script.matches.lock().unwrap().extend([Err(WatchlistError::Other(429)), Ok(Some([7; 12]))]);
+    let (mut d, mut rig) = rig_over(&script);
+    read_list(&mut d, &mut rig);
+    rig.watchlist_add_legacy(annie_hall());
+    settle(&mut d, &mut rig, 40);
+    assert!(script.writes().is_empty());
+    assert_eq!(rig.watchlist_notices_for_test(), 0);
+    assert_eq!(rig.stores.catalog_ids.resolve(&TitleId::Legacy(annie_hall())), Resolved::Waiting, "never shown as a result");
+    settle(&mut d, &mut rig, 50);
+    assert_eq!(script.match_asks.load(Ordering::SeqCst), 1, "not re-asked on its own");
+    rig.watchlist_add_legacy(annie_hall());
+    settle(&mut d, &mut rig, 60);
+    assert_eq!(script.writes(), vec![([7; 12], Intent::Add)]);
+}
+
+/// The lookup's answers are the account's catalog's, not the profile's: a profile switch resets
+/// the Watchlist and keeps them.
+#[test]
+fn lookup_answers_survive_a_profile_switch() {
+    let _serial = plx_base::testlock::serial();
+    let script = Script::new(&[1]);
+    script.matches.lock().unwrap().push(Ok(Some([7; 12])));
+    let (mut d, mut rig) = rig_over(&script);
+    read_list(&mut d, &mut rig);
+    let title = TitleId::Legacy(annie_hall());
+    rig.stores.catalog_ids.resolve(&title);
+    settle(&mut d, &mut rig, 40);
+    assert_eq!(rig.stores.catalog_ids.resolve(&title), Resolved::Hex([7; 12]));
+    rig.watchlist_for_test().run(plx_data::stores::watchlist::WatchlistCmd::Reset);
+    settle(&mut d, &mut rig, 50);
+    assert_eq!(rig.stores.catalog_ids.resolve(&title), Resolved::Hex([7; 12]));
+    assert_eq!(script.match_asks.load(Ordering::SeqCst), 1);
 }

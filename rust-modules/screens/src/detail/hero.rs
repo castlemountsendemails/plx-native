@@ -328,21 +328,20 @@ use plx_data::catalog::Membership;
 
 pub use plx_appkit::watchlist_disc::{face_icon, Face};
 
-/// The 12 hex bytes of a PMS item's `plex://movie|show/<hex>` guid, `None` for any other shape.
-pub fn guid_hex(guid: &str) -> Option<[u8; 12]> {
-    plx_data::watchlist::decode_hex(guid.rsplit('/').next()?)
-}
-
 /// What a press on the disc asks for: Add when the title is not (known to be) on the list, Remove
-/// when it is. `None` when the item carries no guid in the form the service takes — the disc then
-/// stays drawn but the press does nothing. The Remove arm is keyed by the guid string, like the
-/// menu's own.
-pub fn press(guid: &str, m: Membership) -> Option<crate::registry::ItemMenuAction> {
+/// when it is, both by the title's catalog id `hex` (never by the page's own guid, which may be a
+/// legacy one). A `legacy` title whose id has not arrived adds through the catalog-id lookup.
+/// `None` when the title has neither.
+pub fn press(
+    kind: plx_data::watchlist::model::Kind, hex: Option<[u8; 12]>, legacy: Option<&plx_data::catalog_ids::LegacyTitle>,
+    m: Membership,
+) -> Option<crate::registry::ItemMenuAction> {
     use crate::registry::ItemMenuAction as Action;
-    let hex = guid_hex(guid)?;
-    Some(match m {
-        Membership::On => Action::WatchlistRemove(guid.to_string()),
-        Membership::Off | Membership::Unknown => Action::WatchlistAdd { hex },
+    Some(match (hex, legacy, m) {
+        (Some(hex), _, Membership::On) => Action::WatchlistRemove(plx_data::watchlist::guid_of(kind, &hex)),
+        (Some(hex), ..) => Action::WatchlistAdd { hex },
+        (None, Some(t), _) => Action::WatchlistAddLegacy { kind: t.kind, guid: t.guid.clone() },
+        (None, None, _) => return None,
     })
 }
 

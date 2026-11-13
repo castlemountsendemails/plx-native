@@ -23,5 +23,6 @@
   "watchlist.empty.filtered_body": "Modifiez Trier et filtrer pour voir le reste de votre liste de suivi.",
   "watchlist.empty.unreachable": "Impossible d’accéder à votre liste de suivi",
   "watchlist.detail.trailer": "Bande-annonce",
-  "watchlist.page.debug_write_blocked": "Débogage : écriture dans la liste bloquée"
+  "watchlist.page.debug_write_blocked": "Débogage : écriture dans la liste bloquée",
+  "watchlist.notice.not_in_catalog": "Absent du catalogue Plex"
 }

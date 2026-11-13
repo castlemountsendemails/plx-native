@@ -73,6 +73,14 @@ fn non_plex_and_duplicate_guids_are_dropped_in_order() {
 }
 
 #[test]
+fn a_bare_legacy_form_is_asked_beside_plex_guids() {
+    let legacy = "com.plexapp.agents.thetvdb://291866".to_string();
+    let chunks = guid_lookup_paths(GuidKind::Show, &[guid("show", 1), legacy.clone()]);
+    assert_eq!(chunks[0].1, vec![guid("show", 1), legacy]);
+    assert!(query_param(&chunks[0].0, "guid").unwrap().contains("com.plexapp.agents.thetvdb%3A%2F%2F291866"), "{}", chunks[0].0);
+}
+
+#[test]
 fn no_request_carries_a_token() {
     for (path, _) in guid_lookup_paths(GuidKind::Show, &guids("show", 3)) {
         assert!(!path.contains("X-Plex-Token"), "{path}");
@@ -155,6 +163,19 @@ mod loopback {
         assert_eq!(got, vec![
             GuidMatch { guid: g[0].clone(), rating_key: "101".into(), library_section_id: Some(4), blur: None, facts: Default::default() },
             GuidMatch { guid: g[2].clone(), rating_key: "103".into(), library_section_id: None, blur: None, facts: Default::default() },
+        ]);
+    }
+
+    #[test]
+    fn a_legacy_row_answers_with_its_language_suffix_and_matches_the_bare_form_asked() {
+        let asked = vec!["com.plexapp.agents.imdb://tt12003946".to_string()];
+        let body = format!(r#"{{"MediaContainer":{{"size":1,"Metadata":[{}]}}}}"#,
+            row("com.plexapp.agents.imdb://tt12003946?lang=en", "71261", 9));
+        let (port, server) = serve(vec![("200 OK", body)]);
+        let got = client(port).find_by_guids(GuidKind::Movie, &asked).unwrap();
+        server.join().unwrap();
+        assert_eq!(got, vec![
+            GuidMatch { guid: asked[0].clone(), rating_key: "71261".into(), library_section_id: Some(9), blur: None, facts: Default::default() },
         ]);
     }
 

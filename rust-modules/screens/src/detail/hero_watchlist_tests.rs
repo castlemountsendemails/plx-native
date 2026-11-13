@@ -97,19 +97,34 @@ fn the_disc_has_no_label_and_never_widens() {
     assert_eq!(next.x, r.x + r.w + CGAP);
 }
 
-/// Membership x press: Add from Off and Unknown, Remove from On; no usable guid, no press.
+/// Membership x press: Add from Off and Unknown, Remove from On; no id and no legacy title, no press.
 #[test]
 fn the_press_table() {
     use crate::registry::ItemMenuAction as Action;
+    use plx_data::watchlist::model::Kind;
     let hex = plx_data::watchlist::decode_hex(HEX).unwrap();
-    assert_eq!(guid_hex(GUID), Some(hex));
-    assert_eq!(press(GUID, Membership::Off), Some(Action::WatchlistAdd { hex }));
-    assert_eq!(press(GUID, Membership::Unknown), Some(Action::WatchlistAdd { hex }));
-    assert_eq!(press(GUID, Membership::On), Some(Action::WatchlistRemove(GUID.into())));
-    for bad in ["", "plex://movie/", "plex://movie/zz", "/library/metadata/42"] {
-        assert_eq!(press(bad, Membership::Off), None, "{bad:?}");
-        assert_eq!(press(bad, Membership::On), None, "{bad:?}");
+    assert_eq!(press(Kind::Movie, Some(hex), None, Membership::Off), Some(Action::WatchlistAdd { hex }));
+    assert_eq!(press(Kind::Movie, Some(hex), None, Membership::Unknown), Some(Action::WatchlistAdd { hex }));
+    assert_eq!(press(Kind::Movie, Some(hex), None, Membership::On), Some(Action::WatchlistRemove(GUID.into())));
+    for m in [Membership::Off, Membership::On] {
+        assert_eq!(press(Kind::Movie, None, None, m), None);
     }
+}
+
+/// A legacy page: Remove is keyed by the looked-up catalog id, not the page's own guid, and before
+/// the id arrives the press adds through the lookup.
+#[test]
+fn a_legacy_title_presses_by_its_looked_up_id() {
+    use crate::registry::ItemMenuAction as Action;
+    use plx_data::watchlist::model::Kind;
+    let hex = plx_data::watchlist::decode_hex(HEX).unwrap();
+    let legacy = plx_data::catalog_ids::LegacyTitle::of(Kind::Movie, "com.plexapp.agents.imdb://tt0075686?lang=en").unwrap();
+    assert_eq!(press(Kind::Movie, Some(hex), Some(&legacy), Membership::On), Some(Action::WatchlistRemove(GUID.into())));
+    assert_eq!(press(Kind::Movie, Some(hex), Some(&legacy), Membership::Off), Some(Action::WatchlistAdd { hex }));
+    assert_eq!(
+        press(Kind::Movie, None, Some(&legacy), Membership::Unknown),
+        Some(Action::WatchlistAddLegacy { kind: Kind::Movie, guid: "com.plexapp.agents.imdb://tt0075686".into() }),
+    );
 }
 
 /// Without a Watchlist-takeable guid the row has no disc at all: Play, then whatever follows.

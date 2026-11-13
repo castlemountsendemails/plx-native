@@ -32,7 +32,9 @@
 //! What the application does with the page's requests is `content::watchlist_requests`.
 use std::collections::HashMap;
 
+use plx_data::catalog_ids::{LegacyTitle, Match, Resolved, TitleId};
 use plx_data::stores::watchlist::{Status, WatchlistCmd};
+use plx_screens::item_menu::watchlist::{Face, Subject};
 use plx_data::watchlist::ledger::Intent;
 use plx_screens::registry::{AppArg, WatchlistMenuArg};
 use plx_screens::watchlist::options::WatchlistOptionsState;
@@ -163,6 +165,7 @@ impl Bridge {
         if feed.instance != Some(instance) {
             *feed = Feed { instance: Some(instance), reread_at: feed.reread_at, ..Feed::default() };
             store.run(WatchlistCmd::Open);
+            self.stores.catalog_ids.forget_failures();
         }
         // The window follows the focus (the page's own cursor, a reserved cell past the loaded
         // tail included), over the whole list.
@@ -254,6 +257,56 @@ impl Bridge {
     pub(crate) fn watchlist_add(&mut self, hex: [u8; 12]) {
         self.watchlist_press(hex, Intent::Add);
         self.chrome.pulse(plx_ui::widgets::TAB_KEY_WATCHLIST);
+    }
+
+    /// A press on a title a server knows only by its legacy guid (`Action::WatchlistAddLegacy`):
+    /// added as soon as the catalog-id lookup has its id, asked again even after a failed ask.
+    /// The catalog's "no match" ends it with the not-in-catalog toast.
+    pub(crate) fn watchlist_add_legacy(&mut self, title: LegacyTitle) {
+        self.stores.catalog_ids.retry(&title);
+        match self.stores.catalog_ids.resolve(&TitleId::Legacy(title.clone())) {
+            Resolved::Hex(hex) => self.watchlist_add(hex),
+            Resolved::NoMatch => self.not_in_catalog(),
+            Resolved::Waiting => {
+                if !self.watchlist_waiting.contains(&title) {
+                    self.watchlist_waiting.push(title);
+                }
+            }
+        }
+        plx_machine::idle::invalidate();
+    }
+
+    /// Once a frame: land the catalog-id lookup's answers and finish the presses waiting on them.
+    /// A failed lookup ends a waiting press as a refused add does: nothing changes, no toast.
+    fn catalog_ids_pump(&mut self) {
+        let landed = self.stores.catalog_ids.pump(&self.stores.landgate);
+        for (title, answer) in landed {
+            plx_machine::idle::invalidate();
+            let Some(i) = self.watchlist_waiting.iter().position(|t| *t == title) else { continue };
+            self.watchlist_waiting.swap_remove(i);
+            match answer {
+                Some(Match::Found(hex)) => self.watchlist_add(hex),
+                Some(Match::NoMatch) => self.not_in_catalog(),
+                None => plx_base::eventlog::log("watchlist: legacy add not sent (catalog lookup unanswered)"),
+            }
+        }
+    }
+
+    /// Tell the viewer the catalog has no such title, through the television's own toast (the call
+    /// blocks, so it runs on a worker).
+    fn not_in_catalog(&mut self) {
+        self.watchlist_notices += 1;
+        let message = plx_platform::i18n::msg::watchlist_notice_not_in_catalog().to_owned();
+        plx_base::task::spawn_small("wlist-notice", move || {
+            let outcome = plx_platform::tv::toast::toast(&message);
+            plx_base::eventlog::log(&format!("watchlist: not-in-catalog toast {outcome:?}"));
+        });
+    }
+
+    /// "Not in the Plex catalog" notices sent this run.
+    #[cfg(test)]
+    pub(crate) fn watchlist_notices_for_test(&self) -> u32 {
+        self.watchlist_notices
     }
 
     /// What the catalog page's pill asked for (`AppFx::Catalog`): the same write the item menu's rows
@@ -356,8 +409,8 @@ impl Bridge {
         };
         // A Catalog menu's membership row: the tile IS on the list, so it offers Remove.
         let watchlist = match (&kind, hex_of_guid(guid)) {
-            (ItemMenuKind::Catalog { .. }, Some(hex)) => Some(plx_screens::item_menu::watchlist::Face {
-                hex, member: plx_data::catalog::Membership::On, kind: tile.row.kind, from_episode: false,
+            (ItemMenuKind::Catalog { .. }, Some(hex)) => Some(Face {
+                subject: Subject::Hex(hex), member: plx_data::catalog::Membership::On, kind: tile.row.kind, from_episode: false,
             }),
             _ => None,
         };
@@ -426,21 +479,37 @@ impl Bridge {
         }
     }
 
-    /// **The Watchlist subject of an item menu, captured now** ([`plx_screens::item_menu::watchlist::Face`]).
-    /// `None` when the title has no catalog id (`hex` unknown) or plex.tv could not be reached (no
-    /// account, or the first read failed): the menu then omits its row rather than offer a press that
-    /// can only fail. An unread list is `Unknown`, which wears the Add face.
+    /// **The Watchlist subject of an item menu, captured now** ([`Face`]). `None` when plex.tv could
+    /// not be reached (no account, or the first read failed): the menu then omits its row rather
+    /// than offer a press that can only fail. An unread list is `Unknown`, which wears the Add face,
+    /// and so is a legacy title still waiting for its catalog id.
     pub(crate) fn watchlist_face(
-        &self, hex: Option<[u8; 12]>, kind: plx_data::watchlist::model::Kind, from_episode: bool,
-    ) -> Option<plx_screens::item_menu::watchlist::Face> {
-        let hex = hex?;
+        &self, subject: Subject, kind: plx_data::watchlist::model::Kind, from_episode: bool,
+    ) -> Option<Face> {
         let view = self.stores.watchlist.view();
         if matches!(view.status(), Status::NoAccount | Status::Failed(_)) {
             return None;
         }
-        Some(plx_screens::item_menu::watchlist::Face {
-            hex, member: membership_in(&view, &hex), kind, from_episode,
-        })
+        let member = match &subject {
+            Subject::Hex(hex) => membership_in(&view, hex),
+            Subject::Waiting(_) => plx_data::catalog::Membership::Unknown,
+        };
+        Some(Face { subject, member, kind, from_episode })
+    }
+
+    /// [`Self::watchlist_face`] for a title as the catalog-id lookup resolves it now: its catalog
+    /// id, or a legacy title waiting for one. No row for no title, or one the catalog has no
+    /// match for.
+    pub(crate) fn watchlist_title_face(
+        &self, title: Option<&TitleId>, kind: plx_data::watchlist::model::Kind, from_episode: bool,
+    ) -> Option<Face> {
+        let title = title?;
+        let subject = match (title, self.stores.catalog_ids.resolve(title)) {
+            (_, Resolved::Hex(hex)) => Subject::Hex(hex),
+            (TitleId::Legacy(t), Resolved::Waiting) => Subject::Waiting(t.clone()),
+            _ => return None,
+        };
+        self.watchlist_face(subject, kind, from_episode)
     }
 
     /// The face for a PMS card row: a movie or show acts on itself, an episode or a season on its
@@ -450,25 +519,27 @@ impl Bridge {
     /// (`client.metadata(rk or show_rk).guid`, `WatchlistStore::want_hex`): the read is asked for
     /// here and runs on a worker, so the menu being opened now omits the row and the next one
     /// offers it. A server that did not answer, or an item with no portable id, never does.
-    pub(crate) fn watchlist_card_face(
-        &self, item: &plx_data::pms::PmsMovie,
-    ) -> Option<plx_screens::item_menu::watchlist::Face> {
-        let (kind, known, from_episode) = item.watchlist_subject()?;
+    ///
+    /// A row whose guid is an IMDb, TMDB or TVDB legacy one goes through the catalog-id lookup
+    /// instead ([`Self::watchlist_title_face`]), so its row is offered on the first open.
+    pub(crate) fn watchlist_card_face(&self, item: &plx_data::pms::PmsMovie) -> Option<Face> {
+        let (kind, title, from_episode) = item.watchlist_title()?;
+        if title.is_some() {
+            return self.watchlist_title_face(title.as_ref(), kind, from_episode);
+        }
         let rk = if from_episode { item.show_rk.as_str() } else { item.rk.as_str() };
-        let hex = known.or_else(|| {
-            if rk.is_empty() || item.sid == plx_plex::plex::ServerId::UNSET {
-                return None;
+        if rk.is_empty() || item.sid == plx_plex::plex::ServerId::UNSET {
+            return None;
+        }
+        let store = &self.stores.watchlist;
+        let hex = match store.view().resolved_hex(item.sid, rk) {
+            Some(answer) => answer,
+            None => {
+                store.want_hex(item.sid, rk);
+                None
             }
-            let store = &self.stores.watchlist;
-            match store.view().resolved_hex(item.sid, rk) {
-                Some(answer) => answer,
-                None => {
-                    store.want_hex(item.sid, rk);
-                    None
-                }
-            }
-        });
-        self.watchlist_face(hex, kind, from_episode)
+        };
+        self.watchlist_face(Subject::Hex(hex?), kind, from_episode)
     }
 
     /// Once a frame, route-unconditional: the catalog store's landing pass, the catalog page's
@@ -479,6 +550,7 @@ impl Bridge {
         if self.stores.catalog.pump() {
             plx_machine::idle::invalidate();
         }
+        self.catalog_ids_pump();
         let mut catalog: Option<(EntryId, [u8; 12])> = None;
         let mut details: Vec<EntryId> = Vec::new();
         let mut homes: Vec<EntryId> = Vec::new();
@@ -490,12 +562,18 @@ impl Bridge {
                 _ => {}
             }
         }
+        // A Detail page that was not on the stack last frame lets failed lookups be asked again.
+        if details.iter().any(|id| !self.watchlist_details.contains(id)) {
+            self.stores.catalog_ids.forget_failures();
+        }
+        self.watchlist_details.clone_from(&details);
         for id in details {
             let Some(screen) = d.nav.entry_mut(id)
                 .and_then(|e| e.inst.as_mut())
                 .and_then(|i| i.screen.as_any_mut())
                 .and_then(|a| a.downcast_mut::<plx_screens::detail::DetailScreen>()) else { continue };
-            let Some(hex) = screen.watchlist_hex() else { continue };
+            let ids = &self.stores.catalog_ids;
+            let Some(hex) = screen.resolve_watchlist(|t| ids.resolve(t)) else { continue };
             screen.set_watchlist(membership_in(&self.stores.watchlist.view(), &hex));
             self.watchlist_open_if_idle();
         }
@@ -505,7 +583,8 @@ impl Bridge {
                 .and_then(|e| e.inst.as_mut())
                 .and_then(|i| i.screen.as_any_mut())
                 .and_then(|a| a.downcast_mut::<plx_screens::home::HomeScreen>()) else { continue };
-            let Some(hex) = screen.watchlist_hex() else { continue };
+            let ids = &self.stores.catalog_ids;
+            let Some(hex) = screen.watchlist_hex().or_else(|| screen.resolve_watchlist(|t| ids.resolve(t))) else { continue };
             screen.set_watchlist(hex, membership_in(&self.stores.watchlist.view(), &hex));
             self.watchlist_open_if_idle();
         }

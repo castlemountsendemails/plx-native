@@ -110,6 +110,13 @@ pub struct PmsMovie {
     pub guid: Option<[u8; 12]>,
     /// The parent show's catalog id, from `grandparentGuid` (episode); `None` as above.
     pub show_guid: Option<[u8; 12]>,
+    /// The bare legacy-agent guid when `guid` is an IMDb, TMDB or TVDB one
+    /// (`plex::legacy_catalog_guid`): the catalog-id lookup's key for a title with no `guid` id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_guid: Option<String>,
+    /// The same for the parent show (`grandparentGuid`, a season's `parentGuid`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_legacy_guid: Option<String>,
     pub season_index: c_int, // season number (episode: parentIndex, or [`SEASON_UNKNOWN`]; season: index)
     pub show_title: String, // episode: grandparentTitle; season: parentTitle
     pub ep_index: c_int, // episode only: episode number within the season
@@ -186,6 +193,14 @@ impl PmsMovie {
             2 | 3 => Some((Kind::Show, self.show_guid, true)),
             _ => None,
         }
+    }
+
+    /// [`Self::watchlist_subject`] with the title named for the catalog-id lookup: its catalog id,
+    /// else its legacy title. The id is `None` when the row names neither.
+    pub fn watchlist_title(&self) -> Option<(crate::watchlist::model::Kind, Option<crate::catalog_ids::TitleId>, bool)> {
+        let (kind, hex, from_episode) = self.watchlist_subject()?;
+        let legacy = if from_episode { &self.show_legacy_guid } else { &self.legacy_guid };
+        Some((kind, crate::catalog_ids::TitleId::of(kind, hex, legacy.as_deref()), from_episode))
     }
 
     /// Played fraction for the amber resume bar, or None when not in progress — THE one
@@ -437,6 +452,8 @@ pub fn parse_item(it: &plx_plex::plex::Metadata, sid: ServerId) -> PmsMovie {
     m.aired = clean(&it.originally_available_at);
     m.guid = it.guid_hex();
     m.show_guid = it.show_guid_hex();
+    m.legacy_guid = it.legacy_guid();
+    m.show_legacy_guid = it.show_legacy_guid();
     m.kind = match it.kind.as_str() {
         "show" => 1,
         "season" => 2,

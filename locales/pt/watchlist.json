@@ -23,5 +23,6 @@
   "watchlist.empty.filtered_body": "Altere Ordenar e filtrar para ver o resto da sua lista.",
   "watchlist.empty.unreachable": "Não foi possível aceder à sua lista para ver",
   "watchlist.detail.trailer": "Trailer",
-  "watchlist.page.debug_write_blocked": "Depuração: escrita na lista bloqueada"
+  "watchlist.page.debug_write_blocked": "Depuração: escrita na lista bloqueada",
+  "watchlist.notice.not_in_catalog": "Não está no catálogo do Plex"
 }

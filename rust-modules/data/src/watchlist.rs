@@ -14,6 +14,7 @@ pub mod ledger;
 pub mod model;
 pub mod order;
 
+use crate::catalog_ids::{LegacyTitle, RecordIds};
 use ledger::{Intent, PendingWrite, WriteOutcome};
 use model::{Asked, Kind, Reach, ServerMatch, WatchRow};
 use plx_plex::plex::account::AccountClient;
@@ -94,6 +95,16 @@ pub trait WatchlistIo: Reach + Send + Sync {
     fn guid_of(&self, _server: ServerId, _rk: &str) -> Option<String> {
         None
     }
+    /// WORKER THREAD. The catalog id Discover matches `title` to; `Ok(None)` is the catalog's "no
+    /// match". The default never answers.
+    fn catalog_match(&self, _auth: &WatchlistAuth, _title: &LegacyTitle) -> Result<Option<[u8; 12]>, WatchlistError> {
+        Err(WatchlistError::Transport)
+    }
+    /// WORKER THREAD. The external ids of the catalog record `hex` (`Guid[]`). The default is a
+    /// record with none, so a script that never checks reads every "absent" as it was answered.
+    fn catalog_guids(&self, _auth: &WatchlistAuth, _hex: &[u8; 12]) -> Result<Vec<String>, WatchlistError> {
+        Ok(Vec::new())
+    }
 }
 
 /// The production seam: libcurl through `plex::watchlist`, matching through the registered
@@ -159,6 +170,18 @@ impl WatchlistIo for LiveIo {
     }
     fn guid_of(&self, server: ServerId, rk: &str) -> Option<String> {
         plx_plex::plex::client_for(server)?.metadata(rk).map(|m| m.guid)
+    }
+    fn catalog_match(&self, auth: &WatchlistAuth, title: &LegacyTitle) -> Result<Option<[u8; 12]>, WatchlistError> {
+        let client = auth.client();
+        let mut transport = client.watchlist_transport();
+        let answer = client.catalog_match(title.kind == Kind::Show, &title.guid, &mut transport)?;
+        answer.map(|hex| decode_hex(&hex).ok_or(WatchlistError::Unreadable)).transpose()
+    }
+    fn catalog_guids(&self, auth: &WatchlistAuth, hex: &[u8; 12]) -> Result<Vec<String>, WatchlistError> {
+        let client = auth.client();
+        let mut transport = client.watchlist_transport();
+        let answer = client.catalog_item(&encode_hex(hex), &mut transport).map(|item| item.guids);
+        answer
     }
     fn today(&self) -> Option<String> {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
@@ -314,19 +337,36 @@ fn guid_kind(kind: Kind) -> GuidKind {
     }
 }
 
+/// What the match workers need for the reverse check ([`match_on`]): the identity a catalog
+/// record is read with, and the run's record cache.
+#[derive(Clone, Copy)]
+pub struct Reverse<'a> {
+    pub auth: &'a WatchlistAuth,
+    pub records: &'a RecordIds,
+}
+
 /// Match `rows` (guid, kind) against every reachable server: per server and kind, chunks of
 /// [`GUIDS_PER_REQUEST`]. A guid the server answered about is `Held` or `Absent`; a server that did
 /// not answer a chunk leaves its guids unanswered (silent), so `Absent` is never inferred.
-pub fn match_rows(io: &dyn WatchlistIo, rows: &[(String, Kind)]) -> Vec<Answer> {
+pub fn match_rows(io: &dyn WatchlistIo, rows: &[(String, Kind)], reverse: Option<Reverse<'_>>) -> Vec<Answer> {
     let mut out = Vec::new();
     for sid in io.roster().into_iter().filter(|s| io.reachable(*s)) {
-        out.extend(match_on(io, sid, rows));
+        out.extend(match_on(io, sid, rows, reverse));
     }
     out
 }
 
-/// [`match_rows`] against ONE server (it is not asked whether the server is reachable).
-pub fn match_on(io: &dyn WatchlistIo, sid: ServerId, rows: &[(String, Kind)]) -> Vec<Answer> {
+/// One server's copy of a title, from its lookup row; `None` for a key we cannot use.
+fn held(sid: ServerId, m: &GuidMatch) -> Option<Asked> {
+    let rating_key = m.rating_key.parse::<i64>().ok()?;
+    let blur = m.blur.map(quantize_blur);
+    Some(Asked::Held(ServerMatch { server_id: sid, rating_key, blur }, m.facts.clone()))
+}
+
+/// [`match_rows`] against ONE server (it is not asked whether the server is reachable). With
+/// `reverse`, a guid the server answered "absent" is asked again by the title's legacy forms
+/// ([`reverse_check`]) before it is reported.
+pub fn match_on(io: &dyn WatchlistIo, sid: ServerId, rows: &[(String, Kind)], reverse: Option<Reverse<'_>>) -> Vec<Answer> {
     let mut out = Vec::new();
     for kind in [Kind::Movie, Kind::Show] {
         let mut seen = HashSet::new();
@@ -337,27 +377,57 @@ pub fn match_on(io: &dyn WatchlistIo, sid: ServerId, rows: &[(String, Kind)]) ->
             .collect();
         for chunk in guids.chunks(GUIDS_PER_REQUEST) {
             let Ok(found) = io.find(sid, guid_kind(kind), chunk) else { continue };
+            let mut absent = Vec::new();
             for g in chunk {
-                let hit = found.iter().find(|m| &m.guid == g);
-                let held = hit.and_then(|m| m.rating_key.parse::<i64>().ok());
-                match (hit.is_some(), held) {
-                    (true, Some(rating_key)) => out.push((
-                        g.clone(),
-                        sid,
-                        Asked::Held(
-                            ServerMatch {
-                                server_id: sid,
-                                rating_key,
-                                blur: hit.and_then(|m| m.blur).map(quantize_blur),
-                            },
-                            hit.map(|m| m.facts.clone()).unwrap_or_default(),
-                        ),
-                    )),
-                    (true, None) => {} // a key we cannot use: neither held nor absent
-                    (false, _) => out.push((g.clone(), sid, Asked::Absent)),
+                match found.iter().find(|m| &m.guid == g) {
+                    Some(m) => out.extend(held(sid, m).map(|a| (g.clone(), sid, a))),
+                    None => absent.push(g.clone()),
+                }
+            }
+            match reverse {
+                Some(rev) => out.extend(reverse_check(io, sid, kind, absent, rev)),
+                None => out.extend(absent.into_iter().map(|g| (g, sid, Asked::Absent))),
+            }
+        }
+    }
+    out
+}
+
+/// A server that holds a title under a legacy-agent guid answers "absent" by catalog id, so each
+/// such title is asked again by the legacy forms its catalog record names. A title whose record or
+/// server could not be read gets no answer at all from this server (never a false "absent").
+fn reverse_check(io: &dyn WatchlistIo, sid: ServerId, kind: Kind, absent: Vec<String>, rev: Reverse<'_>) -> Vec<Answer> {
+    let mut out = Vec::new();
+    let mut asks: Vec<(String, Vec<String>)> = Vec::new();
+    for g in absent {
+        let Some(hex) = plx_plex::plex::catalog_hex_of_guid(&g) else {
+            out.push((g, sid, Asked::Absent));
+            continue;
+        };
+        match rev.records.legacy_forms(&hex, || io.catalog_guids(rev.auth, &hex)) {
+            Ok(forms) if forms.is_empty() => out.push((g, sid, Asked::Absent)),
+            Ok(forms) => asks.push((g, forms)),
+            Err(_) => {}
+        }
+    }
+    // Requests of at most GUIDS_PER_REQUEST forms, a title's forms never split across two.
+    let mut start = 0;
+    while start < asks.len() {
+        let mut end = start;
+        let mut forms: Vec<String> = Vec::new();
+        while end < asks.len() && (end == start || forms.len() + asks[end].1.len() <= GUIDS_PER_REQUEST) {
+            forms.extend(asks[end].1.iter().cloned());
+            end += 1;
+        }
+        if let Ok(found) = io.find(sid, guid_kind(kind), &forms) {
+            for (g, title_forms) in &asks[start..end] {
+                match found.iter().find(|m| title_forms.contains(&m.guid)) {
+                    Some(m) => out.extend(held(sid, m).map(|a| (g.clone(), sid, a))),
+                    None => out.push((g.clone(), sid, Asked::Absent)),
                 }
             }
         }
+        start = end;
     }
     out
 }
@@ -376,6 +446,7 @@ pub fn run_list(
     tag: Tag,
     known: (&HashSet<String>, u32),
     etag: Option<&str>,
+    records: &RecordIds,
     post: &mut dyn FnMut(Landed),
 ) {
     let mut start = 0u32;
@@ -405,7 +476,7 @@ pub fn run_list(
             .filter(|r| !(skip_known && known.0.contains(&r.guid)))
             .map(|r| (r.guid.clone(), r.kind))
             .collect();
-        let answers = match_rows(io, &keys);
+        let answers = match_rows(io, &keys, Some(Reverse { auth, records }));
         let total = page.total;
         let etag = page.etag;
         post(Landed { tag, what: What::Page { start, total, rows, answers, roster_gen, etag } });
@@ -430,15 +501,25 @@ pub fn run_list(
 }
 
 /// WORKER THREAD: the full re-match of `rows` after the roster moved.
-pub fn run_rematch(io: &dyn WatchlistIo, rows: &[(String, Kind)], tag: Tag, post: &mut dyn FnMut(Landed)) {
+pub fn run_rematch(
+    io: &dyn WatchlistIo, rows: &[(String, Kind)], reverse: Reverse<'_>, tag: Tag, post: &mut dyn FnMut(Landed),
+) {
     let roster_gen = io.roster_gen();
-    let answers = match_rows(io, rows);
+    let answers = match_rows(io, rows, Some(reverse));
     post(Landed { tag, what: What::Rematch { answers, roster_gen } });
 }
 
 /// WORKER THREAD: ask ONE server again about `rows` after its library changed.
-pub fn run_delta(io: &dyn WatchlistIo, sid: ServerId, rows: &[(String, Kind)], tag: Tag, post: &mut dyn FnMut(Landed)) {
-    post(Landed { tag, what: What::Delta { answers: match_on(io, sid, rows) } });
+pub fn run_delta(
+    io: &dyn WatchlistIo, sid: ServerId, rows: &[(String, Kind)], reverse: Reverse<'_>, tag: Tag, post: &mut dyn FnMut(Landed),
+) {
+    post(Landed { tag, what: What::Delta { answers: match_on(io, sid, rows, Some(reverse)) } });
+}
+
+/// WORKER THREAD: ask every reachable server again about `rows`, the titles some server left
+/// unanswered, after a list read that answered 304 and so matched nothing.
+pub fn run_unanswered(io: &dyn WatchlistIo, rows: &[(String, Kind)], reverse: Reverse<'_>, tag: Tag, post: &mut dyn FnMut(Landed)) {
+    post(Landed { tag, what: What::Delta { answers: match_rows(io, rows, Some(reverse)) } });
 }
 
 /// WORKER THREAD: one write. A failure of any kind is `Failed`; the ledger reverts the flip.
