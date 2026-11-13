@@ -1252,7 +1252,7 @@ fn de_ultrablur<'de, D: serde::Deserializer<'de>>(
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog_hex_of_guid, resolve_catalog_hex, Envelope};
+    use super::{catalog_hex_of_guid, legacy_catalog_guid, legacy_forms, resolve_catalog_hex, Envelope};
 
     const HEX: &str = "5d7768264de0ee001fcc87e4";
     const BYTES: [u8; 12] = [0x5d, 0x77, 0x68, 0x26, 0x4d, 0xe0, 0xee, 0x00, 0x1f, 0xcc, 0x87, 0xe4];
