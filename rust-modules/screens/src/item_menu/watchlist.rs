@@ -12,6 +12,7 @@
 use std::convert::Infallible;
 
 use plx_data::catalog::Membership;
+use plx_data::catalog_ids::LegacyTitle;
 use plx_data::watchlist::model::Kind;
 use plx_ui::form::FormSection;
 use plx_ui::form::RowKind;
@@ -20,11 +21,20 @@ use plx_ui::table::Row;
 
 use super::{Action, ItemRow};
 
-/// What the menu is about, as the Watchlist knows it. Identity only.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Face {
+/// Which title the rows act on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Subject {
     /// The 12 bytes of the title's discover guid.
-    pub hex: [u8; 12],
+    Hex([u8; 12]),
+    /// A title known by its legacy-agent guid whose catalog id has not arrived: it offers Add,
+    /// and the press waits for the id.
+    Waiting(LegacyTitle),
+}
+
+/// What the menu is about, as the Watchlist knows it. Identity only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Face {
+    pub subject: Subject,
     /// The membership as read when the menu opened.
     pub member: Membership,
     /// The catalog kind the rows act on: a movie card is `Movie`; an episode or season acts on
@@ -55,6 +65,11 @@ fn add_row(hex: [u8; 12], show_label: bool) -> Built {
     (ItemRow::WatchlistAdd, Action::WatchlistAdd { hex }, Row::new(label).licon(Icon::Bookmark))
 }
 
+fn add_legacy_row(title: &LegacyTitle, show_label: bool) -> Built {
+    let (_, _, row) = add_row([0; 12], show_label);
+    (ItemRow::WatchlistAdd, Action::WatchlistAddLegacy { kind: title.kind, guid: title.guid.clone() }, row)
+}
+
 fn remove_row(guid: String, show_label: bool) -> Built {
     let label = if show_label {
         plx_platform::i18n::msg::watchlist_action_remove_show()
@@ -67,9 +82,10 @@ fn remove_row(guid: String, show_label: bool) -> Built {
 /// The one row a face adds to a card, episode or season menu: Remove when the title is on the
 /// list, Add otherwise (an unknown membership included).
 pub fn face_row(face: &Face) -> Built {
-    match face.member {
-        Membership::On => remove_row(guid_of(face.kind, &face.hex), face.from_episode),
-        Membership::Off | Membership::Unknown => add_row(face.hex, face.from_episode),
+    match (&face.subject, face.member) {
+        (Subject::Hex(hex), Membership::On) => remove_row(guid_of(face.kind, hex), face.from_episode),
+        (Subject::Hex(hex), _) => add_row(*hex, face.from_episode),
+        (Subject::Waiting(title), _) => add_legacy_row(title, face.from_episode),
     }
 }
 

@@ -101,5 +101,9 @@
   "watchlist.page.debug_write_blocked": {
     "value": "Debug: watchlist write blocked",
     "description": "Developer builds only, never shown to users: a line under the Watchlist title saying the last add or remove was not sent, because a test build does not write to the real account."
+  },
+  "watchlist.notice.not_in_catalog": {
+    "value": "Not in the Plex catalog",
+    "description": "System toast after the viewer pressed Add to Watchlist on a title the server knows by an IMDb, TMDB or TVDB id that the Plex catalog has no entry for."
   }
 }

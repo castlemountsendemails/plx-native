@@ -23,5 +23,6 @@
   "watchlist.empty.filtered_body": "Modifica Ordina e filtra per vedere il resto della tua Watchlist.",
   "watchlist.empty.unreachable": "Impossibile raggiungere la tua Watchlist",
   "watchlist.detail.trailer": "Trailer",
-  "watchlist.page.debug_write_blocked": "Debug: scrittura nella Watchlist bloccata"
+  "watchlist.page.debug_write_blocked": "Debug: scrittura nella Watchlist bloccata",
+  "watchlist.notice.not_in_catalog": "Non presente nel catalogo Plex"
 }

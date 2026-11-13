@@ -438,6 +438,12 @@ pub(crate) struct Bridge {
     watchlist: watchlist::Feed,
     /// The catalog page instance the store was last opened for (`watchlist::catalog_feed`).
     catalog_seat: Option<InstanceId>,
+    /// Presses on legacy titles waiting for the catalog-id lookup (`watchlist::watchlist_add_legacy`).
+    watchlist_waiting: Vec<plx_data::catalog_ids::LegacyTitle>,
+    /// The Detail pages on the stack last frame: a new one lets failed lookups be asked again.
+    watchlist_details: Vec<EntryId>,
+    /// "Not in the Plex catalog" notices sent this run.
+    watchlist_notices: u32,
     #[cfg(test)]
     keyboard_calls: Vec<bool>,
     #[cfg(test)]
@@ -649,6 +655,9 @@ impl Bridge {
             watchlist_reqs: Vec::new(),
             watchlist: watchlist::Feed::default(),
             catalog_seat: None,
+            watchlist_waiting: Vec::new(),
+            watchlist_details: Vec::new(),
+            watchlist_notices: 0,
             #[cfg(test)]
             keyboard_calls: Vec::new(),
             #[cfg(test)]
@@ -1121,14 +1130,14 @@ impl Bridge {
                 // the season's address rides on the menu: the strip's item is no catalog row, so
                 // the write's scope cannot be read off one (`apply_item_action`)
                 let mut arg = strip_menu_arg(sid, &rk, ItemMenuKind::Season { mark, show_rk, index }, entry, ret.focus, rect);
-                // a season acts on its show: the page's own catalog id, when the page is the show
-                arg.watchlist = self.watchlist_face(page.watchlist_hex(), plx_data::watchlist::model::Kind::Show, true);
+                // a season acts on its show: the page's own title, when the page is the show
+                arg.watchlist = self.watchlist_title_face(page.watchlist_title(), plx_data::watchlist::model::Kind::Show, true);
                 return Some(arg);
             }
             if let Some((rk, mark)) = page.focused_episode(ret.focus, meta) {
                 // the ONE entry point whose item is a leaf of the season this page has loaded
                 let mut arg = strip_menu_arg(sid, &rk, ItemMenuKind::Episode { mark }, entry, ret.focus, rect);
-                arg.watchlist = self.watchlist_face(page.watchlist_hex(), plx_data::watchlist::model::Kind::Show, true);
+                arg.watchlist = self.watchlist_title_face(page.watchlist_title(), plx_data::watchlist::model::Kind::Show, true);
                 return Some(arg);
             }
         }

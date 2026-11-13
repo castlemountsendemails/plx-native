@@ -17,6 +17,7 @@ catalog id name the same film in two unrelated id spaces; the only join between 
 |---|---|---|
 | client | `plex::watchlist` (`impl AccountClient`) | paged list, `released` list, `user_state`, `catalog_item`, add/remove `PUT`; injectable request closure |
 | guid lookup | `Client::find_by_guids` (`plex/library.rs`) | which guids does this server hold |
+| catalog-id lookup | `data::catalog_ids`, `stores::catalog_ids::CatalogIdStore` | a legacy title to its catalog id, a catalog id to the legacy forms a server holds; not Watchlist state |
 | ids and ledger | `data::watchlist` (`model`, `ledger`, `order`) | rows, match table, `TileState`, intent ledger, comparator |
 | store | `stores::watchlist::WatchlistStore` | main-thread state plus a mailbox adapter; `StoreId::Watchlist` |
 | catalog | `data::catalog`, `stores::catalog::CatalogStore` | one Discover-only item; `StoreId::Catalog`, appended last |
@@ -62,8 +63,14 @@ outside one add/check/remove/check pair on that profile.
   both a body-less `PUT`, both 200 with an empty container. They are idempotent, which is why an
   unknown membership may show the Add face.
 - **The `ratingKey` of a Discover item is the 24-hex id**, not a PMS key, and `guid` ends in the same
-  24 hex digits. `catalog_hex_of_guid` decodes that tail once into `[u8; 12]`; any other guid form
-  (`imdb://`, `local://`, a non-hex tail) gives no id, and such a title has no disc and no menu row.
+  24 hex digits. `catalog_hex_of_guid` decodes that tail once into `[u8; 12]`. A server item whose guid
+  is a legacy agent's IMDb, TMDB or TVDB one (`com.plexapp.agents.imdb|themoviedb|thetvdb://<id>`,
+  `plex::legacy_catalog_guid`) gets its id from the catalog-id lookup (below); any other form
+  (`local://`, `none`, another agent) gives no id, and such a title has no disc and no menu row.
+- **Matches:** `GET /library/metadata/matches?type=1|2&guid=<bare legacy guid>` answers the catalog
+  item for a legacy guid (`type` must match the kind; a wrong one answers nothing), or an empty
+  container when the catalog has none. The item record's `Guid[]` holds the title's external ids
+  (`imdb://tt…`, `tmdb://…`, `tvdb://…`).
 - Responses are `Cache-Control: no-store`.
 
 ## The token rule
@@ -111,10 +118,19 @@ would, unless it carries the owner's `PLX_WATCHLIST_LIVE_OWNER=1` prefix.
 A Watchlist row is a Discover guid. To play it, the app asks each Reachable server whether it holds
 that guid: `Client::find_by_guids(kind, guids)` issues one
 `GET /library/all?type=T&guid=a,b,c` per chunk of at most **40** guids per server per kind (`T` 1 for a
-movie, 2 for a show). Only the primary `plex://` guid matches (`imdb://` and `tmdb://` answer 0), the
+movie, 2 for a show). Only an item's primary guid matches (`imdb://` and `tmdb://` from `Guid[]` answer 0;
+a legacy item matches its bare `com.plexapp.agents…` form and answers with its `?lang=…` suffix), the
 guids are percent-encoded individually and joined with a literal comma (a repeated `guid=` param keeps
 only the last), and a guid the server lacks is silently absent. An error is "could not ask" and is
 never read as "absent". See `docs/pms-api.md` for the request.
+
+**The reverse check.** A server that holds a title under a legacy guid answers "absent" by catalog id,
+so a title a server answered absent for is asked again before that answer is used: its catalog record's
+`Guid[]` gives the legacy forms (`plex::legacy_forms`) and the server is asked for those. The server's
+answer stays silent until that check finishes, so the tile never passes through "Not on your servers".
+A record or server that could not be read leaves the server silent (never a false "absent"); the record
+cache (`catalog_ids::RecordIds`) keeps only successes, for the run and across profile switches. A list
+read that answers 304 re-asks the titles a reachable server left unanswered.
 
 The result is a per-profile match table held in memory (it is not persisted across launches; owner
 question Q5). It is incremental for new guids and fully recomputed when the server roster changes. The
@@ -126,7 +142,9 @@ id. `resolve_catalog_hex(known, fetch)` (`plex/models.rs`) is the helper for a r
 fetches `client.metadata(rk or show_rk).guid` only when the id is not already known. A hold-menu card
 whose row carries no guid asks for it (`WatchlistStore::want_hex`, a worker reading the item's own
 server record, an episode's SHOW record): the menu being opened omits the row, the next one offers it
-once the record named a portable id (tests in `app/watchlist_press_tests.rs`). The Detail disc reads
+once the record named a portable id (tests in `app/watchlist_press_tests.rs`). A row whose guid is
+a legacy IMDb, TMDB or TVDB one goes through the catalog-id lookup instead, so its row is offered on the
+first open. The Detail disc reads
 the guid of the loaded record; the Home hero's disc reads the hero row's own (`PmsMovie::watchlist_subject`) and, unlike the menu, does not ask the server record for a missing one: its presence moves the focus row, so it appears only for a row that already names a title. Real
 PMS guids are hex; the mock's default placeholder guids are not, which is why `mock_pms` has a
 `{"guids":"all"}` mode for menu captures.
@@ -167,12 +185,13 @@ this id lives on another service with another token). `IntentLedger`:
 
 **Surfaces.** The Detail hero's bookmark disc is second after Play/Resume (`ELEM_WATCHLIST`, a circle that names itself with a caption under it while focused, "Add to Watchlist" / "On Watchlist", through the shared `hero_layout::draw_name`,
 outline when off the list, filled when on; the fill rises from the bottom with a 3 px ribbon drop on a
-flip, not on the first answer). It exists only for an item whose guid is `plex://movie|show/<hex>`
+flip, not on the first answer). It exists for an item whose guid is `plex://movie|show/<hex>`, and for one
+whose guid is a legacy IMDb, TMDB or TVDB one unless the catalog has answered "no match"
 (`HeroSet::watchlist`).
 The **Home hero** carries the same disc, second after Play/Resume and before Info (Play, disc, Info, with
 `HERO_CTRL_GAP` = `CTRL_GAP`, 20 px, between controls; the 12 px `HERO_ICON_GAP` is inside the Play pill). It is present when the hero row stands for a title
 (`PmsMovie::watchlist_subject`: a movie or show itself, a season or episode its SHOW, "Add Show"
-semantics) with a known id. The application feeds it the membership of the title the hero shows
+semantics) with a known id or a legacy IMDb, TMDB or TVDB guid. The application feeds it the membership of the title the hero shows
 (`HomeScreen::watchlist_hex` / `set_watchlist`, `app::watchlist::catalog_feed`); it flips only on a real
 membership change of that title, never on open or when the hero rotates to another title. A press is the
 same `AppFx::ItemMenu` write as Detail's. Face, glyphs, flip and the `Disc` state that decides when the flip plays are `plx_appkit::watchlist_disc`, shared.
@@ -181,6 +200,17 @@ Watchlist` / `Remove Show...` for an episode or season, with the identity captur
 opened. A catalog page's primary pill reads `Add to Watchlist` / `On Watchlist`. An add from a menu
 pulses the strip's bookmark tab (about 1.35x and a glow, decorative, no page image held): the
 application does it (`ChromeSnapshot::pulse`), never a screen.
+
+**Legacy titles (the catalog-id lookup).** A title a server knows only by a legacy IMDb, TMDB or TVDB
+guid shows the disc and the menu row from the first frame, on the Add face (the Unknown rule). The
+application asks Discover `matches` for its catalog id on demand (`CatalogIdStore::resolve`; one ask per
+title, answers kept in memory for the run and across profile switches, no disk file, no prefetch). A
+press before the answer is `Action::WatchlistAddLegacy { kind, guid }`: the application holds it and adds
+the id once it arrives (`Bridge::watchlist_add_legacy`). When the catalog has no match the disc and the row
+go, and a waiting press ends with the television's toast "Not in the Plex catalog". A failed lookup is
+never stored or shown as a result: a waiting press ends as a refused add does, and the title is asked
+again on the next press, a Detail page opening, or the Watchlist page opening. Remove and every write
+use the looked-up id, never the page's own legacy guid.
 
 **Accepted deviation, action keying.** `Action::WatchlistAdd` carries the 12-byte `{ hex }`; the
 `WatchlistRemove` and `GoToCatalog` actions carry the discover guid string and decode the hex from

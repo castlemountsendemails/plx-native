@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::sync::Arc;
 
+use plx_data::catalog_ids::{Resolved, TitleId};
 use plx_data::pms::{HeroRef, HubIdentity, HubRef, HubsView, PmsMovie};
 use plx_data::stores::hubs::HubsCmd;
 use plx_data::stores::{StoreCmd, StoreId, StoreWork};
@@ -1739,11 +1740,8 @@ impl HomeScreen {
         // page-freeze snapshot (`idle::decorative`)
         plx_machine::idle::decorative(|| self.hero_pop.step(hero_focus, dt));
         // The bookmark disc: the title it is for (read by the application's feed) and its flip.
-        self.disc.shown = status_read(view)
-            .is_none()
-            .then(|| self.selected_hero(view))
-            .flatten()
-            .and_then(|h| disc_hex(h.item));
+        let shown = status_read(view).is_none().then(|| self.selected_hero(view)).flatten().map(|h| h.item);
+        self.disc.follow(shown);
         self.disc.step(dt);
         let visible_cx: Cx<'_, H> = Cx {
             views: cx.views,
@@ -2158,7 +2156,7 @@ impl HomeScreen {
     ) {
         let resumes = plx_data::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
         let label = plx_appkit::hero_layout::play_label(resumes);
-        let HeroRects { play: pill, disc, info } = hero_rects(measure, hero, label);
+        let HeroRects { play: pill, disc, info } = hero_rects(measure, label, self.disc.present(hero));
         let mark_d = HERO_PAGER_D.round();
         let mark = Rect::new(
             info.x + info.w + HERO_PAGER_PAD,
@@ -2191,9 +2189,9 @@ impl HomeScreen {
             .palette(palette)
             .scale(pop(0))
             .draw(env, p);
-        if let Some((rect, hex)) = disc.zip(disc_hex(hero)) {
+        if let Some(rect) = disc {
             // At either rest the plain face; only a flip in flight layers the fill.
-            let (icon, mid) = plx_appkit::watchlist_disc::paint(self.disc.progress(hex));
+            let (icon, mid) = plx_appkit::watchlist_disc::paint(self.disc.progress_of(hero));
             let mut button = CircleButton::new(c"".as_ptr())
                 .icon(icon)
                 .at(rect.x, rect.y)
@@ -2219,9 +2217,9 @@ impl HomeScreen {
         if live {
             use plx_appkit::hero_layout::NameWant;
             let mut wants = Vec::with_capacity(3);
-            if let Some((rect, hex)) = disc.zip(disc_hex(hero)) {
+            if let Some(rect) = disc {
                 let focus = fill(2);
-                wants.extend(plx_appkit::watchlist_disc::names(self.disc.progress(hex)).map(|(name, flip)| NameWant { ctl: rect, name, want: focus * flip }));
+                wants.extend(plx_appkit::watchlist_disc::names(self.disc.progress_of(hero)).map(|(name, flip)| NameWant { ctl: rect, name, want: focus * flip }));
             }
             wants.push(NameWant { ctl: info, name: plx_appkit::hero_layout::info_name(hero.kind), want: fill(1) });
             plx_appkit::hero_layout::draw_names(p, &wants, measure);
@@ -2942,7 +2940,7 @@ impl HomeScreen {
     fn hero_slots(&self, view: HubsView<'_>) -> ([usize; HERO_NBTN], usize) {
         match status_read(view) {
             Some((_, _, action)) => ([0, 0, 0], usize::from(action.is_some())),
-            None => self.selected_hero(view).map_or(([0, 0, 0], 0), |h| item_slots(h.item)),
+            None => self.selected_hero(view).map_or(([0, 0, 0], 0), |h| item_slots(self.disc.present(h.item))),
         }
     }
 
@@ -2962,9 +2960,16 @@ impl HomeScreen {
     }
 
     /// The title the hero shows now, for the application's Watchlist feed. `None` while the
-    /// failure read-out or a title with no Watchlist identity is up.
+    /// failure read-out, a title with no Watchlist identity, or a legacy title still waiting for
+    /// its catalog id is up.
     pub fn watchlist_hex(&self) -> Option<[u8; 12]> {
         self.disc.shown
+    }
+
+    /// The app's feed for a hero title known only by a legacy guid: `resolve` answers the
+    /// catalog-id lookup for it. Returns the catalog id the disc then acts on.
+    pub fn resolve_watchlist(&mut self, resolve: impl FnOnce(&TitleId) -> Resolved) -> Option<[u8; 12]> {
+        self.disc.resolve(resolve)
     }
 
     /// The application's answer: `hex`'s membership on the Watchlist (`Unknown` while the list is
@@ -2988,7 +2993,7 @@ impl HomeScreen {
         let hero = self.selected_hero(view)?.item;
         let resumes = plx_data::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
         let label = plx_appkit::hero_layout::play_label(resumes);
-        let rects = hero_rects(measure, hero, label);
+        let rects = hero_rects(measure, label, self.disc.present(hero));
         match index {
             0 => Some(rects.play),
             1 => Some(rects.info),
@@ -3387,16 +3392,18 @@ fn hero_elem(slot: usize) -> u32 {
 
 /// The hero controls an item draws, in ROW order, as slots: Play, the bookmark disc when the item
 /// stands for a Watchlist title, then Info. The disc is second, as on Detail.
-fn item_slots(item: &PmsMovie) -> ([usize; HERO_NBTN], usize) {
-    if disc_hex(item).is_some() { ([0, 2, 1], 3) } else { ([0, 1, 0], 2) }
+fn item_slots(has_disc: bool) -> ([usize; HERO_NBTN], usize) {
+    if has_disc { ([0, 2, 1], 3) } else { ([0, 1, 0], 2) }
 }
 
-/// The catalog id the hero's bookmark disc acts on: the item's own, or its show's for a season or
-/// an episode. `None` (no `plex://movie|show` guid, or a collection) means no disc at all, which is
-/// what Detail does too; Home does not resolve a missing id through the server record as the item
-/// menu does, because the disc's presence moves the focus row and must not appear a beat late.
-fn disc_hex(item: &PmsMovie) -> Option<[u8; 12]> {
-    item.watchlist_subject().and_then(|(_, hex, _)| hex)
+/// What the hero's bookmark disc acts on: the kind, the row's own catalog id (its show's for a
+/// season or an episode) and the bare legacy guid it carries instead. Home does not resolve a
+/// missing id through the server record as the item menu does: the disc's presence moves the
+/// focus row, so it is decided by what the row names, up front.
+fn disc_subject(item: &PmsMovie) -> Option<(plx_data::watchlist::model::Kind, Option<[u8; 12]>, Option<&str>)> {
+    let (kind, hex, from_episode) = item.watchlist_subject()?;
+    let legacy = if from_episode { &item.show_legacy_guid } else { &item.legacy_guid };
+    Some((kind, hex, legacy.as_deref()))
 }
 
 /// The bookmark disc's Home half: which title the shared [`plx_appkit::watchlist_disc::Disc`] is
@@ -3411,16 +3418,90 @@ struct HeroDisc {
     flip: plx_appkit::watchlist_disc::Disc,
     /// The previous title and whether it wore the filled face, for the page sliding out.
     prev: Option<([u8; 12], bool)>,
-    /// The title the hero shows now, cached each tick for the application's feed.
+    /// The catalog id of the title the hero shows now (its own, or the lookup's for a legacy one),
+    /// cached each tick for the application's feed.
     shown: Option<[u8; 12]>,
+    /// The legacy title the hero shows now, when the row names no catalog id.
+    shown_legacy: Option<TitleId>,
+    /// The app's lookup answer for a legacy title, by its bare guid.
+    lookup: Option<(String, Resolved)>,
 }
 
 impl HeroDisc {
-    /// What a press on the disc of `item` asks for, `None` when it names no title.
+    /// The lookup's answer for the bare legacy guid `guid`, when the app gave one.
+    fn answer(&self, guid: &str) -> Option<Resolved> {
+        self.lookup.as_ref().filter(|(g, _)| g == guid).map(|(_, r)| *r)
+    }
+
+    /// The catalog id the disc of `item` acts on: the row's own, else the lookup's.
+    fn hex_of(&self, item: &PmsMovie) -> Option<[u8; 12]> {
+        let (_, hex, legacy) = disc_subject(item)?;
+        hex.or_else(|| match self.answer(legacy?)? {
+            Resolved::Hex(hex) => Some(hex),
+            Resolved::Waiting | Resolved::NoMatch => None,
+        })
+    }
+
+    /// Does `item` get the disc? A catalog id, or a legacy title the catalog has not answered
+    /// "no match" for.
+    fn present(&self, item: &PmsMovie) -> bool {
+        match disc_subject(item) {
+            Some((_, Some(_), _)) => true,
+            Some((_, None, Some(legacy))) => self.answer(legacy) != Some(Resolved::NoMatch),
+            _ => false,
+        }
+    }
+
+    /// The flip progress `item`'s disc draws at: a legacy title still waiting for its id wears
+    /// the Add face.
+    fn progress_of(&self, item: &PmsMovie) -> f32 {
+        self.hex_of(item).map_or(0.0, |hex| self.progress(hex))
+    }
+
+    /// Follow the title the hero shows (`None`: no title), rebuilding the legacy title only when
+    /// its guid changes.
+    fn follow(&mut self, item: Option<&PmsMovie>) {
+        let subject = item.and_then(disc_subject);
+        let legacy = subject.and_then(|(kind, hex, legacy)| if hex.is_none() { legacy.map(|g| (kind, g)) } else { None });
+        let same = match (&self.shown_legacy, legacy) {
+            (Some(TitleId::Legacy(t)), Some((_, g))) => t.guid == g,
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.shown_legacy = legacy.and_then(|(kind, g)| plx_data::catalog_ids::LegacyTitle::of(kind, g)).map(TitleId::Legacy);
+        }
+        self.shown = item.and_then(|i| self.hex_of(i));
+    }
+
+    /// The app's lookup for the legacy title shown now; the catalog id it found, if any.
+    fn resolve(&mut self, resolve: impl FnOnce(&TitleId) -> Resolved) -> Option<[u8; 12]> {
+        let title = self.shown_legacy.as_ref()?;
+        let resolved = resolve(title);
+        let TitleId::Legacy(t) = title else { return None };
+        if self.answer(&t.guid) != Some(resolved) {
+            self.lookup = Some((t.guid.clone(), resolved));
+            plx_machine::idle::invalidate();
+        }
+        match resolved {
+            Resolved::Hex(hex) => {
+                self.shown = Some(hex);
+                Some(hex)
+            }
+            Resolved::Waiting | Resolved::NoMatch => None,
+        }
+    }
+
+    /// What a press on the disc of `item` asks for, `None` when it names no title. A legacy title
+    /// whose catalog id has not arrived adds through the lookup.
     fn press(&mut self, item: &PmsMovie) -> Option<crate::registry::ItemMenuAction> {
         use crate::registry::ItemMenuAction as Action;
-        let (kind, hex, _) = item.watchlist_subject()?;
-        let hex = hex?;
+        let (kind, _, legacy) = disc_subject(item)?;
+        let Some(hex) = self.hex_of(item) else {
+            let title = plx_data::catalog_ids::LegacyTitle::of(kind, legacy?)?;
+            self.flip.press();
+            return Some(Action::WatchlistAddLegacy { kind: title.kind, guid: title.guid });
+        };
         let on = self.of == Some(hex) && self.flip.membership() == plx_data::catalog::Membership::On;
         self.flip.press();
         Some(if on {
@@ -3469,10 +3550,10 @@ struct HeroRects {
     info: Rect,
 }
 
-fn hero_rects(measure: &dyn Measure, item: &PmsMovie, label: &std::ffi::CStr) -> HeroRects {
+fn hero_rects(measure: &dyn Measure, label: &std::ffi::CStr, has_disc: bool) -> HeroRects {
     let play = Rect::new(MARGIN_X, HERO_ROW_Y, hero_pill_w(measure, label), HERO_CTRL_D);
     let mut x = play.x + play.w + HERO_CTRL_GAP;
-    let disc = disc_hex(item).map(|_| {
+    let disc = has_disc.then(|| {
         let r = Rect::new(x, HERO_ROW_Y, HERO_CTRL_D, HERO_CTRL_D);
         x += HERO_CTRL_D + HERO_CTRL_GAP;
         r

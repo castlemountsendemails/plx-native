@@ -116,6 +116,9 @@ pub enum Action {
     /// tab pulse. (`GoToCatalog` / `WatchlistRemove` above stay discover-guid keyed: the hex is
     /// the guid's tail, `plx_data::watchlist::decode_hex`.)
     WatchlistAdd { hex: [u8; 12] },
+    /// Add the title a server knows only by this legacy-agent guid: the app adds it once the
+    /// catalog-id lookup has its id, or says the catalog has no such title.
+    WatchlistAddLegacy { kind: plx_data::watchlist::model::Kind, guid: String },
 }
 
 impl Action {
@@ -154,6 +157,7 @@ impl Action {
             | Action::RemoveFromDeck(rk)
             | Action::GoToCatalog(rk)
             | Action::WatchlistRemove(rk) => rk,
+            Action::WatchlistAddLegacy { guid, .. } => guid,
             Action::PlayTrailer { rk, .. } => rk,
             // No ratingKey: the subject is a catalog id.
             Action::WatchlistAdd { .. } => "",
@@ -174,6 +178,7 @@ impl Action {
             Action::GoToCatalog(_) => 9,
             Action::WatchlistRemove(_) => 10,
             Action::WatchlistAdd { .. } => 11,
+            Action::WatchlistAddLegacy { .. } => 12,
         };
         c.u32(tag).str(self.rk());
         if let Action::WatchlistAdd { hex } = self {
@@ -181,6 +186,10 @@ impl Action {
         }
         if let Action::GoToShow(_, season) = self {
             c.u32(*season as u32);
+        }
+        // The kind rides in the shape's `season` slot.
+        if let Action::WatchlistAddLegacy { kind, .. } = self {
+            c.u32(match kind { plx_data::watchlist::model::Kind::Movie => 0, plx_data::watchlist::model::Kind::Show => 1 });
         }
         if let Action::PlayTrailer {
             part,

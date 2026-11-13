@@ -23,5 +23,6 @@
   "watchlist.empty.filtered_body": "A Figyelőlista többi részének megtekintéséhez módosítsa a Rendezés és szűrés beállítást.",
   "watchlist.empty.unreachable": "A Figyelőlista nem érhető el",
   "watchlist.detail.trailer": "Előzetes",
-  "watchlist.page.debug_write_blocked": "Debug: watchlist write blocked"
+  "watchlist.page.debug_write_blocked": "Debug: watchlist write blocked",
+  "watchlist.notice.not_in_catalog": "Nem szerepel a Plex katalógusában"
 }

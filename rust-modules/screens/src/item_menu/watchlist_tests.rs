@@ -9,7 +9,7 @@ use plx_ui::widgets::PosterMark;
 const HEX: [u8; 12] = [0xab; 12];
 
 fn face(member: Membership, kind: Kind, from_episode: bool) -> Face {
-    Face { hex: HEX, member, kind, from_episode }
+    Face { subject: Subject::Hex(HEX), member, kind, from_episode }
 }
 
 struct Menu(FormTable<ItemRow, Action, Infallible>);
@@ -61,6 +61,21 @@ fn a_movie_card_offers_add_or_remove_by_membership() {
     assert_eq!(on.label(ItemRow::WatchlistRemove), "Remove from Watchlist");
     assert_eq!(on.action(ItemRow::WatchlistRemove), Action::WatchlistRemove(guid_of(Kind::Movie, &HEX)));
     assert!(!on.offers(ItemRow::WatchlistAdd));
+}
+
+/// A legacy title whose catalog id has not arrived offers the same Add row on the first open; its
+/// press carries the legacy guid for the app to resolve.
+#[test]
+fn a_legacy_title_waiting_for_its_id_offers_add() {
+    let title = LegacyTitle::of(Kind::Show, "com.plexapp.agents.thetvdb://291866?lang=en").unwrap();
+    let waiting = |from_episode| Face { subject: Subject::Waiting(title.clone()), member: Membership::Unknown, kind: Kind::Show, from_episode };
+    let m = card(1, Some(&waiting(false)));
+    assert_eq!(m.label(ItemRow::WatchlistAdd), "Add to Watchlist");
+    assert_eq!(m.action(ItemRow::WatchlistAdd),
+        Action::WatchlistAddLegacy { kind: Kind::Show, guid: "com.plexapp.agents.thetvdb://291866".into() });
+    assert!(m.action(ItemRow::WatchlistAdd).has_subject());
+    let ep = menu(build_episode("1", PosterMark::None, Some(&waiting(true))));
+    assert_eq!(ep.label(ItemRow::WatchlistAdd), "Add Show to Watchlist");
 }
 
 #[test]

@@ -142,15 +142,20 @@ Every Settings drill-down is a family-stack push through `family::form_activate`
   the face, glyphs, `flip_frame` and the `Disc` that owns the membership, flip spring and press flag are
   `plx_appkit::watchlist_disc`, shared with Home's hero). There is one element id for both faces so focus survives a flip,
   it is always the circle width so it never unfurls, and it is not a focus anchor in full-trailer
-  mode. Its guid must be `plex://movie|show/<24 hex>` or it is absent: `HeroSet::watchlist` is
-  set from `catalog_hex_of_guid` and `hero_ctls` omits the disc otherwise. When the fill snaps and
+  mode. It is present for a `plex://movie|show/<24 hex>` guid and for a legacy IMDb, TMDB or TVDB
+  guid (`plex::legacy_catalog_guid`) until the app's catalog-id lookup answers "no match"; any
+  other guid has no disc (`HeroSet::watchlist`, `DetailScreen::disc_shown`). The app answers the
+  lookup through `DetailScreen::resolve_watchlist`; a press acts on the looked-up id, never on the
+  page's own legacy guid, and before the id arrives it is `ItemMenuAction::WatchlistAddLegacy`. When the fill snaps and
   when it flips is `Disc::set`'s one rule (the first answer snaps; a change from a known face, or one
   answering the user's own press, plays the flip); a screen never copies it.
 - **Home's hero carries the same disc** (`home/mod.rs`: `HERO_WATCHLIST_ELEM`, `HeroDisc`). A hero
   control's SLOT (`Located::Hero(slot)`: 0 Play, 1 Info, 2 disc, the `CtlPop` index) is not its
   POSITION in the row (`hero_slots`: Play, disc, Info); neighbours, the focus extent and the hit
-  stops all go through `hero_slots` / `hero_rects`. The disc exists only for a hero row with a known
-  catalog id; the application feeds `set_watchlist(hex, membership)` for the title shown, and `HeroDisc`
+  stops all go through `hero_slots` / `hero_rects`. The disc exists for a hero row with a known
+  catalog id or a legacy IMDb, TMDB or TVDB guid the lookup has not answered "no match" for
+  (`HeroDisc::present`); the application answers that lookup through `resolve_watchlist` and feeds
+  `set_watchlist(hex, membership)` for the title shown, and `HeroDisc`
   keeps only which title the shared `Disc` is for: a rotation `reset`s it onto the new face, and the
   same title's change is `Disc::set`'s rule.
 - **New widths, rungs and ids come from the existing systems.** The catalog page's 36 px board line
