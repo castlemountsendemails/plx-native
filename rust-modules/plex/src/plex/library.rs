@@ -106,7 +106,8 @@ impl Client {
 
     /// Which of `guids` does THIS server hold? One `GET /library/all?type=T&guid=a,b,c` per chunk
     /// of at most [`GUIDS_PER_REQUEST`], `T` = 1 (movie) or 2 (show) from `kind`. Only `plex://`
-    /// guids are sent; anything else is skipped, never matched. A guid the server does not hold is
+    /// guids and bare legacy-agent forms ([`legacy_catalog_guid`](super::legacy_catalog_guid)) are
+    /// sent; anything else is skipped, never matched. A guid the server does not hold is
     /// simply absent from the result; `Err` means a chunk could not be answered at all, which the
     /// caller must NOT read as "absent" (docs/watchlist-plan.md §1.5).
     ///
@@ -119,15 +120,15 @@ impl Client {
                 return Err(GuidLookupError::Unanswered);
             };
             for item in mc.metadata {
-                if chunk.contains(&item.guid)
-                    && !item.rating_key.is_empty()
-                    && !found.iter().any(|m| m.guid == item.guid)
-                {
+                // A legacy item answers with its `?lang=…` suffix; the match is on the bare form asked for.
+                let held = item.guid.split('?').next().unwrap_or_default();
+                let Some(asked) = chunk.iter().find(|g| g.as_str() == held) else { continue };
+                if !item.rating_key.is_empty() && !found.iter().any(|m| &m.guid == asked) {
                     found.push(GuidMatch {
                         facts: item.listing_facts(),
                         blur: item.ultra_blur_colors.and_then(|c| c.corners()),
                         library_section_id: (item.library_section_id != 0).then_some(item.library_section_id),
-                        guid: item.guid,
+                        guid: asked.clone(),
                         rating_key: item.rating_key,
                     });
                 }
@@ -395,7 +396,7 @@ impl Client {
     }
 }
 
-/// The request paths `find_by_guids` issues: only `plex://` guids, de-duplicated in order, in
+/// The request paths `find_by_guids` issues: only `plex://` guids and bare legacy-agent forms, de-duplicated in order, in
 /// chunks of at most [`GUIDS_PER_REQUEST`]. Each guid is percent-encoded on its own and the chunk is
 /// joined with a literal `,` — the one separator PMS splits the `guid` param on (measured,
 /// docs/watchlist-plan.md); an encoded comma inside a guid cannot occur, since ids are hex. Each
@@ -404,7 +405,9 @@ impl Client {
 fn guid_lookup_paths(kind: GuidKind, guids: &[String]) -> Vec<(String, Vec<String>)> {
     let mut wanted: Vec<&String> = Vec::new();
     for g in guids {
-        if g.starts_with("plex://") && g.len() > "plex://".len() && !g.contains(',') && !wanted.contains(&g) {
+        let askable = (g.starts_with("plex://") && g.len() > "plex://".len())
+            || super::models::legacy_catalog_guid(g) == Some(g.as_str());
+        if askable && !g.contains(',') && !wanted.contains(&g) {
             wanted.push(g);
         }
     }
