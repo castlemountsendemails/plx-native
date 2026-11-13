@@ -81,7 +81,7 @@ impl DeleteConfirm {
     /// through the press that opened it never answers yes).
     pub fn open<H: Host>(&mut self, body: Vec<Cow<'static, str>>, to: MachineId, fx: &mut Effects<'_, H>) {
         self.alert.open_card(msg::browse_menu_delete_question_c(), body, plx_ui::decision_alert::Answers::Two);
-        crate::plaintext_question::enter_group(fx, to, GROUP);
+        super::super::plaintext_question::enter_group(fx, to, GROUP);
     }
 
     pub fn update(&mut self, dt: f32) {

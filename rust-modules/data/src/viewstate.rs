@@ -1201,7 +1201,7 @@ mod tests {
 
         // …and the next pump re-reads Home's hubs and the libraries' shelves, once
         let (mut browse, mut hubs) = (Vec::new(), Vec::new());
-        store.pump(
+        let _ = store.pump(
             &mut |cmd| { browse.push(cmd); true },
             &mut |cmd| { hubs.push(cmd); crate::stores::StoreOutcome::default() },
             &mut |_| true, &mut |_| true, &mut |_| true, &mut |_| true,

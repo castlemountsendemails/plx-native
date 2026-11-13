@@ -802,7 +802,7 @@ impl ItemMenuScreen {
     /// changes nothing; Delete reports the action and dismisses the menu.
     fn confirm_answer<H: AppLike>(&mut self, delete: bool, fx: &mut Effects<'_, H>) {
         if !delete {
-            crate::plaintext_question::enter_group(fx, fx.from(), GroupId(0));
+            super::plaintext_question::enter_group(fx, fx.from(), GroupId(0));
             return;
         }
         if let ItemMenuKind::Card { row, .. } = &self.arg.kind {
