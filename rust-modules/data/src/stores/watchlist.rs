@@ -18,12 +18,13 @@
 //! `ViewChange` for a matched `(server, ratingKey)` patches the tile in place ([`WatchlistStore::apply_view`]).
 //! `facts_gen` and the roster generation move a tile's state in one pass ([`WatchlistStore::pump_with_gate`]).
 
+use crate::catalog_ids::RecordIds;
 use crate::viewstate::{ViewChange, ViewEdit, ViewFact};
 use crate::watchlist::ledger::{Intent, IntentLedger, PendingWrite, WriteOutcome};
 use crate::watchlist::model::{tile_state, Asked, Kind, MatchTable, ServerMatch, TileState, WatchRow};
 use crate::watchlist::order::{sorted_filtered, FilterSpec, SortSpec};
 use crate::watchlist::{
-    run_delta, run_list, run_rematch, run_write, Failure, Landed, LiveIo, Tag, What, WatchlistAuth, WatchlistIo,
+    run_delta, run_list, run_rematch, run_unanswered, run_write, Failure, Landed, LiveIo, Reverse, Tag, What, WatchlistAuth, WatchlistIo,
 };
 use plx_machine::machine::{Cx, Effects, Handled, Host, Machine};
 use plx_plex::plex::{ListingFacts, ServerId};
@@ -150,6 +151,8 @@ struct WatchlistState {
     index: Vec<usize>,
     window: Range<usize>,
     list_wanted: bool,
+    /// A list read answered 304: the titles some reachable server left unanswered are asked again.
+    unanswered_owed: bool,
     reread_owed: bool,
     wrote: bool,
     list_retry: u32,
@@ -196,6 +199,7 @@ impl WatchlistState {
             index: Vec::new(),
             window: 0..0,
             list_wanted: false,
+            unanswered_owed: false,
             reread_owed: false,
             wrote: false,
             list_retry: 0,
@@ -212,6 +216,8 @@ pub struct WatchlistStore {
     state: WatchlistState,
     adapter: Arc<WatchlistAdapter>,
     io: Arc<dyn WatchlistIo>,
+    /// The catalog-id lookup's record cache: outside `state`, so a profile switch keeps it.
+    records: Arc<RecordIds>,
     spawn: Spawn,
     notice_gen: AtomicU32,
     notice_dirty: AtomicBool,
@@ -239,10 +245,16 @@ impl WatchlistStore {
             state: WatchlistState::new(0, default_sort(), FilterSpec::default()),
             adapter: Arc::new(WatchlistAdapter::default()),
             io,
+            records: Arc::default(),
             spawn: spawn_worker,
             notice_gen: AtomicU32::new(0),
             notice_dirty: AtomicBool::new(false),
         }
+    }
+
+    /// Read catalog records through the lookup's shared cache (`stores::catalog_ids`).
+    pub fn share_records(&mut self, records: Arc<RecordIds>) {
+        self.records = records;
     }
 
     fn bump(&self) {
@@ -549,6 +561,7 @@ impl WatchlistStore {
                 self.state.rows_stamp = self.state.read_stamp;
                 self.state.status = Status::Ready;
                 self.state.read_etag = self.state.list_etag.clone();
+                self.state.unanswered_owed = true;
                 self.rederive();
                 true
             }
@@ -672,6 +685,39 @@ impl WatchlistStore {
             && self.io.roster_gen() != self.state.table.roster_gen
         {
             self.spawn_rematch(&auth);
+        } else if self.state.unanswered_owed {
+            self.spawn_unanswered(&auth);
+        }
+    }
+
+    fn spawn_unanswered(&mut self, auth: &WatchlistAuth) {
+        let answered = self.matched_guids();
+        let keys: Vec<(String, Kind)> =
+            self.state.rows.iter().filter(|r| !answered.contains(&r.guid)).map(|r| (r.guid.clone(), r.kind)).collect();
+        if keys.is_empty() {
+            self.state.unanswered_owed = false;
+            return;
+        }
+        self.state.req += 1;
+        let tag = self.current_tag(auth);
+        let (adapter, io, auth) = (Arc::clone(&self.adapter), Arc::clone(&self.io), auth.clone());
+        let records = Arc::clone(&self.records);
+        adapter.list_busy.store(true, Ordering::SeqCst);
+        let guard = Release(Arc::clone(&adapter), |a| &a.list_busy);
+        let spawned = (self.spawn)("wlist", Box::new(move || {
+            let _guard = guard;
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_unanswered(&*io, &keys, Reverse { auth: &auth, records: &records }, tag, &mut |l| adapter.post(l));
+            }));
+            if outcome.is_err() {
+                plx_base::eventlog::log("watchlist: unanswered re-match worker panicked");
+            }
+        }));
+        if spawned {
+            self.state.unanswered_owed = false;
+        } else {
+            self.adapter.list_busy.store(false, Ordering::SeqCst);
+            self.state.list_retry = RETRY_FRAMES;
         }
     }
 
@@ -727,12 +773,13 @@ impl WatchlistStore {
         self.state.read_etag = None;
         self.state.read_writes = quiet.then_some(self.state.writes_seen);
         let (adapter, io, auth) = (Arc::clone(&self.adapter), Arc::clone(&self.io), auth.clone());
+        let records = Arc::clone(&self.records);
         adapter.list_busy.store(true, Ordering::SeqCst);
         let guard = Release(Arc::clone(&adapter), |a| &a.list_busy);
         let spawned = (self.spawn)("wlist", Box::new(move || {
             let _guard = guard;
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_list(&*io, &auth, tag, (&known, known_gen), etag.as_deref(), &mut |l| adapter.post(l));
+                run_list(&*io, &auth, tag, (&known, known_gen), etag.as_deref(), &records, &mut |l| adapter.post(l));
             }));
             if outcome.is_err() {
                 adapter.post(Landed { tag, what: What::PageFailed { start: 0, why: Failure::Other } });
@@ -751,13 +798,14 @@ impl WatchlistStore {
         self.state.req += 1;
         let tag = self.current_tag(auth);
         let keys: Vec<(String, Kind)> = self.state.rows.iter().map(|r| (r.guid.clone(), r.kind)).collect();
-        let (adapter, io) = (Arc::clone(&self.adapter), Arc::clone(&self.io));
+        let (adapter, io, auth) = (Arc::clone(&self.adapter), Arc::clone(&self.io), auth.clone());
+        let records = Arc::clone(&self.records);
         adapter.list_busy.store(true, Ordering::SeqCst);
         let guard = Release(Arc::clone(&adapter), |a| &a.list_busy);
         let spawned = (self.spawn)("wlist", Box::new(move || {
             let _guard = guard;
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_rematch(&*io, &keys, tag, &mut |l| adapter.post(l));
+                run_rematch(&*io, &keys, Reverse { auth: &auth, records: &records }, tag, &mut |l| adapter.post(l));
             }));
             if outcome.is_err() {
                 // Keep the table as it is: no landing, the roster check asks again.
@@ -835,12 +883,13 @@ impl WatchlistStore {
         self.state.req += 1;
         let tag = self.current_tag(&auth);
         let (adapter, io) = (Arc::clone(&self.adapter), Arc::clone(&self.io));
+        let records = Arc::clone(&self.records);
         adapter.list_busy.store(true, Ordering::SeqCst);
         let guard = Release(Arc::clone(&adapter), |a| &a.list_busy);
         let spawned = (self.spawn)("wlist", Box::new(move || {
             let _guard = guard;
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_delta(&*io, sid, &asks, tag, &mut |l| adapter.post(l));
+                run_delta(&*io, sid, &asks, Reverse { auth: &auth, records: &records }, tag, &mut |l| adapter.post(l));
             }));
             if outcome.is_err() {
                 plx_base::eventlog::log("watchlist: library re-match worker panicked");
@@ -1130,6 +1179,9 @@ pub(super) mod tests {
         etag_on: AtomicBool,
         /// Every page request as `(start, If-None-Match)`, 304s included.
         asked: Mutex<Vec<(u32, Option<String>)>>,
+        /// The external ids of a catalog record by id; absent = a record with none.
+        records: Mutex<HashMap<[u8; 12], Result<Vec<String>, WatchlistError>>>,
+        record_reads: AtomicUsize,
     }
 
     impl Mock {
@@ -1167,6 +1219,8 @@ pub(super) mod tests {
                 guid_answers: Mutex::new(Vec::new()),
                 etag_on: AtomicBool::new(true),
                 asked: Mutex::new(Vec::new()),
+                records: Mutex::new(HashMap::new()),
+                record_reads: AtomicUsize::new(0),
             })
         }
     }
@@ -1252,6 +1306,10 @@ pub(super) mod tests {
         fn guid_of(&self, _: ServerId, _: &str) -> Option<String> {
             let mut q = self.guid_answers.lock().unwrap();
             if q.is_empty() { None } else { q.remove(0) }
+        }
+        fn catalog_guids(&self, _: &WatchlistAuth, hex: &[u8; 12]) -> Result<Vec<String>, WatchlistError> {
+            self.record_reads.fetch_add(1, Ordering::SeqCst);
+            self.records.lock().unwrap().get(hex).cloned().unwrap_or(Ok(Vec::new()))
         }
     }
 
@@ -1403,6 +1461,61 @@ pub(super) mod tests {
         assert_eq!(s.view().status(), Status::Idle);
         assert!(!s.state.ledger.busy(), "the old profile's queued write is never sent to the new one");
         assert!(mock.writes.lock().unwrap().is_empty());
+    }
+
+    /// An owned title its server holds under a legacy-agent guid: "absent" by catalog id, found by
+    /// the IMDb form its catalog record names, so the card opens that copy.
+    #[test]
+    fn a_copy_held_under_a_legacy_guid_matches_through_the_catalog_record() {
+        let mock = three();
+        *mock.released.lock().unwrap() = Some(mock.items.lock().unwrap().clone());
+        let sid = ServerId::from_raw(0);
+        mock.records.lock().unwrap().insert(hex_of(2), Ok(vec!["imdb://tt12003946".into(), "tmdb://5".into()]));
+        mock.held.lock().unwrap().insert((sid, "com.plexapp.agents.imdb://tt12003946".into()), "71261".into());
+        let mut s = store(&mock);
+        load(&mut s);
+        assert_eq!(s.view().state(1), Some(TileState::Available));
+        assert_eq!(s.view().copy(1).map(|c| c.rating_key), Some(71261));
+        assert_eq!(s.view().state(0), Some(TileState::NotOnAnyServer), "a record with no ids stays absent");
+        assert!(mock.found.lock().unwrap().iter().any(|asked| asked.contains(&"com.plexapp.agents.themoviedb://5".to_string())));
+    }
+
+    /// A record that could not be read says nothing for that server: never "Not on your servers".
+    /// The failure is not stored, so the next read asks again.
+    #[test]
+    fn a_failed_record_read_leaves_the_server_silent_and_is_asked_again() {
+        let mock = three();
+        *mock.released.lock().unwrap() = Some(mock.items.lock().unwrap().clone());
+        mock.records.lock().unwrap().insert(hex_of(1), Err(WatchlistError::Other(429)));
+        let mut s = store(&mock);
+        load(&mut s);
+        assert_eq!(s.view().state(0), Some(TileState::Unknown));
+        assert_eq!(s.view().state(1), Some(TileState::NotOnAnyServer));
+        mock.records.lock().unwrap().remove(&hex_of(1));
+        let reads = mock.record_reads.load(Ordering::SeqCst);
+        s.run(WatchlistCmd::Reread);
+        for _ in 0..4 {
+            s.pump();
+        }
+        assert_eq!(s.view().state(0), Some(TileState::NotOnAnyServer));
+        assert_eq!(mock.record_reads.load(Ordering::SeqCst), reads + 1, "only the failed record is read again");
+    }
+
+    /// The record cache is the lookup's, not the epoch's: a profile switch reads no record twice.
+    #[test]
+    fn record_answers_survive_a_profile_switch() {
+        let mock = three();
+        mock.records.lock().unwrap().insert(hex_of(1), Ok(vec!["imdb://tt1".into()]));
+        let mut s = store(&mock);
+        load(&mut s);
+        let reads = mock.record_reads.load(Ordering::SeqCst);
+        assert_eq!(reads, 3, "one read per title the server answered absent");
+        mock.generation.fetch_add(1, Ordering::SeqCst);
+        s.pump();
+        assert!(s.view().is_empty(), "the switch reset the list");
+        load(&mut s);
+        assert_eq!(s.view().len(), 3);
+        assert_eq!(mock.record_reads.load(Ordering::SeqCst), reads);
     }
 
     #[test]

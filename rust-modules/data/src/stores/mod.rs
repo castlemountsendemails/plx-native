@@ -61,6 +61,7 @@ pub(crate) fn push_held(keys: &mut HeldKeys, sid: plx_plex::plex::ServerId, rk: 
 
 pub mod browse;
 pub mod catalog;
+pub mod catalog_ids;
 pub mod fanout;
 mod content_arg;
 pub use content_arg::ContentArg;
@@ -101,6 +102,9 @@ pub struct Stores {
     pub watchlist: watchlist::WatchlistStore,
     /// The catalog page's discover record (`crate::catalog`). Appended last, like its `StoreId`.
     pub catalog: catalog::CatalogStore,
+    /// The catalog-id lookup (`crate::catalog_ids`): never reset, so its answers outlive a
+    /// profile switch. No `StoreId`: the application pumps it; it lands under the Watchlist's.
+    pub catalog_ids: catalog_ids::CatalogIdStore,
     /// The PMS notification feed's owner. Ships on for owned servers (`notify::NOTIFY_ENABLED`); no `StoreId`, no
     /// `StoreCmd`: the application pumps it and tells it the lifecycle (`Bridge::notify_*`).
     pub notify: notify::NotifyStore,
@@ -133,12 +137,15 @@ impl Default for Stores {
             reconcile: viewreconcile::ViewReconcileStore::default(),
             watchlist: watchlist::WatchlistStore::default(),
             catalog: catalog::CatalogStore::default(),
+            catalog_ids: catalog_ids::CatalogIdStore::default(),
             notify: notify::NotifyStore::default(),
             notify_map: Default::default(),
             view_ledger: Default::default(),
             network_held: false,
         };
         stores.share_view_ledger();
+        let records = stores.catalog_ids.records();
+        stores.watchlist.share_records(records);
         stores
     }
 }
