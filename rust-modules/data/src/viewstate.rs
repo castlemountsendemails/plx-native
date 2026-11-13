@@ -166,6 +166,9 @@ pub enum ViewFact {
     Watched(bool),
     /// The item was hidden from Continue Watching and nothing else about it changed.
     LeftDeck,
+    /// The item was deleted from its server. Unlike every other fact it is not a state of the row
+    /// but the row's end: stores drop it where they can and re-read where they cannot.
+    Removed,
     /// What the server SAID about the item when the read-back asked ([`crate::stores::viewreconcile`]):
     /// the three fields of its watch state, as `pms::parse_item` reads them.
     Facts { watched: bool, unwatched: bool, resume_ms: i64 },
@@ -197,6 +200,9 @@ pub enum ViewEdit {
     Watched(bool),
     /// Leave Continue Watching; every other field of the row stands.
     LeftDeck,
+    /// The item is gone from the server. Changes no field of a row (see [`ViewEdit::changes`]): a
+    /// store drops the row, or marks its listing stale, by matching this edit itself.
+    Removed,
     /// Set the three watch-state fields to what the server answered. Never recorded in the
     /// [`crate::viewledger::ViewLedger`]: it is the server's word, not a press.
     Facts { watched: bool, unwatched: bool, resume_ms: i64 },
@@ -224,6 +230,7 @@ impl ViewChange {
         match self.fact {
             ViewFact::Watched(on) => ViewEdit::Watched(on),
             ViewFact::LeftDeck => ViewEdit::LeftDeck,
+            ViewFact::Removed => ViewEdit::Removed,
             ViewFact::Facts { watched, unwatched, resume_ms } => {
                 ViewEdit::Facts { watched, unwatched, resume_ms }
             }
@@ -286,6 +293,8 @@ impl ViewEdit {
             }
             ViewEdit::Offset { ms } => m.resume_ms != ms,
             ViewEdit::Watched(_) | ViewEdit::LeftDeck => true,
+            // never a field edit: the stores that can drop the row match `Removed` themselves
+            ViewEdit::Removed => false,
         }
     }
     /// Apply to one row already known to be covered. `LeftDeck` changes no field of a row — leaving
@@ -299,7 +308,7 @@ impl ViewEdit {
                 m.resume_ms = resume_ms;
             }
             ViewEdit::Offset { ms } => m.resume_ms = ms,
-            ViewEdit::LeftDeck => {}
+            ViewEdit::LeftDeck | ViewEdit::Removed => {}
         }
     }
 }
@@ -1075,6 +1084,14 @@ pub fn run(
         ViewStateCmd::Request { sid, rk, write, scope, guid } => {
             self.request(adapter, sid, &rk, write, scope, &guid, browse, hubs, person, collection, search, metadata)
         }
+        // The server already deleted the item, so nothing is queued or sent: tell every store that
+        // can drop the row, and owe the hub re-read that clears the copies the others still hold.
+        ViewStateCmd::Removed { sid, rk, scope } => {
+            let change = ViewChange { sid, rk, scope, fact: ViewFact::Removed };
+            publish_view(change, browse, hubs, person, collection, search, metadata);
+            self.want_hubs = true;
+            true
+        }
         ViewStateCmd::Reset => {
             self.reset();
             true
@@ -1144,6 +1161,53 @@ mod tests {
             "the optimistic edit reaches {} before run returns", crate::stores::StoreId::Metadata.name());
         assert!(store.take_notice().is_some(), "the owning ViewState store notices its command");
         crate::metadata::install_for_test(metadata_store.state_mut(), None);
+        plx_plex::plex::reset_servers_for_test();
+    }
+
+    /// A delete the server took is told to every store that can drop the row, sends nothing, and
+    /// owes the hub re-read that clears the copies the others still hold.
+    #[test]
+    fn a_removal_reaches_every_store_sends_nothing_and_owes_the_hub_refetch() {
+        let _g = plx_base::testlock::serial();
+        plx_plex::plex::reset_servers_for_test();
+        let sid = plx_plex::plex::register_for_test(
+            "viewstate-removed", "127.0.0.1", 9, "synthetic", "fixture");
+        let mut store = crate::stores::viewstate::ViewStateStore::default();
+        let (mut browse, mut hubs, mut person, mut collection, mut search) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut metadata_store = crate::stores::metadata::MetadataStore::default();
+
+        assert!(store.run(
+            crate::stores::viewstate::ViewStateCmd::Removed { sid, rk: "7".into(), scope: Scope::Show },
+            &mut |cmd| { browse.push(cmd); true },
+            &mut |cmd| { hubs.push(cmd); crate::stores::StoreOutcome::default() },
+            &mut |cmd| { person.push(cmd); true },
+            &mut |cmd| { collection.push(cmd); true },
+            &mut |cmd| { search.push(cmd); true },
+            &mut |cmd| metadata_store.run(cmd),
+        ));
+
+        assert!(!store.is_busy_for_test(), "nothing is queued: the server already deleted it");
+        assert!(matches!(hubs.as_slice(), [crate::stores::hubs::HubsCmd::ApplyView {
+            at, edit: ViewEdit::Removed }] if at.sid == sid && at.rk == "7" && at.scope == Scope::Show));
+        assert!(matches!(browse.as_slice(), [crate::stores::browse::BrowseCmd::ApplyView {
+            edit: ViewEdit::Removed, .. }]));
+        assert!(matches!(person.as_slice(), [crate::stores::person::PersonCmd::ApplyView {
+            edit: ViewEdit::Removed, .. }]));
+        assert!(matches!(collection.as_slice(), [crate::stores::collection::CollectionCmd::ApplyView {
+            edit: ViewEdit::Removed, .. }]));
+        assert!(matches!(search.as_slice(), [crate::stores::search::SearchCmd::ApplyView {
+            edit: ViewEdit::Removed, .. }]));
+
+        // …and the next pump re-reads Home's hubs and the libraries' shelves, once
+        let (mut browse, mut hubs) = (Vec::new(), Vec::new());
+        store.pump(
+            &mut |cmd| { browse.push(cmd); true },
+            &mut |cmd| { hubs.push(cmd); crate::stores::StoreOutcome::default() },
+            &mut |_| true, &mut |_| true, &mut |_| true, &mut |_| true,
+        );
+        assert!(matches!(hubs.as_slice(), [crate::stores::hubs::HubsCmd::RefetchHubs]));
+        assert!(matches!(browse.as_slice(), [crate::stores::browse::BrowseCmd::HubsInvalidateAll]));
         plx_plex::plex::reset_servers_for_test();
     }
 

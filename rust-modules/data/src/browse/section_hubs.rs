@@ -890,6 +890,21 @@ impl super::BrowseState {
         hit
     }
 
+    /// The item was deleted: off every section shelf, wherever it sits. True when a shelf lost it.
+    pub(super) fn hubs_removed(&mut self, sid: ServerId, rk: &str) -> bool {
+        let mut hit = false;
+        for st in self.states_mut() {
+            if drop_from_shelves(&mut st.hubs.committed, sid, rk) {
+                st.hubs.revised();
+                hit = true;
+            }
+            if let Some(staged) = st.hubs.staged.as_mut() {
+                drop_from_shelves(staged, sid, rk);
+            }
+        }
+        hit
+    }
+
     /// A notification from `sid`: its sections' shelves may have moved. No other server's section
     /// is touched and the failure ladder is kept (see [`SecHubs::invalidate_notified`]).
     pub(super) fn hubs_invalidate_server(&mut self, sid: ServerId, adapter: &Arc<super::BrowseAdapter>) {
@@ -982,6 +997,20 @@ fn drop_from_deck(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str) -> boo
     }
     shelves.retain(|shelf| !shelf.items.is_empty());
     hit
+}
+
+/// [`drop_from_deck`] for a deleted item: off every shelf, not only the deck. A shelf it empties goes.
+fn drop_from_shelves(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str) -> bool {
+    let held = |item: &PmsMovie| plx_plex::plex::same_item((item.sid, &item.rk), (sid, rk));
+    if !shelves.iter().flat_map(|shelf| shelf.items.iter()).any(|item| held(item)) {
+        return false;
+    }
+    let shelves = Arc::make_mut(shelves);
+    for shelf in shelves.iter_mut() {
+        shelf.items.retain(|item| !held(item));
+    }
+    shelves.retain(|shelf| !shelf.items.is_empty());
+    true
 }
 
 /// Publish a section's shelves directly, for the screen tests that need a document with a shelf

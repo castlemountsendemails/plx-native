@@ -890,6 +890,20 @@ fn apply_view(state: &mut PersonState, at: &crate::viewstate::ViewAt, edit: crat
     let Some(p) = state.current.as_mut() else {
         return false;
     };
+    // A deleted title leaves the filmography now; its shelves are not re-read otherwise.
+    if let crate::viewstate::ViewEdit::Removed = edit {
+        let mut gone = false;
+        for shelf in p.srcs.iter_mut().flat_map(|s| s.shelves.iter_mut()) {
+            let n = shelf.items.len();
+            shelf.items.retain(|m| !at.is_item(m.sid, &m.rk));
+            gone |= shelf.items.len() != n;
+        }
+        if gone {
+            resettle(p);
+            state.revision += 1;
+        }
+        return gone;
+    }
     let mut hit = false;
     for m in p
         .srcs

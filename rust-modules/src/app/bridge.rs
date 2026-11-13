@@ -444,6 +444,8 @@ pub(crate) struct Bridge {
     watchlist_details: Vec<EntryId>,
     /// "Not in the Plex catalog" notices sent this run.
     watchlist_notices: u32,
+    /// Item deletes on their way to a server (`delete_item`).
+    deletes: super::delete_item::DeleteJobs,
     #[cfg(test)]
     keyboard_calls: Vec<bool>,
     #[cfg(test)]
@@ -658,6 +660,7 @@ impl Bridge {
             watchlist_waiting: Vec::new(),
             watchlist_details: Vec::new(),
             watchlist_notices: 0,
+            deletes: Default::default(),
             #[cfg(test)]
             keyboard_calls: Vec::new(),
             #[cfg(test)]
@@ -1287,6 +1290,28 @@ impl Bridge {
 
     pub(crate) fn viewstate_run(&mut self, cmd: plx_data::stores::viewstate::ViewStateCmd) -> bool {
         self.stores.viewstate_run(cmd, self.directory.view())
+    }
+
+    /// Delete an item's media from its server, after the menu's confirm. The card changes only
+    /// when the server has said yes (`delete_pump`).
+    pub(crate) fn delete_item(&mut self, sid: plx_plex::plex::ServerId, rk: String, title: String,
+        scope: plx_data::viewstate::Scope) {
+        self.deletes.start(sid, rk, title, scope);
+    }
+
+    /// Once a frame: the deletes that finished. A delete the server took drops the item's rows
+    /// where the stores can and owes the re-read for the rest (`ViewStateCmd::Removed`), then says
+    /// so; one it refused changes nothing and says why it may have been.
+    pub(crate) fn delete_pump(&mut self) {
+        for landing in self.deletes.take() {
+            if landing.outcome == super::delete_item::Outcome::Deleted {
+                self.viewstate_run(plx_data::stores::viewstate::ViewStateCmd::Removed {
+                    sid: landing.sid, rk: landing.rk.clone(), scope: landing.scope.clone(),
+                });
+                plx_machine::idle::invalidate();
+            }
+            super::delete_item::toast(super::delete_item::message(&landing));
+        }
     }
 
     /// Keep the view-state reconcile network work owed while the player is on top

@@ -18,6 +18,9 @@ pub enum ViewStateCmd {
         /// to resolve it from `(sid, rk)`.
         guid: String,
     },
+    /// The item was deleted from server `sid`: drop its rows where the stores can, and refresh
+    /// the rest. Nothing is sent to the server.
+    Removed { sid: ServerId, rk: String, scope: crate::viewstate::Scope },
     Reset,
 }
 

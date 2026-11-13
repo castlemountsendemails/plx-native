@@ -868,6 +868,8 @@ fn apply_edit(b: &mut SourceBuild, at: &ViewAt, edit: ViewEdit) -> bool {
     let mine = |m: &PmsMovie| match edit {
         ViewEdit::Watched(_) | ViewEdit::Facts { .. } | ViewEdit::Offset { .. } => at.covers(m),
         ViewEdit::LeftDeck => at.is_item(m.sid, &m.rk),
+        // a deleted show takes its episodes with it
+        ViewEdit::Removed => at.covers(m),
     };
     match edit {
         ViewEdit::Watched(_) | ViewEdit::Facts { .. } | ViewEdit::Offset { .. } => {
@@ -891,6 +893,19 @@ fn apply_edit(b: &mut SourceBuild, at: &ViewAt, edit: ViewEdit) -> bool {
             let before = b.cw.len();
             b.cw.retain(|c| !mine(&*c.m));
             b.lane.remove(|row| mine(&*row.m)) || b.cw.len() != before
+        }
+        // The item is gone: off the deck and off every shelf. The refetch the removal owes
+        // (`ViewStateState::want_hubs`) corrects the shelves' totals.
+        ViewEdit::Removed => {
+            let before = b.cw.len();
+            b.cw.retain(|c| !mine(&*c.m));
+            let mut hit = b.lane.remove(|row| mine(&*row.m)) || b.cw.len() != before;
+            for shelf in b.shelves.iter_mut() {
+                let n = shelf.items.len();
+                shelf.items.retain(|m| !mine(&**m));
+                hit |= shelf.items.len() != n;
+            }
+            hit
         }
     }
 }

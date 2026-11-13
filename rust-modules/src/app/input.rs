@@ -664,9 +664,16 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
         // The write is queued on the Watchlist store (the ledger flips the face at once and puts it
         // back if plex.tv refuses) and the strip's bookmark pulses: the APP owns that, not the menu.
         Action::WatchlistAdd { hex } => bridge.watchlist_add(hex),
-        // ponytail: the menu reports this only after its confirm was answered Delete. The DELETE
-        // call and what follows it come in part C; until then the answer does nothing.
-        Action::DeleteItem(_) => {}
+        // Reported by the menu only after its confirm was answered Delete, the one producer of
+        // this action: nothing else may reach the call. The captured row names the title and how
+        // far the delete reaches (a show takes its episodes). Nothing changes on screen until the
+        // server says yes (`Bridge::delete_pump`).
+        Action::DeleteItem(rk) => {
+            let row = item.as_ref().filter(|m| m.rk == rk);
+            let title = row.map(|m| m.title.clone()).unwrap_or_default();
+            let scope = row.map_or(plx_data::viewstate::Scope::Leaf, plx_data::viewstate::Scope::of_row);
+            bridge.delete_item(sid, rk, title, scope);
+        }
         // A legacy title: added once the catalog-id lookup has its id (`Bridge::watchlist_add_legacy`).
         Action::WatchlistAddLegacy { kind, guid } => {
             if let Some(title) = plx_data::catalog_ids::LegacyTitle::of(kind, &guid) {

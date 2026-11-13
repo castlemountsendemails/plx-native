@@ -93,6 +93,8 @@
     "other": "A sorozat és az összes epizódja ({count}) törlődik a szerver lemezéről. Ez nem vonható vissza."
   },
   "browse.menu.delete_show_all": "A sorozat és az összes epizódja törlődik a szerver lemezéről. Ez nem vonható vissza.",
+  "browse.menu.deleted_toast": "„{title}” törölve",
+  "browse.menu.delete_failed": "A Plex nem törölte a következőt: „{title}”. Lehet, hogy a törlés ki van kapcsolva a szerveren, vagy ennek a fióknak nincs engedélye.",
   "browse.login.deleted": "Helyi adatok törölve",
   "browse.login.deleted_detail": "A hitelesítő adatok, a beállítások, a telemetria és a helyi diagnosztika törölve.",
   "browse.login.partial": "Kijelentkezve, a legtöbb helyi adat törölve",

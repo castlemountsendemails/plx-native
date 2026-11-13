@@ -1375,11 +1375,13 @@ impl BrowseState {
         let current = self.cur();
         let facts = matches!(edit,
             crate::viewstate::ViewEdit::Facts { .. } | crate::viewstate::ViewEdit::Offset { .. });
+        let removed = matches!(edit, crate::viewstate::ViewEdit::Removed);
         let mut hit = false;
         for (i, state) in self.states.iter_mut().enumerate() {
             let (covered, changed) = state.items.apply_view(at, edit);
             hit |= changed;
-            if covered && facts && state.membership_depends_on_viewing() {
+            // A deleted item changes every listing that held it, whatever the listing filters on.
+            if covered && (removed || facts && state.membership_depends_on_viewing()) {
                 if i == current {
                     hit |= !state.membership_stale;
                     state.membership_stale = true;
@@ -2683,6 +2685,13 @@ impl BrowseState {
                     self.apply_view_local(&at, edit)
                 }
                 crate::viewstate::ViewEdit::LeftDeck => self.hubs_left_the_deck(at.sid, &at.rk),
+                // The listing drops its pages (or re-queries, on the section in view) and the
+                // section shelves lose the card now; the hub refetch follows.
+                crate::viewstate::ViewEdit::Removed => {
+                    let listing = self.apply_view_local(&at, edit);
+                    let shelves = self.hubs_removed(at.sid, &at.rk);
+                    listing || shelves
+                }
             },
         }
     }

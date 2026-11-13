@@ -95,6 +95,8 @@
     "other": "La série et tous ses épisodes ({count}) seront supprimés du disque de votre serveur. Cette action est irréversible."
   },
   "browse.menu.delete_show_all": "La série et tous ses épisodes seront supprimés du disque de votre serveur. Cette action est irréversible.",
+  "browse.menu.deleted_toast": "« {title} » supprimé",
+  "browse.menu.delete_failed": "Plex n’a pas supprimé « {title} ». La suppression est peut-être désactivée sur le serveur, ou ce compte n’y est pas autorisé.",
   "browse.login.deleted": "Données locales supprimées",
   "browse.login.deleted_detail": "Les identifiants, préférences, données de télémétrie et diagnostics locaux ont été supprimés.",
   "browse.login.partial": "Déconnecté ; la plupart des données locales supprimées",

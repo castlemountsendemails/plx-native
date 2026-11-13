@@ -146,3 +146,39 @@ fn an_agreeing_read_back_resets_a_stale_section_that_is_not_showing() {
     let first = &browse.state.states()[0];
     assert_eq!((first.fetch, first.total), (SecFetch::Loading, -1), "its next visit fetches afresh");
 }
+
+#[test]
+fn a_deleted_item_marks_the_listing_that_held_it_stale_whatever_it_filters_on() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, sid, _) = registered_page_source();
+    resident(sid, &mut browse); // ordered by title, no filter: viewing does not decide membership
+    let gen = browse.state.query_gen();
+    assert!(apply(&mut browse, sid, ViewEdit::Removed));
+    assert!(stale(&mut browse), "the row is gone from the server, so the listing is out of date");
+    assert_eq!(browse.state.query_gen(), gen, "marking it never re-queries under the cursor");
+    assert_eq!(browse.state.states()[0].items.get(0).unwrap().rk, "7", "the row itself is not edited");
+    assert!(browse.state.requery_stale(), "the next ask re-runs the query once");
+}
+
+#[test]
+fn a_deleted_item_in_a_section_that_is_not_showing_makes_it_forget_its_pages() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, sid, _) = registered_page_source();
+    browse.append_sections(0, vec![(2, "Other".into(), SecKind::Movie)]);
+    resident(sid, &mut browse);
+    browse.state.set_cur(1);
+    assert!(apply(&mut browse, sid, ViewEdit::Removed));
+    let first = &browse.state.states()[0];
+    assert_eq!((first.fetch, first.total), (SecFetch::Loading, -1), "its next visit fetches afresh");
+}
+
+#[test]
+fn a_deleted_item_the_listing_never_held_changes_nothing() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, sid, _) = registered_page_source();
+    resident(sid, &mut browse);
+    let other = browse.state.run_owned(&browse.adapter, crate::stores::browse::BrowseCmd::ApplyView {
+        at: ViewAt::leaf(sid, "99"), edit: ViewEdit::Removed });
+    assert!(!other);
+    assert!(!stale(&mut browse));
+}

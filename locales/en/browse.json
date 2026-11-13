@@ -375,6 +375,20 @@
     "value": "This deletes the show and all its episodes from your server’s disk. It can’t be undone.",
     "description": "Confirm body for a show whose episode count the server did not give."
   },
+  "browse.menu.deleted_toast": {
+    "value": "Deleted “{title}”",
+    "args": {
+      "title": "str"
+    },
+    "description": "System toast after an item was deleted from the server. {title} is the movie's or show's title."
+  },
+  "browse.menu.delete_failed": {
+    "value": "Plex didn’t delete “{title}”. Deletion may be off on the server, or this account may not be allowed to delete.",
+    "args": {
+      "title": "str"
+    },
+    "description": "System toast when a delete did not go through: the server refused, or did not answer. {title} is the movie's or show's title. The item stays."
+  },
   "browse.login.deleted": {
     "value": "Local data deleted",
     "description": "browse login deleted"

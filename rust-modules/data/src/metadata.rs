@@ -3961,6 +3961,8 @@ pub fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAdapter>,
             crate::viewstate::ViewEdit::Watched(on) => set_watched_local(state, &at, on),
             // the loaded item has no deck to leave
             crate::viewstate::ViewEdit::LeftDeck => false,
+            // A deleted item stays on this page's Related shelf until the page is next read.
+            crate::viewstate::ViewEdit::Removed => false,
             // The server's word reaches the other items' tiles on this page (Related, the
             // collection shelf). The loaded item, its episodes and seasons are re-read whole by
             // the application when the read-back lands (`app::content::reconcile_details`); only
