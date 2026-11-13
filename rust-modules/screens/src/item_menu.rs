@@ -119,6 +119,9 @@ pub enum Action {
     /// Add the title a server knows only by this legacy-agent guid: the app adds it once the
     /// catalog-id lookup has its id, or says the catalog has no such title.
     WatchlistAddLegacy { kind: plx_data::watchlist::model::Kind, guid: String },
+    /// Delete the item's media from its server: a movie with all its versions, or a show with all
+    /// its episodes. The row opens a confirm; the press itself deletes nothing.
+    DeleteItem(String),
 }
 
 impl Action {
@@ -156,7 +159,8 @@ impl Action {
             | Action::PlayFromStart(rk)
             | Action::RemoveFromDeck(rk)
             | Action::GoToCatalog(rk)
-            | Action::WatchlistRemove(rk) => rk,
+            | Action::WatchlistRemove(rk)
+            | Action::DeleteItem(rk) => rk,
             Action::WatchlistAddLegacy { guid, .. } => guid,
             Action::PlayTrailer { rk, .. } => rk,
             // No ratingKey: the subject is a catalog id.
@@ -179,6 +183,7 @@ impl Action {
             Action::WatchlistRemove(_) => 10,
             Action::WatchlistAdd { .. } => 11,
             Action::WatchlistAddLegacy { .. } => 12,
+            Action::DeleteItem(_) => 13,
         };
         c.u32(tag).str(self.rk());
         if let Action::WatchlistAdd { hex } = self {
@@ -247,6 +252,8 @@ pub enum ItemRow {
     WatchlistRemove,
     /// Add to Watchlist (movie) / Add Show to Watchlist (episode, catalog page menu).
     WatchlistAdd,
+    /// Delete the item's media (destructive, last).
+    Delete,
 }
 
 impl ItemRow {
@@ -271,6 +278,7 @@ impl FormId for ItemRow {
             ItemRow::GoToCatalog => 9,
             ItemRow::WatchlistRemove => 10,
             ItemRow::WatchlistAdd => 11,
+            ItemRow::Delete => 12,
         })
     }
 }
@@ -306,7 +314,7 @@ fn build_with(
     deck_press: DeckPress,
     trailer: Option<&plx_data::metadata::Extra>,
 ) -> ItemForm {
-    build_card(m, from_deck, deck_press, trailer, None, None)
+    build_card(m, from_deck, deck_press, trailer, None, None, false)
 }
 
 /// `deck_press` is the Continue Watching setting. It changes this menu for a card FROM the deck
@@ -327,6 +335,7 @@ fn build_card(
     trailer: Option<&plx_data::metadata::Extra>,
     watchlist_guid: Option<&str>,
     face: Option<&watchlist::Face>,
+    can_delete: bool,
 ) -> ItemForm {
     let leaf = m.kind == 0 || m.kind == 3;
     let opens_details = from_deck && !deck_press.press_plays();
@@ -434,6 +443,16 @@ fn build_card(
         // face adds Add / Remove, last, with the one other destructive row.
         sec = watchlist::push_face(sec, face);
     }
+    // Last, below every other destructive row. Movies and shows only: an episode or season would
+    // need count queries and after-delete handling on the Detail page. `can_delete` is the
+    // server's own `allowMediaDeletion="1"`, so a server that did not say it hides the row.
+    sec = sec.item_if(
+        can_delete && matches!(m.kind, 0 | 1),
+        ItemRow::Delete,
+        RowKind::Button,
+        Action::DeleteItem(m.rk.clone()),
+        Row::new(plx_platform::i18n::msg::browse_menu_delete()).licon(Icon::Close).destructive(true),
+    );
     Form::new().section(sec)
 }
 
@@ -680,7 +699,8 @@ impl ItemMenuScreen {
                 let trailer = cached_trailer(self.arg.sid, row, meta);
                 // A Watchlist tile with a reachable copy is a card of that copy, and Remove joins it.
                 let remove = self.arg.catalog.as_ref().map(|c| c.guid.as_str());
-                build_card(row, *from_deck, plx_media::route::deck_press(), trailer.as_ref(), remove, self.face.as_ref())
+                build_card(row, *from_deck, plx_media::route::deck_press(), trailer.as_ref(), remove, self.face.as_ref(),
+                    plx_plex::plex::media_deletion_allowed(self.arg.sid))
             }
             ItemMenuKind::Episode { mark } => build_episode(&self.arg.rk, *mark, self.face.as_ref()),
             ItemMenuKind::Season { mark, .. } => build_season(&self.arg.rk, *mark, self.face.as_ref()),
@@ -1395,6 +1415,36 @@ mod tests {
         // and nothing navigates: both rows the shelf menu offers an episode are dead ends from the
         // page that episode already belongs to
         assert!(!menu.offers(ItemRow::GoToShow) && !menu.offers(ItemRow::GoToItem));
+    }
+
+    /// **Delete is the card menu's last row, for a movie or a show, and only when the server said
+    /// `allowMediaDeletion="1"`.** Episodes and seasons never get it, and it is destructive so the
+    /// menu never opens on it.
+    #[test]
+    fn delete_is_the_last_row_of_a_movie_or_show_card_only_when_the_server_allows_it() {
+        let with = |m: &PmsMovie, from_deck: bool, can_delete: bool| {
+            built(super::build_card(m, from_deck, DeckPress::Play, None, None, None, can_delete))
+        };
+        for kind in [0, 1] {
+            let m = item(kind, PosterMark::Watched);
+            let on = with(&m, false, true);
+            assert_eq!(on.ids().last(), Some(&ItemRow::Delete), "kind {kind}: Delete is last");
+            assert_eq!(on.action(ItemRow::Delete), Action::DeleteItem("42".into()));
+            assert!(on.is_destructive(ItemRow::Delete));
+            assert!(!with(&m, false, false).offers(ItemRow::Delete), "kind {kind}: setting off hides it");
+        }
+        // below the other destructive rows, on a deck card too
+        let on_deck = with(&item(0, PosterMark::Watched), true, true);
+        let ids = on_deck.ids();
+        assert!(ids.iter().position(|i| *i == ItemRow::RemoveFromDeck) < ids.iter().position(|i| *i == ItemRow::Delete));
+        assert!(on_deck.offers(ItemRow::RemoveFromDeck), "rig: a deck card");
+        // an episode or season row never offers it, whatever the server says
+        for kind in [2, 3] {
+            assert!(!with(&item(kind, PosterMark::None), false, true).offers(ItemRow::Delete), "kind {kind}");
+        }
+        assert!(!build_episode("77", PosterMark::None).offers(ItemRow::Delete));
+        assert!(!build_season("78", PosterMark::None).offers(ItemRow::Delete));
+        assert!(Action::DeleteItem("42".into()).has_subject() && !Action::DeleteItem(String::new()).has_subject());
     }
 
     /// **A menu never opens with its focus on a destructive action.** *Mark as Unwatched* throws the
@@ -2264,7 +2314,7 @@ mod tests {
     #[test]
     fn a_playable_catalog_hold_menu_is_the_card_menu_plus_remove() {
         let movie = item(0, PosterMark::None);
-        let menu = built(super::build_card(&movie, false, DeckPress::Play, None, Some("plex://movie/abc"), None));
+        let menu = built(super::build_card(&movie, false, DeckPress::Play, None, Some("plex://movie/abc"), None, false));
         let ids = menu.ids();
         for row in [ItemRow::GoToItem, ItemRow::MarkWatched, ItemRow::PlayFromStart] {
             assert!(ids.contains(&row), "the card's {row:?} row is there: {ids:?}");

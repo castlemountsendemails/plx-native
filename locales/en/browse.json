@@ -339,6 +339,10 @@
     "value": "Remove from Deck",
     "description": "browse menu remove_deck"
   },
+  "browse.menu.delete": {
+    "value": "Delete",
+    "description": "Last row of a movie's or show's card menu, shown only when the server allows deleting media. Opens a confirm; it does not delete by itself."
+  },
   "browse.login.deleted": {
     "value": "Local data deleted",
     "description": "browse login deleted"

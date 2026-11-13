@@ -784,6 +784,15 @@ impl Client {
             .map(|reply| reply.status)
     }
 
+    /// DELETE whose HTTP status is the result. `None` is "nothing answered"; any `Some` is the
+    /// server's word. The item delete reports the status raw because the refusal code for a server
+    /// with deletion off is unproven, so no caller may decide on it.
+    #[track_caller]
+    pub(super) fn delete_status(&self, path_no_token: &str) -> Option<i32> {
+        self.send(path_no_token, Method::Delete, &[])
+            .map(|reply| reply.status)
+    }
+
     /// Deadline-bearing GET status for one phase of a larger media transaction.
     #[track_caller]
     pub(super) fn get_status_until(

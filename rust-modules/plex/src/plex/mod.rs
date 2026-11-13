@@ -108,7 +108,7 @@ pub use client::{decode_ip, decode_link, encode_ip, encode_link};
 #[allow(unused_imports)]
 pub use client::{Client, IpVersion, StreamUrl};
 // `Client::find_by_guids`' vocabulary (library.rs stays private).
-pub use library::{GuidKind, GuidLookupError, GuidMatch, GUIDS_PER_REQUEST};
+pub use library::{media_deletion_allowed, note_media_deletion, ServerRoot, GuidKind, GuidLookupError, GuidMatch, GUIDS_PER_REQUEST};
 // WHERE a server is, as one value. `Origin` is what `register_origin`/`install` take and what a
 // `Client` carries; `Scheme` is re-exported beside it because `dev::DevServer` deserializes one
 // straight out of the `plxnative-servers` trigger.

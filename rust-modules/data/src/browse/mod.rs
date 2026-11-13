@@ -3653,7 +3653,15 @@ pub fn execute_discovery(request: DiscoveryRequest) -> bool {
             // the server naming ITSELF, so a roster that never reached plex.tv still heads its
             // group with a machine name. One request, once, per source.
             let name = if want_name {
-                client.friendly_name().unwrap_or_default()
+                // The same `GET /` also says whether the server lets clients delete media; the
+                // item menu's Delete row reads that (`plex::media_deletion_allowed`).
+                match client.root() {
+                    Some(root) => {
+                        plx_plex::plex::note_media_deletion(client.id(), root.allow_media_deletion);
+                        root.name
+                    }
+                    None => String::new(),
+                }
             } else {
                 String::new()
             };

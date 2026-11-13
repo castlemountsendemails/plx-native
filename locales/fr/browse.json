@@ -81,6 +81,7 @@
   "browse.menu.go_season": "Aller à la saison",
   "browse.menu.go_movie": "Aller au film",
   "browse.menu.remove_deck": "Retirer de la liste",
+  "browse.menu.delete": "Supprimer",
   "browse.login.deleted": "Données locales supprimées",
   "browse.login.deleted_detail": "Les identifiants, préférences, données de télémétrie et diagnostics locaux ont été supprimés.",
   "browse.login.partial": "Déconnecté ; la plupart des données locales supprimées",
