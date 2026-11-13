@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.37] - 2026-11-13
+
+### Added
+- Watchlist: titles your server matched with the older IMDb, TMDB or TVDB agents now get the Watchlist. The bookmark disc is on their Detail page and on the Home hero, and the Add/Remove row is in a card's hold menu, from the first time it opens. The app looks up the title's Plex catalog id when it is first needed. A press made before the answer adds the title once it arrives. A title the Plex catalog does not have loses the disc and the row, and a waiting press shows "Not in the Plex catalog". Not yet tried on any device. Shared code: the LG app gets the same.
+
+### Changed
+- Watchlist page: a title your server holds under an older-agent guid used to read "Not on your servers". It now finds the server copy and opens it. Not yet tried on any device. Shared code: the LG app gets the same.
+
 ## [0.2.36] - 2026-11-10
 
 ### Added
