@@ -166,6 +166,7 @@ fn a_deleted_item_in_a_section_that_is_not_showing_makes_it_forget_its_pages() {
     let (_cleanup, mut browse, sid, _) = registered_page_source();
     browse.append_sections(0, vec![(2, "Other".into(), SecKind::Movie)]);
     resident(sid, &mut browse);
+    browse.state.want(0, PAGE, None); // the window the grid last showed, kept as section 0 is left
     browse.state.set_cur(1);
     assert!(apply(&mut browse, sid, ViewEdit::Removed));
     let first = &browse.state.states()[0];
