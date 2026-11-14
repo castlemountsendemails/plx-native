@@ -22,5 +22,17 @@
   "library_header.show": {
     "value": "Show",
     "description": "Heading of the first section of the Sort & Filter menu, over the list of what the library page shows (Films, Shows, Seasons, Episodes)."
+  },
+  "library_header.scan": {
+    "value": "Scan library",
+    "description": "Library header control, the row's last: asks the server to look for added and removed files in this library. Shown only on the account's own servers. Keep it short."
+  },
+  "library_header.scan_requested": {
+    "value": "Scan requested",
+    "description": "Replaces the Scan library label for a few seconds once the server has accepted the request. It says only that the server took it, not that the scan has finished."
+  },
+  "library_header.scan_failed": {
+    "value": "Scan didn't start",
+    "description": "Replaces the Scan library label for a few seconds when the server refused the scan request or did not answer."
   }
 }

@@ -379,10 +379,10 @@ a dead source is **absent** from Home and states itself in its own library secti
 - **`notify.rs` is the PMS server-sent-event feed, and it is not a playback signal.** It parses
   `/:/eventsource/notifications?filters=playing%2Ctimeline` (`docs/pms-api.md` §9: the parameter is
   `filters`, the spec's `filter` is wrong; the encoded comma list was measured to deliver `timeline`) into
-  lenient `Notification`s (`Play`, `Library` for finished movie/show timeline entries, `Ping`,
+  lenient `Notification`s (`Play`, `Library` for finished movie, show and episode timeline entries, `Ping`,
   `Ignored`; a `timeline` frame is `event: timeline` + one `{"TimelineEntry":{...}}` object, state 5 both opens
-  and closes a sequence so "created" is state 5 with no `metadataState`, and state 9 for a delete is UNVERIFIED,
-  never captured) over `http::stream`, dropping this
+  and closes a sequence so "created" is state 5 with no `metadataState`, and a delete is state 9, captured
+  for an episode (`metadataState` "deleted") but not yet for a movie or show) over `http::stream`, dropping this
   device's own sessions at the source, and never mints a client id (`client_id` is the persisted
   one; a new id raises a new-device alert). Its policy lives in `plx_data::stores::notify`: shipped
   ON (`NOTIFY_ENABLED`), owned servers only. Nothing here may call a stop, an end-of-stream candidate or an Offset

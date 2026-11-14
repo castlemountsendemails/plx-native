@@ -249,6 +249,9 @@ impl plx_screens::registry::LibraryLike for AppHost {
     fn collections_count(cx: &Cx<'_, Self>, section: usize) -> Option<Result<u32, plx_screens::registry::Forbidden>> {
         super::collections_probe::count(cx.views.directory, section, cx.tick.ms)
     }
+    fn owns_server(_cx: &Cx<'_, Self>, sid: plx_plex::plex::ServerId) -> bool {
+        plx_plex::plex::server_facts(sid).is_some_and(|facts| facts.owned)
+    }
 }
 
 impl plx_screens::registry::PersonLike for AppHost {
@@ -446,6 +449,8 @@ pub(crate) struct Bridge {
     watchlist_notices: u32,
     /// Item deletes on their way to a server (`delete_item`).
     deletes: super::delete_item::DeleteJobs,
+    /// Library scan requests on their way to a server (`scan_library`).
+    scans: super::scan_library::ScanJobs,
     #[cfg(test)]
     keyboard_calls: Vec<bool>,
     #[cfg(test)]
@@ -661,6 +666,7 @@ impl Bridge {
             watchlist_details: Vec::new(),
             watchlist_notices: 0,
             deletes: Default::default(),
+            scans: Default::default(),
             #[cfg(test)]
             keyboard_calls: Vec::new(),
             #[cfg(test)]
@@ -1311,6 +1317,22 @@ impl Bridge {
                 plx_machine::idle::invalidate();
             }
             super::delete_item::toast(super::delete_item::message(&landing));
+        }
+    }
+
+    /// Ask a library's server to scan it (the Library header's Scan library).
+    pub(crate) fn scan_library(&mut self, target: plx_data::stores::browse::SectionAddress) {
+        self.scans.start(target);
+    }
+
+    /// Once a frame: the scan answers that landed, queued for the Library page, which is the one
+    /// that asked. An answer the page no longer waits for is ignored there.
+    pub(crate) fn scan_pump(&mut self) {
+        for landing in self.scans.take() {
+            plx_machine::idle::invalidate();
+            self.library_commands.push_back(plx_screens::registry::LibraryCmd::ScanAnswered {
+                target: landing.target, accepted: landing.accepted,
+            });
         }
     }
 

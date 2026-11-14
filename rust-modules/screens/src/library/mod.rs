@@ -15,6 +15,7 @@ mod draw;
 mod collections_page;
 mod header;
 mod toolbar;
+mod scan;
 mod status;
 pub mod menu;
 #[cfg(test)]
@@ -62,7 +63,7 @@ use plx_ui::{Rect, Spring};
 use plx_ui::xfade::Xfade;
 use identity::{KeyRegistry, KeyRegion, region_of_elem};
 use layout::{Layout, Block, CONTENT_TOP};
-use toolbar::{CollectionsControl, COLLECTIONS, CRUMB_ROOT, RECOMMENDED, SORTFILTER};
+use toolbar::{CollectionsControl, COLLECTIONS, CRUMB_ROOT, RECOMMENDED, SCAN, SORTFILTER};
 #[cfg(test)]
 use layout::COLS;
 use parts::{GridPart, RailPart, GRID_GROUP, RAIL_GROUP};
@@ -183,6 +184,11 @@ pub struct LibraryScreen {
     /// The Collections page's header carries the Sort control (the server declared two or more
     /// sorts for the collections listing). A projection of `header`, read by `toolbar_elems`.
     collections_sort: bool,
+    /// The header ends with Scan library: the Library grid itself, on a server this account
+    /// owns. A projection set by `refresh_header`, read by `toolbar_elems`.
+    scan_shown: bool,
+    /// The Scan library control's state. Not canon: a page remounted mid-request starts idle.
+    scan: scan::ScanControl,
     /// The Collections page asked the store for the collections listing of this epoch: asked once,
     /// so a store change before the answer lands does not ask again. Not canon.
     collections_asked: Option<u32>,
@@ -277,7 +283,7 @@ impl LibraryScreen {
                 MasterDetailGroups { master: RAIL_GROUP, detail: GRID_GROUP },
                 MasterDetailPolicy::new(MasterSide::Right, Follow::Live), Regions,
             ),
-            libraries: Vec::new(), folded: Vec::new(), header: plx_ui::page_header::RowCache::new(), header_capsules: plx_ui::widgets::TabStrip::new(), header_pop: plx_ui::widgets::CtlPop::new(), header_swap: plx_ui::page_header::HeaderSwap::new(), header_of: None, collections: CollectionsControl::Unknown, collections_sort: false, collections_asked: None,
+            libraries: Vec::new(), folded: Vec::new(), header: plx_ui::page_header::RowCache::new(), header_capsules: plx_ui::widgets::TabStrip::new(), header_pop: plx_ui::widgets::CtlPop::new(), header_swap: plx_ui::page_header::HeaderSwap::new(), header_of: None, collections: CollectionsControl::Unknown, collections_sort: false, scan_shown: false, scan: Default::default(), collections_asked: None,
             type_before_collections: None, unfiltered: None,
             switched: false, enter_remembered: false, section: None, epoch: None, query: None, grid_reset_pending: false,
             layout, target_layout: layout,
@@ -327,6 +333,7 @@ impl LibraryScreen {
             toolbar::COLLECTIONS => "collections",
             toolbar::RECOMMENDED => "recommended",
             toolbar::SORTFILTER => "sort",
+            toolbar::SCAN => "scan",
             toolbar::CRUMB_ROOT => "crumb",
             MORE => "more",
             _ => "library",
@@ -926,6 +933,12 @@ impl LibraryScreen {
                 return Handled::Yes;
             }
             SORTFILTER => { self.open_menu(crate::registry::LibraryMenuKind::SortFilter, elem, cx, fx); return Handled::Yes; }
+            SCAN => {
+                if let Some(target) = self.address(cx).filter(|_| self.scan_shown) {
+                    if self.scan.press(target, cx.tick.ms) { fx.push(Fx::App(AppFx::Library(LibraryReq::Scan(target)))); }
+                }
+                return Handled::Yes;
+            }
             MORE => { self.open_menu(crate::registry::LibraryMenuKind::Sources, elem, cx, fx); return Handled::Yes; }
             _ => {}
         }
@@ -1046,6 +1059,12 @@ impl LibraryScreen {
             }
             LibraryCmd::OpenListing(listing) => {
                 self.open_listing(listing, cx, fx);
+                return Handled::Yes;
+            }
+            LibraryCmd::ScanAnswered { target, accepted } => {
+                self.scan.answered(target, accepted, cx.tick.ms);
+                self.refresh_header(cx);
+                fx.invalidate(Provenance::Landing(fx.from()));
                 return Handled::Yes;
             }
             LibraryCmd::OpenMenu(kind) => {
@@ -1303,6 +1322,7 @@ impl LibraryScreen {
                     fx.invalidate(Provenance::Landing(fx.from()));
                 }
                 self.plaintext_alert.update(tick.dt());
+                self.scan.advance(tick.ms);
                 if self.grid_reset_pending {
                     if let Some(elem) = self.pair.detail.elem_for(cx, &mut self.keys, 0, self.layout.cols()) {
                         fx.remember(self.pair.groups_config().detail, elem);

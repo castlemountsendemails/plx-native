@@ -968,6 +968,7 @@ pub(crate) unsafe fn library_page_request(
             if let LibraryReq::Play { resume_ns, .. } = request { item.resume_ms = resume_ns / 1_000_000; }
             activate_deck_card(ps, pa, &item, from_deck, play, HUD_LINGER_MS, Some(ret), pages, bridge, menu_play_await, now);
         }
+        LibraryReq::Scan(target) => bridge.scan_library(target),
     }
 }
 

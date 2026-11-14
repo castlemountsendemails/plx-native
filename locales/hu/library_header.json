@@ -3,5 +3,8 @@
   "library_header.recommended": "Ajánlott",
   "library_header.sort_filter": "Rendezés és szűrés",
   "library_header.filtered_of": "{shown} / {total}",
-  "library_header.show": "Megjelenítés"
+  "library_header.show": "Megjelenítés",
+  "library_header.scan": "Könyvtár átvizsgálása",
+  "library_header.scan_requested": "Átvizsgálás kérve",
+  "library_header.scan_failed": "Az átvizsgálás nem indult el"
 }
