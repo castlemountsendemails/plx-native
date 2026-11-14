@@ -148,16 +148,23 @@ fn an_agreeing_read_back_resets_a_stale_section_that_is_not_showing() {
 }
 
 #[test]
-fn a_deleted_item_marks_the_listing_that_held_it_stale_whatever_it_filters_on() {
+fn a_deleted_item_requeries_the_listing_in_view_at_once_whatever_it_filters_on() {
     let _g = plx_base::testlock::serial();
     let (_cleanup, mut browse, sid, _) = registered_page_source();
     resident(sid, &mut browse); // ordered by title, no filter: viewing does not decide membership
     let gen = browse.state.query_gen();
+    let shown = browse.state.listing_snapshot().view().id().unwrap().query;
     assert!(apply(&mut browse, sid, ViewEdit::Removed));
-    assert!(stale(&mut browse), "the row is gone from the server, so the listing is out of date");
-    assert_eq!(browse.state.query_gen(), gen, "marking it never re-queries under the cursor");
-    assert_eq!(browse.state.states()[0].items.get(0).unwrap().rk, "7", "the row itself is not edited");
-    assert!(browse.state.requery_stale(), "the next ask re-runs the query once");
+    // unlike a watch-state change, which waits for a page to bury the Library, the card must go now
+    assert_eq!(browse.state.query_gen(), gen.wrapping_add(1), "exactly one re-fetch, started by the removal");
+    assert!(!stale(&mut browse), "the flag is spent by that re-query");
+    assert_eq!(browse.state.listing_snapshot().view().id().unwrap().query, shown,
+        "…and it is not a query edit: the screen-facing identity stands");
+    let state = &browse.state.states()[0];
+    assert_eq!((state.fetch, state.total), (SecFetch::Loading, -1));
+    assert!(state.cursor.is_some(), "the reader's place stands, so focus falls to the neighbour");
+    assert!(browse.state.requery_owed(), "the first page is owed");
+    assert!(!browse.state.requery_stale(), "a second ask has nothing to do");
 }
 
 #[test]

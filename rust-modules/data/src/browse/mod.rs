@@ -1391,6 +1391,12 @@ impl BrowseState {
                 }
             }
         }
+        // A deleted item must leave the listing in view now. A watch-state change defers its
+        // re-query until a page is pushed over the Library (so cards never shift under the cursor),
+        // but here the card is gone from the server: re-query in place, keeping the reader's place.
+        if removed && self.cur_state().is_some_and(|s| s.membership_stale) {
+            hit |= self.requery_stale();
+        }
         hit
     }
     /// Re-fetch the current section's query because a read-back changed what it would list. The
