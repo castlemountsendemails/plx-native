@@ -518,11 +518,12 @@ fn a_filter_shows_n_of_m_beside_the_control_and_clears_when_reset() {
             press(Key::Back, "", "library", "header:sort*"),
             // The server answered: 37 of the library's 120.
             after(films_answered::<37>, press(Key::Right, "", "library", "header:scan [37 of 120 films]")),
+            press(Key::Left, "", "library", "header:sort [37 of 120 films]"),
             // Reset it, from the same control.
             press(Key::Ok, "library:Menu { kind: SortFilter", "library", "menu:unwatched"),
             press(Key::Ok, "", "library", "menu:unwatched"),
             press(Key::Back, "", "library", "header:sort*"),
-            after(films_answered::<120>, press(Key::Right, "", "library", "header:sort")),
+            after(films_answered::<120>, press(Key::Right, "", "library", "header:scan")),
         ]);
         steps
     };
