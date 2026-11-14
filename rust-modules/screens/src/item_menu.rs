@@ -981,6 +981,12 @@ impl<H: AppLike> Focusable<H> for ItemMenuScreen {
 
 impl<H: AppLike + crate::registry::MetadataLike> Screen<H> for ItemMenuScreen {
     fn opener(&self) -> Option<(EntryId, Option<FocusKey<u32>>)> {
+        // The dispatcher lifts the opener's card back above the dim, and that lift is drawn above
+        // everything, the Delete confirm included: it covered the confirm's title, body and half of
+        // Cancel. While the confirm is up there is no card to lift; the confirm owns the screen.
+        if self.confirm.visible() {
+            return None;
+        }
         Some(ItemMenuScreen::opener(self))
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -2107,6 +2113,26 @@ mod tests {
         // a stale second commit does not answer twice
         let (_, again) = step_focused(&mut s, &ScreenEvent::PressCommit(PressId(0)), delete_confirm::AFFIRM);
         assert!(again.reqs.is_empty());
+    }
+
+    /// **The pressed card is not lifted over the confirm.** The dispatcher paints whatever the menu
+    /// names as its opener above the dim and everything under it, which put the card over the
+    /// confirm's title and answers on the 33 office; so the menu names none while its confirm shows.
+    #[test]
+    fn the_menu_names_no_opener_while_its_confirm_is_up() {
+        let mut s = deletable();
+        assert!(<ItemMenuScreen as Screen<HostFixture>>::opener(&s).is_some(), "the menu lifts its card");
+        press_delete(&mut s);
+        assert!(<ItemMenuScreen as Screen<HostFixture>>::opener(&s).is_none(),
+            "nothing is lifted above the confirm");
+        let back = ScreenEvent::<HostFixture>::Input(InputEvent {
+            at: Tick { ms: 1, dt_us: 0 },
+            source: Source::Sdl,
+            kind: InputKind::Key { key: Key::Back, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
+        });
+        step_focused(&mut s, &back, delete_confirm::CANCEL);
+        assert!(<ItemMenuScreen as Screen<HostFixture>>::opener(&s).is_none(),
+            "the confirm is still fading out, so the card stays down until it is gone");
     }
 
     /// **The confirm opens on Cancel.** An OK held through the press that opened it never deletes.
