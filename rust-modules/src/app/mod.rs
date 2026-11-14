@@ -117,6 +117,7 @@ pub(crate) mod page_title;
 pub(crate) mod clock;
 mod clock_notice;
 mod delete_item;
+mod scan_library;
 mod exit_confirm;
 mod hint_taught;
 mod recorder;

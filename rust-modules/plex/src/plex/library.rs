@@ -99,6 +99,14 @@ impl Client {
         self.delete_status(&format!("/library/metadata/{rating_key}"))
     }
 
+    /// POST /library/sections/{key}/refresh — ask the server to scan one library's folders for
+    /// added and removed files. A plain scan, never `force=1`, which re-reads every item's metadata
+    /// and can overwrite hand-fixed matches. A 2xx means the request was taken, not that the scan
+    /// has run. Returns the HTTP status, or `None` when nothing answered.
+    pub fn scan_section(&self, section_key: i64) -> Option<i32> {
+        self.post_status(&format!("/library/sections/{section_key}/refresh"))
+    }
+
     /// GET /library/all?guid=… — **does THIS server hold this film, and under which key?**
     ///
     /// The one query in the app that crosses libraries rather than naming one, which is why the

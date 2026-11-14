@@ -10,8 +10,9 @@
 //! What the captures show: a movie or show runs state 5 (`metadataState` "processing"), 4 ("loading"),
 //! then 5 with NO `metadataState` (the finished frame); a season runs 2 ("matching"), 5, 3 ("queued"),
 //! 3 ("processing"), 4 ("loading"), 5 and its episodes interleave; a music track (type 10) is two
-//! state-5 frames, the first with `mediaState` "analyzing". No delete was observed: [`MOVIE_DELETED`]
-//! is the community-documented state 9 and is NOT a recording.
+//! state-5 frames, the first with `mediaState` "analyzing"; an episode's file removed is one state-9
+//! frame with `metadataState` "deleted" ([`EPISODE_DELETED`]). No movie delete was observed:
+//! [`MOVIE_DELETED`] is the community-documented state 9 and is NOT a recording.
 
 /// A movie add, as captured: processing, loading, then the finished frame.
 pub const MOVIE_ADD: [&str; 3] = [
@@ -52,6 +53,9 @@ pub const SEASON_AND_EPISODES: [&str; 20] = [
     r#"{"TimelineEntry":{"identifier":"com.plexapp.plugins.library","sectionID":"3","itemID":"3005","type":4,"title":"Episode D","state":4,"metadataState":"loading","updatedAt":1760000203}}"#,
     r#"{"TimelineEntry":{"identifier":"com.plexapp.plugins.library","sectionID":"3","itemID":"3005","type":4,"title":"Episode D","state":5,"updatedAt":1760000203}}"#,
 ];
+
+/// An episode whose file was removed, as captured: one frame, state 9, `metadataState` "deleted".
+pub const EPISODE_DELETED: &str = r#"{"TimelineEntry":{"identifier":"com.plexapp.plugins.library","sectionID":"3","itemID":"3006","type":4,"title":"Episode E","state":9,"metadataState":"deleted","updatedAt":1760000501}}"#;
 
 /// A music track (type 10), as captured: an `analyzing` frame, then the bare state-5 frame. The
 /// identifier is the library plugin's; the TYPE is what makes it not ours.

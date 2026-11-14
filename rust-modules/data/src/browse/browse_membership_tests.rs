@@ -242,3 +242,59 @@ fn a_sections_job_reads_the_root_even_when_the_roster_named_the_server() {
     assert!(reads_root(true, false), "an unnamed source asks on whichever job comes first");
     assert!(!reads_root(false, false), "a count job reads no root");
 }
+
+/// The server answers the page at `start` with `rks`, `total` titles in all, for the query in force.
+fn land_page(browse: &mut TestBrowse, client: &'static plx_plex::plex::Client, start: usize, rks: &[String], total: i64) {
+    let sid = client.id();
+    browse.adapter.fetching.store(true, Ordering::SeqCst);
+    *browse.adapter.page_result.lock().unwrap() = Some(PageResult {
+        client, token_gen: client.token_gen(), gen: browse.state.query_gen(), sec: browse.state.cur(), start,
+        items: rks.iter().map(|rk| PmsMovie { sid, rk: rk.clone(), ..Default::default() }).collect(),
+        total, sorts: None, restored: None, genres: None, genre: None, resolved: Default::default(),
+    });
+    assert!(browse.state.pump_owned(&browse.adapter).changed, "the page landed");
+    plx_base::task::drain_workers_for_test();
+}
+
+/// A title created or deleted on the open library's server re-reads its loaded pages in place:
+/// the listing never empties or reads as loading, each row stays until its page lands again, and
+/// a landed page replaces its rows where they stand (here the server lists a new title first).
+#[test]
+fn a_library_change_rereads_the_listing_in_view_over_its_rows() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, sid, client) = loopback_page_source();
+    rows(sid, &mut browse, PAGE + 3);
+    browse.state.want(0, PAGE + 3, None);
+    let gen = browse.state.query_gen();
+    let shown = browse.state.listing_snapshot().view().id().unwrap().query;
+    assert!(browse.state.run_owned(&browse.adapter, crate::stores::browse::BrowseCmd::LibraryChanged { sid }));
+    let state = &browse.state.states()[0];
+    assert_eq!((state.fetch, state.total), (SecFetch::Ready, PAGE as i64 + 3), "never empty, never loading");
+    assert_eq!(state.stale_pages, [0, 1], "every loaded page is owed again");
+    assert!(state.cursor.is_some(), "the reader's place stands");
+    assert_eq!(rk_at(&browse, 1).as_deref(), Some("1"), "the rows stay until their page lands");
+    assert_eq!(browse.state.query_gen(), gen.wrapping_add(1), "a page still out is dropped");
+    assert_eq!(browse.state.listing_snapshot().view().id().unwrap().query, shown, "not a query edit");
+
+    let first: Vec<String> = std::iter::once("new".to_string()).chain((0..PAGE - 1).map(|i| i.to_string())).collect();
+    land_page(&mut browse, client, 0, &first, PAGE as i64 + 4);
+    let state = &browse.state.states()[0];
+    assert_eq!((state.fetch, state.total), (SecFetch::Ready, PAGE as i64 + 4));
+    assert_eq!(rk_at(&browse, 0).as_deref(), Some("new"), "the landed page replaces its rows");
+    assert_eq!(rk_at(&browse, 1).as_deref(), Some("0"));
+    assert_eq!(browse.state.states()[0].stale_pages, [1], "the next page is still owed");
+    assert_eq!(rk_at(&browse, PAGE).as_deref(), Some(PAGE.to_string().as_str()), "its old rows stay until it lands");
+}
+
+/// A change on a server the open library is not on re-reads nothing.
+#[test]
+fn a_library_change_on_another_server_leaves_the_listing_in_view_alone() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, sid, _) = registered_page_source();
+    rows(sid, &mut browse, 3);
+    let gen = browse.state.query_gen();
+    let other = ServerId::from_raw(sid.raw().wrapping_add(1));
+    assert!(!browse.state.run_owned(&browse.adapter, crate::stores::browse::BrowseCmd::LibraryChanged { sid: other }));
+    assert!(browse.state.states()[0].stale_pages.is_empty());
+    assert_eq!(browse.state.query_gen(), gen);
+}

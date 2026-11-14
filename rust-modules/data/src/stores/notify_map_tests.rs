@@ -691,6 +691,42 @@ fn a_library_change_leaves_home_and_the_reads_alone() {
     let _g = plx_base::testlock::serial();
     let (mut stores, _script, sid) = watchlist_of_three();
     let spent = map(&mut stores, &library(sid, vec![created("20"), deleted("11")]), &[]);
-    assert_eq!(spent, Default::default(), "no Home refetch, no shelf invalidation");
+    assert!(spent.refetched.is_empty() && spent.invalidated.is_empty(), "no Home refetch, no shelf invalidation: {spent:?}");
+    assert_eq!(spent.library_changed, [sid], "only the open library is told");
     assert!(pending(&stores).is_empty());
+}
+
+// ---- a library change re-reads the open library -----------------------------------------------
+
+/// An episode added or removed owes the open library a re-read and the Watchlist nothing: an
+/// episode is never on a Watchlist.
+#[test]
+fn an_episode_change_owes_the_library_a_reread_and_the_watchlist_nothing() {
+    let _g = plx_base::testlock::serial();
+    let (mut stores, script, sid) = watchlist_of_three();
+    let spent = map(&mut stores, &library(sid, vec![
+        change(LibraryKind::Episode, LibraryState::Created, "30"),
+        change(LibraryKind::Episode, LibraryState::Deleted, "31"),
+    ]), &[]);
+    assert_eq!(spent.library_changed, [sid]);
+    assert!(script.asked().is_empty(), "no Watchlist re-match");
+    assert!(stores.notify_owed_for_test().is_empty());
+}
+
+/// However many creates and deletes one server reports in a pump, its library is re-read once.
+#[test]
+fn a_burst_of_changes_is_one_library_reread_per_server() {
+    let _g = plx_base::testlock::serial();
+    let (mut stores, _script, sid) = watchlist_of_three();
+    let other = ServerId::from_raw(3);
+    let burst = NotifyOut {
+        library: vec![
+            NotifyLibrary { sid, entries: vec![created("20"), deleted("11")] },
+            NotifyLibrary { sid, entries: vec![created("21")] },
+            NotifyLibrary { sid: other, entries: vec![created("40")] },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(map(&mut stores, &burst, &[]).library_changed, [sid, other]);
+    assert!(map(&mut stores, &NotifyOut::default(), &[]).library_changed.is_empty(), "spent once");
 }

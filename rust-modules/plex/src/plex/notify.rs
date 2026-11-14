@@ -155,12 +155,15 @@ pub struct PlaySession {
     pub state: PlayState,
 }
 
-/// What kind of library item a `timeline` entry names. Only the two kinds the Watchlist matches
-/// by guid are kept; every other type (episodes, music, photos) is dropped by [`classify`].
+/// What kind of library item a `timeline` entry names. Movies and shows are what the Watchlist
+/// matches by guid; an episode is kept because adding one to a show already in the library reports
+/// only the episode and its season. Every other type (seasons, music, photos) is dropped by
+/// [`classify`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LibraryKind {
     Movie,
     Show,
+    Episode,
 }
 
 /// A library item's lifecycle as a finished `timeline` entry reports it.
@@ -170,12 +173,12 @@ pub enum LibraryState {
     /// frame of its sequence. State 5 also opens the sequence (with `metadataState: "processing"`),
     /// before the item has its metadata, so state alone is not "finished".
     Created,
-    /// The item left the library (state 9). **UNVERIFIED: no delete has been captured**; 9 is the
-    /// community-documented value and the frame's other fields are unknown.
+    /// The item left the library: state 9, with `metadataState` "deleted" on a captured episode
+    /// delete. A movie or show delete has not been captured.
     Deleted,
 }
 
-/// One finished create or delete of a movie or show. The wire names an `itemID` (the item's
+/// One finished create or delete of a movie, show or episode. The wire names an `itemID` (the item's
 /// `ratingKey` on that server), never a guid.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LibraryEntry {
@@ -190,8 +193,8 @@ pub struct LibraryEntry {
 pub enum Notification {
     /// Sessions other than ours (the own-session filter already ran). Never empty.
     Play(Vec<PlaySession>),
-    /// Movies or shows the library finished creating or deleted. Never empty; scan progress,
-    /// metadata updates and every other type are already dropped.
+    /// Movies, shows or episodes the library finished creating or deleted. Never empty; scan
+    /// progress, metadata updates and every other type are already dropped.
     Library(Vec<LibraryEntry>),
     /// The server's keep-alive: a comment line or a `ping` event.
     Ping,
@@ -244,6 +247,7 @@ const LIBRARY_IDENTIFIER: &str = "com.plexapp.plugins.library";
 /// and 5; a movie runs 5 (`metadataState` processing), 4 (loading), 5 (no `metadataState`).
 const TYPE_MOVIE: i64 = 1;
 const TYPE_SHOW: i64 = 2;
+const TYPE_EPISODE: i64 = 4;
 const STATE_PROCESSED: i64 = 5;
 const STATE_DELETED: i64 = 9;
 
@@ -268,6 +272,7 @@ fn library_entry(entry: &serde_json::Value) -> Option<LibraryEntry> {
     let kind = match whole(&entry["type"])? {
         TYPE_MOVIE => LibraryKind::Movie,
         TYPE_SHOW => LibraryKind::Show,
+        TYPE_EPISODE => LibraryKind::Episode,
         _ => return None,
     };
     let state = match whole(&entry["state"])? {
@@ -623,10 +628,20 @@ mod tests {
     }
 
     #[test]
-    fn seasons_episodes_and_music_tracks_are_dropped_whole() {
-        assert_eq!(kept(&fixtures::SEASON_AND_EPISODES), [], "type 3 and 4 never reach the Watchlist");
+    fn each_finished_episode_is_kept_and_seasons_and_music_tracks_are_dropped() {
+        let created = |id| entry(id, LibraryKind::Episode, LibraryState::Created, Some("3"));
+        assert_eq!(kept(&fixtures::SEASON_AND_EPISODES), ["3002", "3003", "3004", "3005"].map(created),
+            "one entry per episode on its finished frame; the season's frames are dropped");
         assert_eq!(kept(&fixtures::MUSIC_TRACK), [], "type 10, analyzing or not");
         assert_eq!(timeline(fixtures::OTHER_PLUGIN), Notification::Ignored);
+    }
+
+    #[test]
+    fn a_captured_episode_delete_is_read_as_deleted() {
+        assert_eq!(
+            library_of(fixtures::EPISODE_DELETED),
+            [entry("3006", LibraryKind::Episode, LibraryState::Deleted, Some("3"))]
+        );
     }
 
     #[test]

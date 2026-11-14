@@ -125,6 +125,18 @@ impl LibraryScreen {
             .unwrap_or_default().to_owned();
         right.push(HeaderItem { value: Some(sort), fold_glyph: true, ..item(msg::library_header_sort_filter()) });
         widest.push(HeaderItem { value: Some(longest), fold_glyph: true, ..item(msg::library_header_sort_filter()) });
+        if self.scan_shown {
+            right.push(item(self.scan.label().text()));
+            // The budget holds the longest of the control's three labels, so a label change
+            // never repacks the row.
+            let longest = [scan::ScanLabel::Scan, scan::ScanLabel::Requested, scan::ScanLabel::Failed]
+                .map(scan::ScanLabel::text)
+                .into_iter()
+                .max_by(|a, b| page_header::cluster_width(&[item(*a)], cx.measure)
+                    .total_cmp(&page_header::cluster_width(&[item(*b)], cx.measure)))
+                .unwrap_or_default();
+            widest.push(item(longest));
+        }
         (right, widest)
     }
 
@@ -141,6 +153,7 @@ impl LibraryScreen {
         self.listed.code().hash(&mut h);
         matches!(self.kind, SecKind::Movie).hash(&mut h);
         self.switched.hash(&mut h);
+        (self.scan_shown, self.scan.label()).hash(&mut h);
         for section in directory.sections() {
             (section.sid.map(|sid| sid.raw()), section.key, section.row.title.as_str(), section.row.pinned).hash(&mut h);
         }
@@ -183,6 +196,9 @@ impl LibraryScreen {
             (read, _) => read,
         };
         self.note_unfiltered(cx);
+        self.scan_shown = self.listing == Listing::All
+            && view.and_then(|index| H::directory(cx).sections().get(index)).and_then(|section| section.sid)
+                .is_some_and(|sid| H::owns_server(cx, sid));
         // `sync` runs every frame; the row (text measurement, packing) is rebuilt only when one
         // of the things it is made of changed.
         let key = self.header_key(cx);

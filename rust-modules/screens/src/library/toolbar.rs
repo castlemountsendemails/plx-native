@@ -9,6 +9,8 @@ pub(super) const RECOMMENDED: u32 = 9;
 pub(super) const SORTFILTER: u32 = 10;
 /// The Collections page's crumb root ("Films"): OK returns to the page below.
 pub(super) const CRUMB_ROOT: u32 = 11;
+/// Scan library, the last control of the Library grid's row on a server this account owns.
+pub(super) const SCAN: u32 = 12;
 
 /// What the Collections control knows about its count (`LibraryLike::collections_count`).
 ///
@@ -43,13 +45,17 @@ impl CollectionsControl {
 
 impl LibraryScreen {
     /// The controls on the row, left to right. The Collections control is on it only with a known
-    /// count: an unknown or hidden one is not.
+    /// count: an unknown or hidden one is not. Scan library ends the row only on an owned server.
     pub(super) fn toolbar_elems(&self) -> &'static [u32] {
         // The Collections page's row: the crumb (its own element, `CRUMB_ROOT`) and, only when the
         // server declares two sorts, the one Sort control. No Collections, Recommended or menu.
         if self.listing == Listing::Collections { return if self.collections_sort { &[SORTFILTER] } else { &[] }; }
-        if matches!(self.collections, CollectionsControl::Count(_)) { &[COLLECTIONS, RECOMMENDED, SORTFILTER] }
-        else { &[RECOMMENDED, SORTFILTER] }
+        match (matches!(self.collections, CollectionsControl::Count(_)), self.scan_shown) {
+            (true, true) => &[COLLECTIONS, RECOMMENDED, SORTFILTER, SCAN],
+            (true, false) => &[COLLECTIONS, RECOMMENDED, SORTFILTER],
+            (false, true) => &[RECOMMENDED, SORTFILTER, SCAN],
+            (false, false) => &[RECOMMENDED, SORTFILTER],
+        }
     }
 
 

@@ -1022,3 +1022,106 @@ fn entering_a_library_with_collections_fades_the_whole_control_in_when_its_count
     }
     knows_collections(&[]);
 }
+
+fn right_labels(page: &LibraryScreen) -> Vec<String> {
+    page.header.row().unwrap().page.spec().right.iter().map(|item| item.label.clone()).collect()
+}
+
+/// Scan library ends the Library grid's row only on a server the account owns. A shared server's
+/// library and the Collections page never carry it.
+#[test]
+fn scan_library_ends_the_row_only_on_an_owned_servers_library_grid() {
+    let _guard = plx_base::testlock::serial();
+    knows_collections(&[]);
+    let (fixture, mut page, engine) = grid_page(1);
+    let scan = plx_platform::i18n::msg::library_header_scan();
+    assert_eq!(page.toolbar_elems(), [RECOMMENDED, SORTFILTER], "not owned: no Scan library");
+    assert!(!right_labels(&page).iter().any(|label| label == scan));
+    let _owned = owns_server();
+    page.sync(&fixture.cx(&engine));
+    assert_eq!(page.toolbar_elems(), [RECOMMENDED, SORTFILTER, SCAN]);
+    assert_eq!(right_labels(&page).last().map(String::as_str), Some(scan), "it is the row's last control");
+    page.listing = Listing::Collections;
+    page.sync(&fixture.cx(&engine));
+    assert!(!page.toolbar_elems().contains(&SCAN), "the Collections page has no Scan library");
+}
+
+/// Right from Sort & Filter reaches Scan library, Right there goes nowhere, Left returns.
+#[test]
+fn right_from_sort_and_filter_reaches_scan_library_and_left_returns() {
+    let _guard = plx_base::testlock::serial();
+    knows_collections(&[]);
+    let _owned = owns_server();
+    let (fixture, mut page, mut engine) = grid_page(1);
+    engine.set(OWNER, page.key(SORTFILTER), Some(LIBRARY_GROUP), By::Dir);
+    fixture.direction(&mut page, &mut engine, Dir::Right);
+    assert_eq!(at(&engine), SCAN);
+    fixture.direction(&mut page, &mut engine, Dir::Right);
+    assert_eq!(at(&engine), SCAN, "the row ends at Scan library");
+    fixture.direction(&mut page, &mut engine, Dir::Left);
+    assert_eq!(at(&engine), SORTFILTER);
+}
+
+/// OK asks for one scan of the library on view. The label says "Scan requested" only once the
+/// server has said yes, presses meanwhile send nothing, the label returns after a few seconds,
+/// and a refusal shows the error line instead.
+#[test]
+fn ok_on_scan_library_asks_once_and_the_answer_is_drawn_on_the_control() {
+    use plx_platform::i18n::msg;
+    let _guard = plx_base::testlock::serial();
+    knows_collections(&[]);
+    let _owned = owns_server();
+    let (fixture, mut page, mut engine) = grid_page(1);
+    let scans = |apps: &[AppFx]| apps.iter().filter_map(|fx| match fx {
+        AppFx::Library(LibraryReq::Scan(target)) => Some(*target),
+        _ => None,
+    }).collect::<Vec<_>>();
+    let label = |page: &LibraryScreen| right_labels(page).last().cloned().unwrap();
+    let sent = scans(&fixture.step(&mut page, &mut engine, ScreenEvent::Activate(SCAN)));
+    assert_eq!(sent.len(), 1, "one press, one scan");
+    let target = sent[0];
+    assert_eq!(Some(target), page.address(&fixture.cx(&engine)), "the library on view");
+    assert_eq!(label(&page), msg::library_header_scan(), "nothing is claimed before the server answers");
+    assert!(scans(&fixture.step(&mut page, &mut engine, ScreenEvent::Activate(SCAN))).is_empty(),
+        "a press while the request is out sends nothing");
+
+    fixture.step(&mut page, &mut engine, ScreenEvent::App(AppMsg::Library(LibraryCmd::ScanAnswered { target, accepted: true })));
+    assert_eq!(label(&page), msg::library_header_scan_requested());
+    assert!(scans(&fixture.step(&mut page, &mut engine, ScreenEvent::Activate(SCAN))).is_empty(),
+        "a press while Scan requested shows is ignored");
+    for frame in 0..240 {
+        fixture.step(&mut page, &mut engine, ScreenEvent::Tick(Tick { ms: frame * 16, dt_us: 16_000 }));
+    }
+    assert_eq!(label(&page), msg::library_header_scan(), "the label returns after a few seconds");
+
+    let target = scans(&fixture.step(&mut page, &mut engine, ScreenEvent::Activate(SCAN)))[0];
+    fixture.step(&mut page, &mut engine, ScreenEvent::App(AppMsg::Library(LibraryCmd::ScanAnswered { target, accepted: false })));
+    assert_eq!(label(&page), msg::library_header_scan_failed(), "a refusal or no answer shows the error line");
+}
+
+/// With Scan library on it, the right cluster's widest case still fits the row in every shipped
+/// language, so no label of the control is cut.
+#[test]
+fn the_cluster_with_scan_library_fits_the_row_in_every_shipped_language() {
+    use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+    let _guard = plx_base::testlock::serial();
+    knows_collections(&[(1, Ok(999))]);
+    let _owned = owns_server();
+    let (fixture, mut page, engine) = grid_page(1);
+    page.sync(&fixture.cx(&engine));
+    assert!(page.scan_shown, "premise: the control is on the row");
+    let measure = plx_base::fontcov::advances::ShippedMeasure;
+    let mut cx = fixture.cx(&engine);
+    cx.measure = &measure;
+    let mut out = Vec::new();
+    for language in SHIPPED {
+        let _lang = language_on_this_thread_for_test(language);
+        let (_, widest) = page.header_right(&cx);
+        let width = plx_ui::page_header::cluster_width(&widest, &measure);
+        let row = plx_ui::page_header::TEXT_X1 - plx_ui::page_header::TEXT_X0;
+        if width > row {
+            out.push(format!("{}: right cluster {width:.0}px of a {row:.0}px row", language.tag()));
+        }
+    }
+    assert!(out.is_empty(), "{}", out.join("\n"));
+}

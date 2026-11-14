@@ -2568,6 +2568,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // Stops first: the resume patch lands before any read of the item is asked for.
         app.bridge.stops_pump();
         app.bridge.delete_pump();
+        app.bridge.scan_pump();
         app.bridge.catalog_feed(&mut app.pages);
         let endpoints = app.bridge.viewstate_pump();
         super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.39] - 2026-11-14
+
+### Added
+- Scan library: on a library of your own server, the Library page's header row now ends with "Scan library", after Sort & Filter. OK asks the server to look for added and removed files in that library (a plain scan, not a metadata refresh). Once the server accepts, the control reads "Scan requested" for a few seconds; if it refuses or does not answer, it reads "Scan didn't start". Presses meanwhile do nothing. It is not on a shared server's library, the Collections page or the Recommended page. Not yet tried on any device. Shared code: the LG app gets the same. The non-English wording is a first draft, not a translator's.
+
+### Changed
+- Library page: when your server reports a movie, show or episode added or removed (by this app's scan, the hourly scan or the automatic one), the open library reads its titles again in place. The grid does not empty, and focus and scroll stay where they were. Not yet tried on any device.
+
 ## [0.2.38] - 2026-11-13
 
 ### Added

@@ -335,6 +335,9 @@ pub enum LibraryReq {
     /// control): `AppArg::LibraryCollections` / `LibraryRecommended` for `section`, the section's
     /// key on its server. Never `Listing::All`, which is this page.
     OpenListing { listing: crate::library::Listing, section: u32 },
+    /// Ask the library's server to scan it (OK on the header's Scan library control). The answer
+    /// comes back as [`LibraryCmd::ScanAnswered`] for the same `target`.
+    Scan(plx_data::stores::browse::SectionAddress),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -551,6 +554,9 @@ pub enum LibraryCmd {
     Sweep,
     SwitchStep(u32),
     ItemMenu,
+    /// The server's answer to a [`LibraryReq::Scan`]: `accepted` is a 2xx, anything else (a
+    /// refusal, no answer) is not.
+    ScanAnswered { target: plx_data::stores::browse::SectionAddress, accepted: bool },
 }
 
 /// Stable section identity. PMS section keys are server-local, never globally unique.
@@ -1314,6 +1320,11 @@ pub trait LibraryLike: AppLike<Memory = PageMemory> + Sized {
     /// (`src/app/bridge.rs`) implements it over the probe.
     fn collections_count(_cx: &Cx<'_, Self>, _section: usize) -> Option<Result<u32, Forbidden>> {
         None
+    }
+    /// Does this account own server `sid`? Only then does the Library header offer Scan library:
+    /// whether a shared token may scan is unproven, so it is never tried.
+    fn owns_server(_cx: &Cx<'_, Self>, _sid: plx_plex::plex::ServerId) -> bool {
+        false
     }
 }
 

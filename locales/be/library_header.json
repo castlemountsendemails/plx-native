@@ -3,5 +3,8 @@
   "library_header.recommended": "Рэкамендацыі",
   "library_header.sort_filter": "Сартаванне і фільтр",
   "library_header.filtered_of": "{shown} з {total}",
-  "library_header.show": "Паказваць"
+  "library_header.show": "Паказваць",
+  "library_header.scan": "Сканаваць бібліятэку",
+  "library_header.scan_requested": "Сканаванне запытана",
+  "library_header.scan_failed": "Сканаванне не пачалося"
 }

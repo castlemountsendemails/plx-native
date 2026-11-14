@@ -3,5 +3,8 @@
   "library_header.recommended": "Consigliati",
   "library_header.sort_filter": "Ordina e filtra",
   "library_header.filtered_of": "{shown} di {total}",
-  "library_header.show": "Mostra"
+  "library_header.show": "Mostra",
+  "library_header.scan": "Scansiona libreria",
+  "library_header.scan_requested": "Scansione richiesta",
+  "library_header.scan_failed": "Scansione non avviata"
 }
