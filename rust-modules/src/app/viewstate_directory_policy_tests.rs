@@ -677,7 +677,7 @@ fn two_bridges_keep_their_own_captured_profile_for_a_scrim_lift() {
 
     // the lift (`Rig::lift_bar_member`) reads exactly this: the bridge's own captured rail items
     let profile = |rig: &Bridge| {
-        let item = rig.chrome.items().last().expect("the profile item");
+        let item = rig.chrome.items().first().expect("the profile item");
         let initial = match &item.mark {
             plx_ui::nav_rail::RailMark::Avatar(initial) => initial.to_bytes().to_vec(),
             _ => Vec::new(),

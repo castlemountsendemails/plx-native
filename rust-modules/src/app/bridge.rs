@@ -1002,8 +1002,9 @@ impl Bridge {
             } else {
                 refresh_chrome(&mut self.chrome, self.directory.view(), None);
             }
-            // The page's own item: Home's is the first, and a library page's is its library's.
-            self.chrome_selection = pill_of_arg(route, &self.chrome, self.directory.view()).unwrap_or(0) as u32;
+            // The page's own item, else Home's: a library page's is its library's.
+            self.chrome_selection = pill_of_arg(route, &self.chrome, self.directory.view())
+                .or_else(|| self.chrome.pill_of(crate::app::chrome::Pill::Home)).unwrap_or(0) as u32;
             let selected = self.navigation_presentation().view_tab.unwrap_or(self.chrome_selection) as i32;
             self.publish_strip(d, selected);
         } else {

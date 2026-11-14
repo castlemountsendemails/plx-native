@@ -219,12 +219,12 @@ fn action_row(a: Action) -> Row {
         .destructive(matches!(a, Action::SignOut))
 }
 
-/// Bottom-left popover, beside the expanded nav rail and level with its Profile item at the foot.
+/// Top-left popover, beside the expanded nav rail, level with its Profile item and hanging down.
 fn panel_rect(table: &TableView, measure: &dyn plx_machine::machine::Measure) -> Rect {
     let pw = table.menu_panel_width(measure);
     let px = plx_ui::nav_rail::EXPANDED_W + plx_ui::theme::space::MD;
     let ph = table.measured_height().clamp(120.0, 440.0);
-    let py = plx_ui::consts::SCR_H - plx_ui::consts::MARGIN_Y - ph;
+    let py = plx_ui::consts::MARGIN_Y;
     Rect::new(px, py, pw, ph)
 }
 
