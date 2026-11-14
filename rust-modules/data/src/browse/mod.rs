@@ -770,6 +770,34 @@ impl SecItems {
         }
         (any_covered, changed)
     }
+    /// Drop every loaded row `at` covers and close the gap: each later row moves up one place per
+    /// row dropped, holes included, so the listing reads as the server's would without them. The
+    /// pages before the first one touched stay shared. Returns how many rows went.
+    fn remove_covered(&mut self, at: &crate::viewstate::ViewAt) -> usize {
+        let mut gone = Vec::new();
+        for (p, page) in self.pages.iter().enumerate() {
+            let Some(page) = page else { continue };
+            gone.extend(page.iter().enumerate()
+                .filter(|(_, m)| m.as_ref().is_some_and(|m| at.covers(m)))
+                .map(|(j, _)| p * PAGE + j));
+        }
+        let Some(&first) = gone.first() else { return 0 };
+        let old = self.clone();
+        let (base, new_len) = (first / PAGE * PAGE, self.len - gone.len());
+        self.pages = Arc::new(old.pages[..first / PAGE].to_vec());
+        self.len = base;
+        self.resize(new_len);
+        let mut skipped = 0;
+        for i in base..new_len {
+            while skipped < gone.len() && gone[skipped] <= i + skipped {
+                skipped += 1;
+            }
+            if let Some(m) = old.get(i + skipped) {
+                self.set(i, m.clone());
+            }
+        }
+        gone.len()
+    }
     #[cfg(any(test, feature = "test-support"))]
     fn from_vec(v: Vec<Option<PmsMovie>>) -> Self {
         let mut s = SecItems::default();
@@ -1378,6 +1406,18 @@ impl BrowseState {
         let removed = matches!(edit, crate::viewstate::ViewEdit::Removed);
         let mut hit = false;
         for (i, state) in self.states.iter_mut().enumerate() {
+            // A deleted item leaves the listing in view at once, whatever it filters on: the listing
+            // without it is the old one minus those rows, so the rows after them move up and the
+            // reader's place falls to the neighbour. No re-query, so no empty grid in between for
+            // the focus to fall through (it landed on the header when the server was slow).
+            if removed && i == current {
+                let gone = state.items.remove_covered(at);
+                if gone > 0 {
+                    state.total = (state.total - gone as i64).max(0);
+                    hit = true;
+                }
+                continue;
+            }
             let (covered, changed) = state.items.apply_view(at, edit);
             hit |= changed;
             // A deleted item changes every listing that held it, whatever the listing filters on.
@@ -1390,12 +1430,6 @@ impl BrowseState {
                     hit = true;
                 }
             }
-        }
-        // A deleted item must leave the listing in view now. A watch-state change defers its
-        // re-query until a page is pushed over the Library (so cards never shift under the cursor),
-        // but here the card is gone from the server: re-query in place, keeping the reader's place.
-        if removed && self.cur_state().is_some_and(|s| s.membership_stale) {
-            hit |= self.requery_stale();
         }
         hit
     }

@@ -147,24 +147,65 @@ fn an_agreeing_read_back_resets_a_stale_section_that_is_not_showing() {
     assert_eq!((first.fetch, first.total), (SecFetch::Loading, -1), "its next visit fetches afresh");
 }
 
+/// Rows rk `0 ..= n-1` in section 0, one more page than `n` rows need to be worth shifting across.
+fn rows(sid: ServerId, browse: &mut TestBrowse, n: usize) {
+    let state = browse.state.state_mut(0).unwrap();
+    state.fetch = SecFetch::Ready;
+    state.total = n as i64;
+    state.items = SecItems::from_vec((0..n).map(|i| Some(PmsMovie { sid, rk: i.to_string(), ..Default::default() })).collect());
+    state.cursor = Some(Arc::new(Cursor { at: CursorAt::SlotIndex(0), scroll: 0.0 }));
+}
+
+fn rk_at(browse: &TestBrowse, i: usize) -> Option<String> {
+    browse.state.states()[0].items.get(i).map(|m| m.rk.clone())
+}
+
+/// A deleted card must leave the listing in view now, with the rows after it moved up one, so the
+/// reader's place falls to the neighbour. It is not a re-query: a re-query empties the grid until
+/// the server answers, and a focus that is reconciled in that gap falls to the header.
 #[test]
-fn a_deleted_item_requeries_the_listing_in_view_at_once_whatever_it_filters_on() {
+fn a_deleted_item_leaves_the_listing_in_view_at_once_and_the_rows_after_it_move_up() {
     let _g = plx_base::testlock::serial();
     let (_cleanup, mut browse, sid, _) = registered_page_source();
-    resident(sid, &mut browse); // ordered by title, no filter: viewing does not decide membership
+    rows(sid, &mut browse, PAGE + 3); // the shift crosses a page boundary
     let gen = browse.state.query_gen();
     let shown = browse.state.listing_snapshot().view().id().unwrap().query;
-    assert!(apply(&mut browse, sid, ViewEdit::Removed));
-    // unlike a watch-state change, which waits for a page to bury the Library, the card must go now
-    assert_eq!(browse.state.query_gen(), gen.wrapping_add(1), "exactly one re-fetch, started by the removal");
-    assert!(!stale(&mut browse), "the flag is spent by that re-query");
-    assert_eq!(browse.state.listing_snapshot().view().id().unwrap().query, shown,
-        "…and it is not a query edit: the screen-facing identity stands");
+    let removed = browse.state.run_owned(&browse.adapter, crate::stores::browse::BrowseCmd::ApplyView {
+        at: ViewAt::leaf(sid, "1"), edit: ViewEdit::Removed });
+    assert!(removed);
+    assert_eq!(rk_at(&browse, 0).as_deref(), Some("0"), "rows before it stay");
+    assert_eq!(rk_at(&browse, 1).as_deref(), Some("2"), "the neighbour takes its place");
+    assert_eq!(rk_at(&browse, PAGE - 1).as_deref(), Some(PAGE.to_string().as_str()), "…across the page boundary");
+    assert_eq!(rk_at(&browse, PAGE + 1).as_deref(), Some((PAGE + 2).to_string().as_str()), "…to the end");
+    assert_eq!(rk_at(&browse, PAGE + 2), None, "the listing is one row shorter");
     let state = &browse.state.states()[0];
-    assert_eq!((state.fetch, state.total), (SecFetch::Loading, -1));
-    assert!(state.cursor.is_some(), "the reader's place stands, so focus falls to the neighbour");
-    assert!(browse.state.requery_owed(), "the first page is owed");
-    assert!(!browse.state.requery_stale(), "a second ask has nothing to do");
+    assert_eq!((state.fetch, state.total), (SecFetch::Ready, PAGE as i64 + 2), "never empty, never loading");
+    assert!(state.cursor.is_some(), "the reader's place stands");
+    assert_eq!(browse.state.query_gen(), gen, "no re-fetch");
+    assert!(!browse.state.requery_owed());
+    assert!(!stale(&mut browse));
+    assert_eq!(browse.state.listing_snapshot().view().id().unwrap().query, shown, "not a query edit");
+}
+
+/// A show deleted from an Episodes listing takes its episodes with it: every covered row goes, and
+/// the gap closes by the number that went.
+#[test]
+fn a_deleted_show_takes_all_its_rows_out_of_the_listing_in_view() {
+    let _g = plx_base::testlock::serial();
+    let (_cleanup, mut browse, sid, _) = registered_page_source();
+    rows(sid, &mut browse, 6);
+    for rk in ["1", "2", "4"] {
+        let state = browse.state.state_mut(0).unwrap();
+        let mut m = state.items.get(rk.parse().unwrap()).unwrap().clone();
+        (m.kind, m.show_rk) = (3, "S".into()); // episodes of one show, rows 1, 2 and 4
+        state.items.set(rk.parse().unwrap(), m);
+    }
+    let removed = browse.state.run_owned(&browse.adapter, crate::stores::browse::BrowseCmd::ApplyView {
+        at: ViewAt { sid, rk: "S".into(), scope: crate::viewstate::Scope::Show }, edit: ViewEdit::Removed });
+    assert!(removed);
+    let left: Vec<_> = (0..4).map(|i| rk_at(&browse, i)).collect();
+    assert_eq!(left, ["0", "3", "5"].map(|rk| Some(rk.to_string())).into_iter().chain([None]).collect::<Vec<_>>());
+    assert_eq!(browse.state.states()[0].total, 3);
 }
 
 #[test]
