@@ -81,6 +81,20 @@
   "browse.menu.go_season": "Ugrás az évadhoz",
   "browse.menu.go_movie": "Ugrás a filmhez",
   "browse.menu.remove_deck": "Eltávolítás a listából",
+  "browse.menu.delete": "Törlés",
+  "browse.menu.delete_question": "Véglegesen törli?",
+  "browse.menu.delete_movie": "A film törlődik a szerver lemezéről. Ez nem vonható vissza.",
+  "browse.menu.delete_versions": {
+    "one": "A film és az összes változata ({count}) törlődik a szerver lemezéről. Ez nem vonható vissza.",
+    "other": "A film és az összes változata ({count}) törlődik a szerver lemezéről. Ez nem vonható vissza."
+  },
+  "browse.menu.delete_show": {
+    "one": "A sorozat és az összes epizódja ({count}) törlődik a szerver lemezéről. Ez nem vonható vissza.",
+    "other": "A sorozat és az összes epizódja ({count}) törlődik a szerver lemezéről. Ez nem vonható vissza."
+  },
+  "browse.menu.delete_show_all": "A sorozat és az összes epizódja törlődik a szerver lemezéről. Ez nem vonható vissza.",
+  "browse.menu.deleted_toast": "„{title}” törölve",
+  "browse.menu.delete_failed": "A Plex nem törölte a következőt: „{title}”. Lehet, hogy a törlés ki van kapcsolva a szerveren, vagy ennek a fióknak nincs engedélye.",
   "browse.login.deleted": "Helyi adatok törölve",
   "browse.login.deleted_detail": "A hitelesítő adatok, a beállítások, a telemetria és a helyi diagnosztika törölve.",
   "browse.login.partial": "Kijelentkezve, a legtöbb helyi adat törölve",

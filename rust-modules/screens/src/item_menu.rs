@@ -42,6 +42,8 @@
 //! `app::input::apply_item_action`, which does the routing, the server call and the hub refresh.
 //! It never mutates playback or PMS state itself.
 
+/// The confirm the Delete row opens.
+mod delete_confirm;
 /// The Watchlist grid's hold-menu rows (`ItemMenuKind::Catalog`, plan §1.9).
 pub mod hold;
 /// The Watchlist rows of the card / episode / season menus and the Catalog menu's membership row.
@@ -119,6 +121,9 @@ pub enum Action {
     /// Add the title a server knows only by this legacy-agent guid: the app adds it once the
     /// catalog-id lookup has its id, or says the catalog has no such title.
     WatchlistAddLegacy { kind: plx_data::watchlist::model::Kind, guid: String },
+    /// Delete the item's media from its server: a movie with all its versions, or a show with all
+    /// its episodes. The row opens a confirm; the press itself deletes nothing.
+    DeleteItem(String),
 }
 
 impl Action {
@@ -156,7 +161,8 @@ impl Action {
             | Action::PlayFromStart(rk)
             | Action::RemoveFromDeck(rk)
             | Action::GoToCatalog(rk)
-            | Action::WatchlistRemove(rk) => rk,
+            | Action::WatchlistRemove(rk)
+            | Action::DeleteItem(rk) => rk,
             Action::WatchlistAddLegacy { guid, .. } => guid,
             Action::PlayTrailer { rk, .. } => rk,
             // No ratingKey: the subject is a catalog id.
@@ -179,6 +185,7 @@ impl Action {
             Action::WatchlistRemove(_) => 10,
             Action::WatchlistAdd { .. } => 11,
             Action::WatchlistAddLegacy { .. } => 12,
+            Action::DeleteItem(_) => 13,
         };
         c.u32(tag).str(self.rk());
         if let Action::WatchlistAdd { hex } = self {
@@ -247,6 +254,8 @@ pub enum ItemRow {
     WatchlistRemove,
     /// Add to Watchlist (movie) / Add Show to Watchlist (episode, catalog page menu).
     WatchlistAdd,
+    /// Delete the item's media (destructive, last).
+    Delete,
 }
 
 impl ItemRow {
@@ -271,6 +280,7 @@ impl FormId for ItemRow {
             ItemRow::GoToCatalog => 9,
             ItemRow::WatchlistRemove => 10,
             ItemRow::WatchlistAdd => 11,
+            ItemRow::Delete => 12,
         })
     }
 }
@@ -306,7 +316,7 @@ fn build_with(
     deck_press: DeckPress,
     trailer: Option<&plx_data::metadata::Extra>,
 ) -> ItemForm {
-    build_card(m, from_deck, deck_press, trailer, None, None)
+    build_card(m, from_deck, deck_press, trailer, None, None, false)
 }
 
 /// `deck_press` is the Continue Watching setting. It changes this menu for a card FROM the deck
@@ -327,6 +337,7 @@ fn build_card(
     trailer: Option<&plx_data::metadata::Extra>,
     watchlist_guid: Option<&str>,
     face: Option<&watchlist::Face>,
+    can_delete: bool,
 ) -> ItemForm {
     let leaf = m.kind == 0 || m.kind == 3;
     let opens_details = from_deck && !deck_press.press_plays();
@@ -434,6 +445,16 @@ fn build_card(
         // face adds Add / Remove, last, with the one other destructive row.
         sec = watchlist::push_face(sec, face);
     }
+    // Last, below every other destructive row. Movies and shows only: an episode or season would
+    // need count queries and after-delete handling on the Detail page. `can_delete` is the
+    // server's own `allowMediaDeletion="1"`, so a server that did not say it hides the row.
+    sec = sec.item_if(
+        can_delete && matches!(m.kind, 0 | 1),
+        ItemRow::Delete,
+        RowKind::Button,
+        Action::DeleteItem(m.rk.clone()),
+        Row::new(plx_platform::i18n::msg::browse_menu_delete()).licon(Icon::Close).destructive(true),
+    );
     Form::new().section(sec)
 }
 
@@ -630,6 +651,8 @@ pub struct ItemMenuScreen {
     /// The Watchlist subject captured when the menu opened; `None` omits the membership row
     /// (plex.tv unreachable, or the item has no catalog guid). See [`watchlist::Face`].
     face: Option<watchlist::Face>,
+    /// The Delete row's confirm. Open, its two answers are the menu's only focus group.
+    confirm: delete_confirm::DeleteConfirm,
 }
 
 /// Play Trailer only when the already-loaded Detail is this movie/show and already has a trailer.
@@ -658,6 +681,7 @@ impl ItemMenuScreen {
             repeat: RepeatGate::IDLE,
             built: false,
             face: None,
+            confirm: delete_confirm::DeleteConfirm::new(),
         }
     }
 
@@ -680,7 +704,8 @@ impl ItemMenuScreen {
                 let trailer = cached_trailer(self.arg.sid, row, meta);
                 // A Watchlist tile with a reachable copy is a card of that copy, and Remove joins it.
                 let remove = self.arg.catalog.as_ref().map(|c| c.guid.as_str());
-                build_card(row, *from_deck, plx_media::route::deck_press(), trailer.as_ref(), remove, self.face.as_ref())
+                build_card(row, *from_deck, plx_media::route::deck_press(), trailer.as_ref(), remove, self.face.as_ref(),
+                    plx_plex::plex::media_deletion_allowed(self.arg.sid))
             }
             ItemMenuKind::Episode { mark } => build_episode(&self.arg.rk, *mark, self.face.as_ref()),
             ItemMenuKind::Season { mark, .. } => build_season(&self.arg.rk, *mark, self.face.as_ref()),
@@ -736,20 +761,52 @@ impl ItemMenuScreen {
         // such a row — this is the belt to that braces, since the rows are data-driven off hub
         // rows. A key that names no row (the separator has none) only dismisses.
         if let Some(act) = act.filter(Action::has_subject) {
-            fx.push(Fx::App(AppFx::ItemMenu(ItemMenuReq {
-                act,
-                sid: self.arg.sid,
-                item: match &self.arg.kind {
-                    ItemMenuKind::Card { row, .. } => Some((**row).clone()),
-                    _ => None,
-                },
-                season: match &self.arg.kind {
-                    ItemMenuKind::Season { show_rk, index, .. } => Some((show_rk.clone(), *index)),
-                    _ => None,
-                },
-                loaded_episode: self.arg.loaded_episode,
-                from_home: self.arg.from_home,
-            })));
+            // Delete asks first: the menu stays up under the confirm, and only the Delete answer
+            // reports the action (`confirm_answer`).
+            if matches!(act, Action::DeleteItem(_)) {
+                self.open_confirm(fx);
+                return;
+            }
+            fx.push(Fx::App(AppFx::ItemMenu(self.request(act))));
+        }
+        fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
+    }
+
+    /// What an action from this menu reports to the app.
+    fn request(&self, act: Action) -> ItemMenuReq {
+        ItemMenuReq {
+            act,
+            sid: self.arg.sid,
+            item: match &self.arg.kind {
+                ItemMenuKind::Card { row, .. } => Some((**row).clone()),
+                _ => None,
+            },
+            season: match &self.arg.kind {
+                ItemMenuKind::Season { show_rk, index, .. } => Some((show_rk.clone(), *index)),
+                _ => None,
+            },
+            loaded_episode: self.arg.loaded_episode,
+            from_home: self.arg.from_home,
+        }
+    }
+
+    /// Open the Delete confirm over the menu. Only a Card menu has the row, so the row it names is
+    /// the captured one.
+    fn open_confirm<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        let ItemMenuKind::Card { row, .. } = &self.arg.kind else { return };
+        let body = delete_confirm::paragraphs(&row.title, row.kind, row.versions, row.leaf_count);
+        self.confirm.open(body, fx.from(), fx);
+    }
+
+    /// The person answered the confirm. Cancel (or Back) puts focus back on the menu's row and
+    /// changes nothing; Delete reports the action and dismisses the menu.
+    fn confirm_answer<H: AppLike>(&mut self, delete: bool, fx: &mut Effects<'_, H>) {
+        if !delete {
+            super::plaintext_question::enter_group(fx, fx.from(), GroupId(0));
+            return;
+        }
+        if let ItemMenuKind::Card { row, .. } = &self.arg.kind {
+            fx.push(Fx::App(AppFx::ItemMenu(self.request(Action::DeleteItem(row.rk.clone())))));
         }
         fx.push(Fx::Nav(NavOp::Dismiss(self.entry)));
     }
@@ -778,6 +835,14 @@ impl ItemMenuScreen {
 impl<H: AppLike + crate::registry::MetadataLike> Machine<H> for ItemMenuScreen {
     type Ev = ScreenEvent<H>;
     fn step(&mut self, ev: &Self::Ev, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
+        match self.confirm.step(ev, cx) {
+            delete_confirm::Verdict::Pass => {}
+            delete_confirm::Verdict::Done(handled) => return handled,
+            delete_confirm::Verdict::Answer(delete) => {
+                self.confirm_answer(delete, fx);
+                return Handled::Yes;
+            }
+        }
         match ev {
             ScreenEvent::Mount => {
                 self.build_rows(H::metadata(cx));
@@ -786,6 +851,7 @@ impl<H: AppLike + crate::registry::MetadataLike> Machine<H> for ItemMenuScreen {
                 plx_ui::hold_hint::mark_learned();
             }
             ScreenEvent::Tick(tick) => {
+                self.confirm.update(tick.dt());
                 self.form.table.sel = cx
                     .focus
                     .current
@@ -838,6 +904,9 @@ impl<H: AppLike + crate::registry::MetadataLike> Machine<H> for ItemMenuScreen {
 
 impl<H: AppLike> Focusable<H> for ItemMenuScreen {
     fn groups(&self, cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
+        if self.confirm.groups(out) {
+            return;
+        }
         out.push(GroupSpec {
             id: GroupId(0),
             kind: GroupKind::Column,
@@ -850,9 +919,15 @@ impl<H: AppLike> Focusable<H> for ItemMenuScreen {
         });
     }
     fn group_of(&self, elem: &u32, _: &Cx<'_, H>) -> Option<GroupId> {
+        if let Some(group) = self.confirm.group_of(*elem) {
+            return group;
+        }
         self.form.index_of_key(RowKey(*elem)).map(|_| GroupId(0))
     }
     fn neighbour(&self, key: FocusKey<u32>, dir: Dir, _: &Cx<'_, H>) -> Step<u32> {
+        if let Some(step) = self.confirm.neighbour(key, dir) {
+            return step;
+        }
         let delta = match dir {
             Dir::Up => -1,
             Dir::Down => 1,
@@ -867,6 +942,9 @@ impl<H: AppLike> Focusable<H> for ItemMenuScreen {
         }
     }
     fn place(&self, elem: &u32, cx: &Cx<'_, H>, _: At) -> Option<Placed> {
+        if let Some(placed) = self.confirm.place(*elem) {
+            return placed;
+        }
         <Self as Focusable<H>>::group_of(self, elem, cx)?;
         let index = self.form.index_of_key(RowKey(*elem))?;
         let rect = self.form.table.row_frame(self.frame(cx.measure), index as i32)?;
@@ -878,6 +956,9 @@ impl<H: AppLike> Focusable<H> for ItemMenuScreen {
         })
     }
     fn reconcile(&self, want: FocusKey<u32>, cx: &Cx<'_, H>) -> FocusKey<u32> {
+        if let Some(key) = self.confirm.reconcile(want) {
+            return key;
+        }
         if <Self as Focusable<H>>::group_of(self, &want.elem, cx).is_some() {
             want
         } else {
@@ -887,7 +968,10 @@ impl<H: AppLike> Focusable<H> for ItemMenuScreen {
             }
         }
     }
-    fn seat(&self, _: GroupId, _: Placed, _: &Cx<'_, H>) -> FocusKey<u32> {
+    fn seat(&self, g: GroupId, _: Placed, _: &Cx<'_, H>) -> FocusKey<u32> {
+        if let Some(key) = self.confirm.seat(g, self.entry) {
+            return key;
+        }
         FocusKey {
             entry: self.entry,
             elem: self.form.selected_key().map_or_else(|| self.opening(), |k| k.0),
@@ -897,6 +981,12 @@ impl<H: AppLike> Focusable<H> for ItemMenuScreen {
 
 impl<H: AppLike + crate::registry::MetadataLike> Screen<H> for ItemMenuScreen {
     fn opener(&self) -> Option<(EntryId, Option<FocusKey<u32>>)> {
+        // The dispatcher lifts the opener's card back above the dim, and that lift is drawn above
+        // everything, the Delete confirm included: it covered the confirm's title, body and half of
+        // Cancel. While the confirm is up there is no card to lift; the confirm owns the screen.
+        if self.confirm.visible() {
+            return None;
+        }
         Some(ItemMenuScreen::opener(self))
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -951,6 +1041,7 @@ impl<H: AppLike + crate::registry::MetadataLike> Screen<H> for ItemMenuScreen {
                 );
             }
         }
+        self.confirm.draw(f, self.entry);
     }
     fn render(&self) -> RenderStrategy {
         RenderStrategy::Page
@@ -1395,6 +1486,36 @@ mod tests {
         // and nothing navigates: both rows the shelf menu offers an episode are dead ends from the
         // page that episode already belongs to
         assert!(!menu.offers(ItemRow::GoToShow) && !menu.offers(ItemRow::GoToItem));
+    }
+
+    /// **Delete is the card menu's last row, for a movie or a show, and only when the server said
+    /// `allowMediaDeletion="1"`.** Episodes and seasons never get it, and it is destructive so the
+    /// menu never opens on it.
+    #[test]
+    fn delete_is_the_last_row_of_a_movie_or_show_card_only_when_the_server_allows_it() {
+        let with = |m: &PmsMovie, from_deck: bool, can_delete: bool| {
+            built(super::build_card(m, from_deck, DeckPress::Play, None, None, None, can_delete))
+        };
+        for kind in [0, 1] {
+            let m = item(kind, PosterMark::Watched);
+            let on = with(&m, false, true);
+            assert_eq!(on.ids().last(), Some(&ItemRow::Delete), "kind {kind}: Delete is last");
+            assert_eq!(on.action(ItemRow::Delete), Action::DeleteItem("42".into()));
+            assert!(on.is_destructive(ItemRow::Delete));
+            assert!(!with(&m, false, false).offers(ItemRow::Delete), "kind {kind}: setting off hides it");
+        }
+        // below the other destructive rows, on a deck card too
+        let on_deck = with(&item(0, PosterMark::Watched), true, true);
+        let ids = on_deck.ids();
+        assert!(ids.iter().position(|i| *i == ItemRow::RemoveFromDeck) < ids.iter().position(|i| *i == ItemRow::Delete));
+        assert!(on_deck.offers(ItemRow::RemoveFromDeck), "rig: a deck card");
+        // an episode or season row never offers it, whatever the server says
+        for kind in [2, 3] {
+            assert!(!with(&item(kind, PosterMark::None), false, true).offers(ItemRow::Delete), "kind {kind}");
+        }
+        assert!(!build_episode("77", PosterMark::None).offers(ItemRow::Delete));
+        assert!(!build_season("78", PosterMark::None).offers(ItemRow::Delete));
+        assert!(Action::DeleteItem("42".into()).has_subject() && !Action::DeleteItem(String::new()).has_subject());
     }
 
     /// **A menu never opens with its focus on a destructive action.** *Mark as Unwatched* throws the
@@ -1885,11 +2006,163 @@ mod tests {
         assert_eq!(feed(&mut screen, Key::Up, Edge::Down, 1620), Handled::No);
     }
 
+    // ---- the Delete confirm ---------------------------------------------------------------
+
+    /// A movie card menu with the Delete row on offer.
+    fn deletable() -> ItemMenuScreen {
+        let m = item(0, PosterMark::Watched);
+        let mut s = ItemMenuScreen::new(EntryId(7), card_arg(&m, false));
+        s.built = true;
+        s.form.table.compact = true;
+        s.form.set(super::build_card(&m, false, DeckPress::Play, None, None, None, true), None);
+        s
+    }
+
+    /// What one call into the screen reported: the app requests and whether it dismissed.
+    #[derive(Default)]
+    struct Reported {
+        reqs: Vec<ItemMenuReq>,
+        dismissed: bool,
+        delivered: usize,
+    }
+
+    fn report(out: Vec<plx_machine::machine::Stamped<HostFixture>>) -> Reported {
+        let mut r = Reported::default();
+        for e in out {
+            match e.fx {
+                Fx::App(AppFx::ItemMenu(q)) => r.reqs.push(q),
+                Fx::Nav(NavOp::Dismiss(_)) => r.dismissed = true,
+                Fx::Deliver(..) => r.delivered += 1,
+                _ => {}
+            }
+        }
+        r
+    }
+
+    /// Press the Delete row.
+    fn press_delete(s: &mut ItemMenuScreen) -> Reported {
+        let elem = ItemRow::Delete.focus_key();
+        let mut out = Vec::new();
+        let mut present = plx_machine::present::Present::new();
+        let mut fx = Effects::new(&mut out, plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(8)), &mut present);
+        s.activate::<HostFixture>(elem, &mut fx);
+        report(out)
+    }
+
+    /// One event with the engine's focus on `elem`.
+    fn step_focused(s: &mut ItemMenuScreen, ev: &ScreenEvent<HostFixture>, elem: u32) -> (Handled, Reported) {
+        let mut out = Vec::new();
+        let mut present = plx_machine::present::Present::new();
+        let mut fx = Effects::new(&mut out, plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(8)), &mut present);
+        let measure = FixtureMeasure;
+        let cx = Cx {
+            views: (),
+            tick: Tick::default(),
+            measure: &measure,
+            focus: FocusRead { current: Some(FocusKey { entry: EntryId(7), elem }), ..Default::default() },
+            press: PressRead::default(),
+            owner: InputOwner::Entry(EntryId(7)),
+        };
+        let handled = <ItemMenuScreen as Machine<HostFixture>>::step(s, ev, &cx, &mut fx);
+        (handled, report(out))
+    }
+
+    /// **Pressing Delete asks; it neither reports the action nor dismisses the menu.** The confirm
+    /// then owns the focus.
+    #[test]
+    fn pressing_delete_opens_the_confirm_and_reports_nothing() {
+        let mut s = deletable();
+        let r = press_delete(&mut s);
+        assert!(r.reqs.is_empty(), "no action leaves before the person answers");
+        assert!(!r.dismissed, "the menu stays up under the confirm");
+        assert!(r.delivered >= 1, "focus is seated on the confirm's answers");
+        assert!(s.confirm.is_open());
+    }
+
+    /// **Back and Cancel change nothing**: no request, the menu stays, the confirm closes.
+    #[test]
+    fn back_and_cancel_leave_everything_untouched() {
+        let back = ScreenEvent::<HostFixture>::Input(InputEvent {
+            at: Tick { ms: 1, dt_us: 0 },
+            source: Source::Sdl,
+            kind: InputKind::Key { key: Key::Back, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
+        });
+        let mut s = deletable();
+        press_delete(&mut s);
+        let (handled, r) = step_focused(&mut s, &back, delete_confirm::CANCEL);
+        assert_eq!(handled, Handled::Yes);
+        assert!(r.reqs.is_empty() && !r.dismissed, "Back is Cancel, not a dismissal of the menu");
+        assert!(!s.confirm.is_open());
+
+        let mut s = deletable();
+        press_delete(&mut s);
+        let (_, r) = step_focused(&mut s, &ScreenEvent::PressCommit(PressId(0)), delete_confirm::CANCEL);
+        assert!(r.reqs.is_empty() && !r.dismissed, "the Cancel answer reports nothing");
+        assert!(!s.confirm.is_open());
+    }
+
+    /// **Only the Delete answer reports the action**, for the captured item, and dismisses the menu.
+    #[test]
+    fn the_delete_answer_reports_the_action_once_and_dismisses() {
+        let mut s = deletable();
+        press_delete(&mut s);
+        let (_, r) = step_focused(&mut s, &ScreenEvent::PressCommit(PressId(0)), delete_confirm::AFFIRM);
+        assert_eq!(r.reqs.len(), 1);
+        assert_eq!(r.reqs[0].act, Action::DeleteItem("42".into()));
+        assert!(r.dismissed);
+        // a stale second commit does not answer twice
+        let (_, again) = step_focused(&mut s, &ScreenEvent::PressCommit(PressId(0)), delete_confirm::AFFIRM);
+        assert!(again.reqs.is_empty());
+    }
+
+    /// **The pressed card is not lifted over the confirm.** The dispatcher paints whatever the menu
+    /// names as its opener above the dim and everything under it, which put the card over the
+    /// confirm's title and answers on the 33 office; so the menu names none while its confirm shows.
+    #[test]
+    fn the_menu_names_no_opener_while_its_confirm_is_up() {
+        let mut s = deletable();
+        assert!(<ItemMenuScreen as Screen<HostFixture>>::opener(&s).is_some(), "the menu lifts its card");
+        press_delete(&mut s);
+        assert!(<ItemMenuScreen as Screen<HostFixture>>::opener(&s).is_none(),
+            "nothing is lifted above the confirm");
+        let back = ScreenEvent::<HostFixture>::Input(InputEvent {
+            at: Tick { ms: 1, dt_us: 0 },
+            source: Source::Sdl,
+            kind: InputKind::Key { key: Key::Back, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
+        });
+        step_focused(&mut s, &back, delete_confirm::CANCEL);
+        assert!(<ItemMenuScreen as Screen<HostFixture>>::opener(&s).is_none(),
+            "the confirm is still fading out, so the card stays down until it is gone");
+    }
+
+    /// **The confirm opens on Cancel.** An OK held through the press that opened it never deletes.
+    #[test]
+    fn the_confirm_seats_focus_on_cancel() {
+        let mut s = deletable();
+        press_delete(&mut s);
+        let measure = FixtureMeasure;
+        let cx = Cx {
+            views: (),
+            tick: Tick::default(),
+            measure: &measure,
+            focus: FocusRead { current: None, ..Default::default() },
+            press: PressRead::default(),
+            owner: InputOwner::Entry(EntryId(7)),
+        };
+        let seat = <ItemMenuScreen as Focusable<HostFixture>>::seat(
+            &s,
+            GroupId(1),
+            Placed { rect: Rect::FULL, rest_rect: Rect::FULL, clip: Rect::FULL, index: None },
+            &cx,
+        );
+        assert_eq!(seat.elem, delete_confirm::CANCEL);
+    }
+
     // ---- fixtures ---------------------------------------------------------------------------
 
     use crate::registry::{AppMsg, PageMemory};
     use plx_ui::fixture::FixtureMeasure;
-    use plx_machine::machine::{FocusRead, Host, InputEvent, InputOwner, PressRead, Source, Tick};
+    use plx_machine::machine::{FocusRead, Host, InputEvent, InputOwner, PressId, PressRead, Source, Tick};
     use plx_ui::screen::ScreenArg;
 
     #[derive(Clone)]
@@ -2264,7 +2537,7 @@ mod tests {
     #[test]
     fn a_playable_catalog_hold_menu_is_the_card_menu_plus_remove() {
         let movie = item(0, PosterMark::None);
-        let menu = built(super::build_card(&movie, false, DeckPress::Play, None, Some("plex://movie/abc"), None));
+        let menu = built(super::build_card(&movie, false, DeckPress::Play, None, Some("plex://movie/abc"), None, false));
         let ids = menu.ids();
         for row in [ItemRow::GoToItem, ItemRow::MarkWatched, ItemRow::PlayFromStart] {
             assert!(ids.contains(&row), "the card's {row:?} row is there: {ids:?}");

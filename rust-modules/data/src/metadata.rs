@@ -2016,6 +2016,52 @@ fn patch_tiles(state: &mut MetadataState, at: &crate::viewstate::ViewAt, edit: c
     hit
 }
 
+/// A deleted item's tiles leave the loaded page's Related row and collection shelf. The Related
+/// row is a head plus a paged tail ([`RelatedTail`]); a tile dropped from the head shortens it, and
+/// one dropped from the tail takes its position with it, so the pager's bookkeeping still lines up
+/// with the cards. Returns whether any tile went. **MAIN THREAD.**
+fn drop_tiles(state: &mut MetadataState, at: &crate::viewstate::ViewAt) -> bool {
+    let Some(d) = state.current.as_mut() else { return false };
+    let mut hit = false;
+    if d.related_tail.is_empty() {
+        let n = d.related.len();
+        d.related.retain(|m| !at.covers(m));
+        hit |= d.related.len() != n;
+    } else {
+        let head = d.related_tail.head.min(d.related.len());
+        let aligned = d.related_tail.positions.len() == d.related.len() - head;
+        let (mut new_head, mut positions, mut i, mut gone) = (0, Vec::new(), 0, false);
+        let old_positions = std::mem::take(&mut d.related_tail.positions);
+        d.related.retain(|m| {
+            let drop = at.covers(m);
+            if drop {
+                gone = true;
+            } else if i < head {
+                new_head += 1;
+            } else if aligned {
+                positions.push(old_positions[i - head]);
+            }
+            i += 1;
+            !drop
+        });
+        d.related_tail.positions = if aligned && gone { positions } else { old_positions };
+        if gone {
+            d.related_tail.head = new_head;
+            hit = true;
+        }
+    }
+    if let Some(c) = d.collection.as_mut() {
+        let n = c.members.len();
+        c.members.retain(|m| !at.covers(m));
+        let removed = n - c.members.len();
+        if removed > 0 {
+            c.count = c.count.saturating_sub(removed);
+            hit = true;
+        }
+    }
+    hit
+}
+
 /// A stop's resume point on the LOADED item, or on the loaded show's episode, whose (server, key)
 /// is exactly the edit's. Only a value that differs counts, so a read-back that agrees raises no
 /// notice. Episodes are matched on the page's server (`Episode` carries no `sid`). **MAIN THREAD.**
@@ -3961,6 +4007,8 @@ pub fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAdapter>,
             crate::viewstate::ViewEdit::Watched(on) => set_watched_local(state, &at, on),
             // the loaded item has no deck to leave
             crate::viewstate::ViewEdit::LeftDeck => false,
+            // A deleted item leaves this page's Related and collection shelves.
+            crate::viewstate::ViewEdit::Removed => drop_tiles(state, &at),
             // The server's word reaches the other items' tiles on this page (Related, the
             // collection shelf). The loaded item, its episodes and seasons are re-read whole by
             // the application when the read-back lands (`app::content::reconcile_details`); only

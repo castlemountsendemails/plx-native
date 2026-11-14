@@ -303,6 +303,11 @@ impl CollectionState {
             CollectionCmd::ApplyView { at, edit } => {
                 // A member has no deck to leave.
                 if let crate::viewstate::ViewEdit::LeftDeck = edit { return false }
+                // A deleted member: members are rows by absolute index in pages the server counts,
+                // so the page is read afresh where it stands instead of splicing one out.
+                if let crate::viewstate::ViewEdit::Removed = edit {
+                    return self.reread_if_held(adapter, &at);
+                }
                 let Some(c) = self.current.as_mut() else { return false };
                 let mut hit = false;
                 for i in 0..c.shown() {
@@ -317,6 +322,20 @@ impl CollectionState {
                 hit
             }
         }
+    }
+
+    /// Read the open collection again, keeping the reader's window, when one of its loaded rows is
+    /// the item `at` addresses. Same restart as a changed client; false when it held none.
+    fn reread_if_held(&mut self, adapter: &CollectionAdapter, at: &crate::viewstate::ViewAt) -> bool {
+        let Some(c) = self.current.as_ref() else { return false };
+        if !c.pages.loaded_rows().any(|(_, m)| at.covers(m)) { return false; }
+        let (id, want, key) = (c.id.clone(), c.wanted.end, c.client_key);
+        let (window, focus, restore) = (c.wanted.clone(), c.focus, c.restore);
+        self.supersede(adapter);
+        let mut fresh = Collection::loading(id, want, key, self.generation);
+        (fresh.wanted, fresh.focus, fresh.restore) = (window, focus, restore);
+        self.current = Some(fresh);
+        true
     }
 
     fn refresh_if_client_changed(&mut self, adapter: &CollectionAdapter) -> bool {
@@ -892,6 +911,29 @@ mod tests {
             edit: crate::viewstate::ViewEdit::Watched(true) }));
         let item = &state.view().current().unwrap().item(0).unwrap();
         assert!(item.watched && !item.unwatched);
+    }
+
+    /// A deleted member is not spliced out of the counted pages: the page reads again where the
+    /// reader stands, and a page that held no such member is left alone.
+    #[test]
+    fn a_deleted_member_reads_the_collection_again() {
+        let adapter = Arc::new(CollectionAdapter::default());
+        let mut state = CollectionState::default();
+        state.run(&adapter, CollectionCmd::Open { target: set_target("50001", 7, "Set") });
+        state.install_for_test(vec![
+            PmsMovie { rk: "a".into(), ..Default::default() },
+            PmsMovie { rk: "b".into(), ..Default::default() },
+        ], CollectionStatus::Ready);
+        let generation = state.generation();
+        assert!(!state.run(&adapter, CollectionCmd::ApplyView {
+            at: crate::viewstate::ViewAt::leaf(ServerId::UNSET, "zz"),
+            edit: crate::viewstate::ViewEdit::Removed }), "an item not on the page changes nothing");
+        assert_eq!(state.generation(), generation);
+        assert!(state.run(&adapter, CollectionCmd::ApplyView {
+            at: crate::viewstate::ViewAt::leaf(ServerId::UNSET, "a"),
+            edit: crate::viewstate::ViewEdit::Removed }));
+        assert_ne!(state.generation(), generation, "reads in flight for the old pages are dropped");
+        assert!(state.view().current().unwrap().item(0).is_none(), "the rows are read afresh");
     }
 
     #[test]

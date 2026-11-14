@@ -3,6 +3,7 @@
 use super::client::{urlenc_str, Client, QueryBuilder, StreamUrl};
 use super::models::{ListingFacts, MediaContainer, Metadata};
 use super::paging::{paged_path, PageReq};
+use super::ServerId;
 use super::params::{SectionQuery, StreamSelection};
 
 /// Largest number of guids one `find_by_guids` request carries.
@@ -45,6 +46,34 @@ fn sidecar_key_allowed(key: &str) -> bool {
         && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// What `GET /` says about the server itself.
+pub struct ServerRoot {
+    pub name: String,
+    pub allow_media_deletion: bool,
+}
+
+/// Which servers said `allowMediaDeletion="1"` the last time `GET /` was read for them.
+// ponytail: a process-wide map read by the menu, which never talks to PMS. It is refreshed only
+// when discovery re-reads the root (a source's first read and a roster change), so a setting
+// flipped later shows after the next one; a refused delete is the backstop. Upgrade path: fold it
+// into `ServerFacts` once that struct's constructors are touched for another reason.
+static MEDIA_DELETION: std::sync::Mutex<Vec<(ServerId, bool)>> = std::sync::Mutex::new(Vec::new());
+
+/// Record what `GET /` said about deleting media on server `id`.
+pub fn note_media_deletion(id: ServerId, allowed: bool) {
+    let mut v = MEDIA_DELETION.lock().unwrap_or_else(|e| e.into_inner());
+    match v.iter_mut().find(|(s, _)| *s == id) {
+        Some(slot) => slot.1 = allowed,
+        None => v.push((id, allowed)),
+    }
+}
+
+/// Did server `id` say it allows deleting media? `false` when it has not said (unread, offline).
+pub fn media_deletion_allowed(id: ServerId) -> bool {
+    let v = MEDIA_DELETION.lock().unwrap_or_else(|e| e.into_inner());
+    v.iter().any(|&(s, allowed)| s == id && allowed)
+}
+
 impl Client {
     /// GET /library/sections (D-3: spec-canonical is /library/sections/all; keep the
     /// known-working bare path). Read `.directory[]` for {kind, key}.
@@ -52,18 +81,22 @@ impl Client {
         self.get_json("/library/sections")
     }
 
-    /// GET / — what this server calls itself (`friendlyName`), or `None` when it did not answer
-    /// or answered with no name. The Sources list heads each server's group with it, which is the
-    /// only place in the app a MACHINE is named.
-    ///
-    /// Same endpoint `serverinfo`'s version/Plex-Pass probe uses, deliberately not folded into it:
-    /// that one is a process-global fact about the CURRENT server refreshed on every session path,
-    /// this is a per-server string a roster row needs once. Sharing the state would mean the last
-    /// server discovered renamed the one you are signed in to.
-    pub fn friendly_name(&self) -> Option<String> {
-        self.get_json("/")
-            .map(|mc| mc.friendly_name)
-            .filter(|s| !s.is_empty())
+    /// GET / — the server's name and whether it lets clients delete media (`allowMediaDeletion`).
+    /// `None` when it did not answer. An absent attribute reads as "no", so the Delete row stays
+    /// hidden unless the server said `1`.
+    pub fn root(&self) -> Option<ServerRoot> {
+        self.get_json("/").map(|mc| ServerRoot {
+            name: mc.friendly_name,
+            allow_media_deletion: mc.allow_media_deletion,
+        })
+    }
+
+    /// DELETE /library/metadata/{rk} — delete the item's media from the server: a movie or a show
+    /// with all its versions or episodes. Returns the HTTP status, or `None` when nothing
+    /// answered. **No caller may reach this without the confirm**; there is no write failsafe here
+    /// (only the Watchlist has `permit_write`).
+    pub fn delete_item(&self, rating_key: &str) -> Option<i32> {
+        self.delete_status(&format!("/library/metadata/{rating_key}"))
     }
 
     /// GET /library/all?guid=… — **does THIS server hold this film, and under which key?**

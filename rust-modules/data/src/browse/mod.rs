@@ -770,6 +770,34 @@ impl SecItems {
         }
         (any_covered, changed)
     }
+    /// Drop every loaded row `at` covers and close the gap: each later row moves up one place per
+    /// row dropped, holes included, so the listing reads as the server's would without them. The
+    /// pages before the first one touched stay shared. Returns how many rows went.
+    fn remove_covered(&mut self, at: &crate::viewstate::ViewAt) -> usize {
+        let mut gone = Vec::new();
+        for (p, page) in self.pages.iter().enumerate() {
+            let Some(page) = page else { continue };
+            gone.extend(page.iter().enumerate()
+                .filter(|(_, m)| m.as_ref().is_some_and(|m| at.covers(m)))
+                .map(|(j, _)| p * PAGE + j));
+        }
+        let Some(&first) = gone.first() else { return 0 };
+        let old = self.clone();
+        let (base, new_len) = (first / PAGE * PAGE, self.len - gone.len());
+        self.pages = Arc::new(old.pages[..first / PAGE].to_vec());
+        self.len = base;
+        self.resize(new_len);
+        let mut skipped = 0;
+        for i in base..new_len {
+            while skipped < gone.len() && gone[skipped] <= i + skipped {
+                skipped += 1;
+            }
+            if let Some(m) = old.get(i + skipped) {
+                self.set(i, m.clone());
+            }
+        }
+        gone.len()
+    }
     #[cfg(any(test, feature = "test-support"))]
     fn from_vec(v: Vec<Option<PmsMovie>>) -> Self {
         let mut s = SecItems::default();
@@ -1375,11 +1403,25 @@ impl BrowseState {
         let current = self.cur();
         let facts = matches!(edit,
             crate::viewstate::ViewEdit::Facts { .. } | crate::viewstate::ViewEdit::Offset { .. });
+        let removed = matches!(edit, crate::viewstate::ViewEdit::Removed);
         let mut hit = false;
         for (i, state) in self.states.iter_mut().enumerate() {
+            // A deleted item leaves the listing in view at once, whatever it filters on: the listing
+            // without it is the old one minus those rows, so the rows after them move up and the
+            // reader's place falls to the neighbour. No re-query, so no empty grid in between for
+            // the focus to fall through (it landed on the header when the server was slow).
+            if removed && i == current {
+                let gone = state.items.remove_covered(at);
+                if gone > 0 {
+                    state.total = (state.total - gone as i64).max(0);
+                    hit = true;
+                }
+                continue;
+            }
             let (covered, changed) = state.items.apply_view(at, edit);
             hit |= changed;
-            if covered && facts && state.membership_depends_on_viewing() {
+            // A deleted item changes every listing that held it, whatever the listing filters on.
+            if covered && (removed || facts && state.membership_depends_on_viewing()) {
                 if i == current {
                     hit |= !state.membership_stale;
                     state.membership_stale = true;
@@ -2683,6 +2725,13 @@ impl BrowseState {
                     self.apply_view_local(&at, edit)
                 }
                 crate::viewstate::ViewEdit::LeftDeck => self.hubs_left_the_deck(at.sid, &at.rk),
+                // The listing drops its pages (or re-queries, on the section in view) and the
+                // section shelves lose the card now; the hub refetch follows.
+                crate::viewstate::ViewEdit::Removed => {
+                    let listing = self.apply_view_local(&at, edit);
+                    let shelves = self.hubs_removed(at.sid, &at.rk);
+                    listing || shelves
+                }
             },
         }
     }
@@ -3637,6 +3686,12 @@ impl DiscoveryRequest {
     }
 }
 
+/// Does this discovery job read the server's root? The name is wanted when the source has none;
+/// the deletion flag every Sections job brings, whether or not the roster already named the server.
+fn reads_root(want_name: bool, is_sections: bool) -> bool {
+    want_name || is_sections
+}
+
 pub fn execute_discovery(request: DiscoveryRequest) -> bool {
     let DiscoveryRequest {
         epoch,
@@ -3650,12 +3705,18 @@ pub fn execute_discovery(request: DiscoveryRequest) -> bool {
     let is_sections = matches!(job, SrcJob::Sections);
     spawn_discovery(move || {
         let landing = catch_unwind(|| {
-            // the server naming ITSELF, so a roster that never reached plex.tv still heads its
-            // group with a machine name. One request, once, per source.
-            let name = if want_name {
-                client.friendly_name().unwrap_or_default()
-            } else {
-                String::new()
+            // `GET /`: the server naming ITSELF, so a roster that never reached plex.tv still heads
+            // its group with a machine name, and whether it lets clients delete media, which the
+            // item menu's Delete row reads (`plex::media_deletion_allowed`). The name is wanted once
+            // per source; the deletion flag is read with every Sections job, because a roster from
+            // plex.tv already names its servers and would otherwise never ask.
+            let root = reads_root(want_name, is_sections).then(|| client.root()).flatten();
+            if let Some(root) = &root {
+                plx_plex::plex::note_media_deletion(client.id(), root.allow_media_deletion);
+            }
+            let name = match root {
+                Some(root) if want_name => root.name,
+                _ => String::new(),
             };
             let what = match job {
                 SrcJob::Sections => {

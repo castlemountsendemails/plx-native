@@ -379,3 +379,58 @@ fn facts_that_change_no_row_are_not_a_hit_but_facts_that_differ_are() {
     assert!(!apply_edit(&mut b, &leaf, watched), "the same facts again change nothing: no hit");
     reset(&mut o.state, &o.adapter);
 }
+
+/// A deleted item leaves the deck and every shelf at once, and nothing else does; a deleted show
+/// takes its episodes with it, but the same key on another server is a different item.
+#[test]
+fn a_deleted_item_leaves_the_deck_and_every_shelf() {
+    let _g = plx_base::testlock::serial();
+    let mut o = Owner::default();
+    reset(&mut o.state, &o.adapter);
+    let mut b = SourceBuild {
+        lane: Default::default(),
+        cw: vec![
+            CwItem { last_viewed_at: 9, m: started(0, "7"), position: 0 },
+            CwItem { last_viewed_at: 8, m: started(0, "8"), position: 1 },
+        ],
+        shelves: vec![
+            shelf(0, "Recently Added", "home.movies.recent", &["7", "8"]),
+            shelf(0, "Other", "home.other", &["9"]),
+            shelf(1, "Theirs", "home.theirs", &["7"]),
+        ],
+    };
+
+    assert!(apply_edit(&mut b, &ViewAt::leaf(sid(0), "7"), ViewEdit::Removed));
+
+    assert_eq!(b.cw.iter().map(|c| c.m.rk.as_str()).collect::<Vec<_>>(), ["8"], "off the deck");
+    assert_eq!(b.shelves[0].items.iter().map(|m| m.rk.as_str()).collect::<Vec<_>>(), ["8"], "off the shelf");
+    assert_eq!(b.shelves[1].items.len(), 1, "an unrelated shelf is untouched");
+    assert_eq!(b.shelves[2].items.len(), 1, "the same key on another server is another item");
+    assert!(!apply_edit(&mut b, &ViewAt::leaf(sid(0), "7"), ViewEdit::Removed), "already gone: nothing to do");
+    reset(&mut o.state, &o.adapter);
+}
+
+#[test]
+fn a_deleted_show_takes_its_episodes_with_it() {
+    let _g = plx_base::testlock::serial();
+    let mut o = Owner::default();
+    reset(&mut o.state, &o.adapter);
+    let episode = |rk: &str, show: &str| {
+        let mut m = (*started(0, rk)).clone();
+        m.kind = 3;
+        m.show_rk = show.into();
+        Arc::new(m)
+    };
+    let mut b = SourceBuild {
+        lane: Default::default(),
+        cw: vec![
+            CwItem { last_viewed_at: 9, m: episode("e1", "S"), position: 0 },
+            CwItem { last_viewed_at: 8, m: episode("e2", "T"), position: 1 },
+        ],
+        shelves: Vec::new(),
+    };
+    let show = ViewAt { sid: sid(0), rk: "S".into(), scope: crate::viewstate::Scope::Show };
+    assert!(apply_edit(&mut b, &show, ViewEdit::Removed));
+    assert_eq!(b.cw.iter().map(|c| c.m.rk.as_str()).collect::<Vec<_>>(), ["e2"], "only the deleted show's episode");
+    reset(&mut o.state, &o.adapter);
+}

@@ -60,6 +60,10 @@ pub struct MediaContainer {
     /// reached plex.tv at all.
     #[serde(rename = "friendlyName", default, deserialize_with = "de_str")]
     pub friendly_name: String,
+    /// GET / — whether the server lets clients delete media (`allowMediaDeletion="1"`). Absent
+    /// reads as `false`, so a server that did not say it is treated as refusing.
+    #[serde(rename = "allowMediaDeletion", default, deserialize_with = "de_bool")]
+    pub allow_media_deletion: bool,
     /// POST /playQueues response ids (0 = absent) — the timeline's playQueueID/playQueueItemID.
     #[serde(rename = "playQueueID", default, deserialize_with = "de_i64")]
     pub play_queue_id: i64,

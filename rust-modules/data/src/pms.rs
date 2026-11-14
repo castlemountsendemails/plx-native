@@ -175,9 +175,14 @@ pub struct PmsMovie {
     /// `addedAt`, seconds since the epoch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub added_at: Option<i64>,
+    /// How many `Media` versions the item carries (a movie kept in 1080p and 4K is 2); 0 when the
+    /// listing sent none. The delete confirm names it when there is more than one.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub versions: u32,
 }
 
 fn is_false(b: &bool) -> bool { !*b }
+fn is_zero_u32(n: &u32) -> bool { *n == 0 }
 
 impl PmsMovie {
     /// **The Watchlist title this row stands for**, as `(kind, catalog id, from_episode)`: a movie or
@@ -540,6 +545,7 @@ pub fn parse_item(it: &plx_plex::plex::Metadata, sid: ServerId) -> PmsMovie {
     m.art = clean(&it.art);
     m.summary = clean(&it.summary);
     m.rk = clean(&it.rating_key);
+    m.versions = it.media.len().min(u32::MAX as usize) as u32;
     // Media[0]: codecs + Part[0].key (movies/episodes; a show container has none)
     if let Some(md) = it.media.first() {
         m.vcodec = clean(&md.video_codec);
@@ -862,6 +868,8 @@ fn apply_edit(b: &mut SourceBuild, at: &ViewAt, edit: ViewEdit) -> bool {
     let mine = |m: &PmsMovie| match edit {
         ViewEdit::Watched(_) | ViewEdit::Facts { .. } | ViewEdit::Offset { .. } => at.covers(m),
         ViewEdit::LeftDeck => at.is_item(m.sid, &m.rk),
+        // a deleted show takes its episodes with it
+        ViewEdit::Removed => at.covers(m),
     };
     match edit {
         ViewEdit::Watched(_) | ViewEdit::Facts { .. } | ViewEdit::Offset { .. } => {
@@ -885,6 +893,19 @@ fn apply_edit(b: &mut SourceBuild, at: &ViewAt, edit: ViewEdit) -> bool {
             let before = b.cw.len();
             b.cw.retain(|c| !mine(&*c.m));
             b.lane.remove(|row| mine(&*row.m)) || b.cw.len() != before
+        }
+        // The item is gone: off the deck and off every shelf. The refetch the removal owes
+        // (`ViewStateState::want_hubs`) corrects the shelves' totals.
+        ViewEdit::Removed => {
+            let before = b.cw.len();
+            b.cw.retain(|c| !mine(&*c.m));
+            let mut hit = b.lane.remove(|row| mine(&*row.m)) || b.cw.len() != before;
+            for shelf in b.shelves.iter_mut() {
+                let n = shelf.items.len();
+                shelf.items.retain(|m| !mine(&**m));
+                hit |= shelf.items.len() != n;
+            }
+            hit
         }
     }
 }

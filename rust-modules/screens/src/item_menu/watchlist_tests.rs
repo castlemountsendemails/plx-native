@@ -47,7 +47,7 @@ fn movie(kind: i32) -> PmsMovie {
     m
 }
 fn card(kind: i32, f: Option<&Face>) -> Menu {
-    menu(build_card(&movie(kind), false, DeckPress::Play, None, None, f))
+    menu(build_card(&movie(kind), false, DeckPress::Play, None, None, f, false))
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn remove_is_destructive_and_add_is_not() {
 #[test]
 fn a_watchlist_tile_card_keeps_its_one_remove_row() {
     let f = face(Membership::On, Kind::Movie, false);
-    let m = menu(build_card(&movie(0), false, DeckPress::Play, None, Some("plex://movie/abc"), Some(&f)));
+    let m = menu(build_card(&movie(0), false, DeckPress::Play, None, Some("plex://movie/abc"), Some(&f), false));
     assert_eq!(m.ids().iter().filter(|i| **i == ItemRow::WatchlistRemove).count(), 1);
 }
 

@@ -81,6 +81,22 @@
   "browse.menu.go_season": "Ir para a temporada",
   "browse.menu.go_movie": "Ir para o filme",
   "browse.menu.remove_deck": "Remover de Continuar a ver",
+  "browse.menu.delete": "Eliminar",
+  "browse.menu.delete_question": "Eliminar definitivamente?",
+  "browse.menu.delete_movie": "O filme será eliminado do disco do seu servidor. Esta ação não pode ser anulada.",
+  "browse.menu.delete_versions": {
+    "one": "O filme e todas as suas versões ({count}) serão eliminados do disco do seu servidor. Esta ação não pode ser anulada.",
+    "many": "O filme e todas as suas versões ({count}) serão eliminados do disco do seu servidor. Esta ação não pode ser anulada.",
+    "other": "O filme e todas as suas versões ({count}) serão eliminados do disco do seu servidor. Esta ação não pode ser anulada."
+  },
+  "browse.menu.delete_show": {
+    "one": "A série e todos os seus episódios ({count}) serão eliminados do disco do seu servidor. Esta ação não pode ser anulada.",
+    "many": "A série e todos os seus episódios ({count}) serão eliminados do disco do seu servidor. Esta ação não pode ser anulada.",
+    "other": "A série e todos os seus episódios ({count}) serão eliminados do disco do seu servidor. Esta ação não pode ser anulada."
+  },
+  "browse.menu.delete_show_all": "A série e todos os seus episódios serão eliminados do disco do seu servidor. Esta ação não pode ser anulada.",
+  "browse.menu.deleted_toast": "«{title}» eliminado",
+  "browse.menu.delete_failed": "A Plex não eliminou «{title}». A eliminação pode estar desativada no servidor, ou esta conta pode não ter permissão.",
   "browse.login.deleted": "Dados locais eliminados",
   "browse.login.deleted_detail": "As credenciais, preferências, telemetria e diagnósticos locais foram removidos.",
   "browse.login.partial": "Sessão terminada e a maioria dos dados locais eliminada",

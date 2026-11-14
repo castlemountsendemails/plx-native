@@ -168,6 +168,30 @@ fn a_focus_survives_the_eviction_and_refetch_of_its_neighbours() {
     }
 }
 
+/// A deleted card leaves the listing in one landing, the rows after it moved up. The focus that was
+/// on it falls to the neighbour now at its place (the last card, to the one before it), not to the
+/// header, however many frames follow.
+#[test]
+fn a_focused_card_that_leaves_the_listing_falls_to_its_neighbour() {
+    let _guard = plx_base::testlock::serial();
+    for (index, lands_on) in [(20, 20), (59, 58)] {
+        let mut fixture = Fixture::new();
+        fixture.listing = numbered(0..60);
+        let mut page = fixture.screen();
+        page.initial = false;
+        let mut engine = FocusEngine::new();
+        let elem = deep(&mut page, &fixture, index);
+        seat(&mut page, &mut engine, &fixture, elem);
+        fixture.listing = ListingSnapshot::fixture(plx_plex::plex::ServerId::from_raw(0),
+            (0..60).filter(|&i| i != index).map(|i| Some(movie(i))).collect(), vec![("A".into(), 59)]);
+        deliver(&mut page, &mut engine, &fixture, ScreenEvent::StoreChanged(StoreId::Browse.ord(), 1));
+        reconcile(&mut page, &mut engine, &fixture);
+        frame(&mut page, &mut engine, &fixture, 7000);
+        assert_eq!(page.grid_position(engine.current(OWNER)), Some((lands_on / COLS, lands_on % COLS)),
+            "card {index} deleted: focus is on the card now at {lands_on}, not elsewhere on the page");
+    }
+}
+
 #[test]
 fn a_jump_to_a_letter_in_a_never_loaded_region_seats_the_target_index() {
     let _guard = plx_base::testlock::serial();
