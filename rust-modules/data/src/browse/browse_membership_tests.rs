@@ -183,3 +183,14 @@ fn a_deleted_item_the_listing_never_held_changes_nothing() {
     assert!(!other);
     assert!(!stale(&mut browse));
 }
+
+/// The deletion flag comes from `GET /`, and a roster from plex.tv already names its servers, so
+/// the root must be read for the flag even when no name is wanted: the Sections job reads it, the
+/// Counts job (which neither needs the name nor the flag) does not.
+#[test]
+fn a_sections_job_reads_the_root_even_when_the_roster_named_the_server() {
+    assert!(reads_root(false, true), "named by plex.tv: the flag still needs the root");
+    assert!(reads_root(true, true));
+    assert!(reads_root(true, false), "an unnamed source asks on whichever job comes first");
+    assert!(!reads_root(false, false), "a count job reads no root");
+}

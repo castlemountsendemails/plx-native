@@ -3646,6 +3646,12 @@ impl DiscoveryRequest {
     }
 }
 
+/// Does this discovery job read the server's root? The name is wanted when the source has none;
+/// the deletion flag every Sections job brings, whether or not the roster already named the server.
+fn reads_root(want_name: bool, is_sections: bool) -> bool {
+    want_name || is_sections
+}
+
 pub fn execute_discovery(request: DiscoveryRequest) -> bool {
     let DiscoveryRequest {
         epoch,
@@ -3659,20 +3665,18 @@ pub fn execute_discovery(request: DiscoveryRequest) -> bool {
     let is_sections = matches!(job, SrcJob::Sections);
     spawn_discovery(move || {
         let landing = catch_unwind(|| {
-            // the server naming ITSELF, so a roster that never reached plex.tv still heads its
-            // group with a machine name. One request, once, per source.
-            let name = if want_name {
-                // The same `GET /` also says whether the server lets clients delete media; the
-                // item menu's Delete row reads that (`plex::media_deletion_allowed`).
-                match client.root() {
-                    Some(root) => {
-                        plx_plex::plex::note_media_deletion(client.id(), root.allow_media_deletion);
-                        root.name
-                    }
-                    None => String::new(),
-                }
-            } else {
-                String::new()
+            // `GET /`: the server naming ITSELF, so a roster that never reached plex.tv still heads
+            // its group with a machine name, and whether it lets clients delete media, which the
+            // item menu's Delete row reads (`plex::media_deletion_allowed`). The name is wanted once
+            // per source; the deletion flag is read with every Sections job, because a roster from
+            // plex.tv already names its servers and would otherwise never ask.
+            let root = reads_root(want_name, is_sections).then(|| client.root()).flatten();
+            if let Some(root) = &root {
+                plx_plex::plex::note_media_deletion(client.id(), root.allow_media_deletion);
+            }
+            let name = match root {
+                Some(root) if want_name => root.name,
+                _ => String::new(),
             };
             let what = match job {
                 SrcJob::Sections => {
