@@ -40,10 +40,24 @@ impl LibraryLike for TestHost {
         let key = u32::try_from(cx.views.directory.sections().get(section)?.key).ok()?;
         COLLECTION_ANSWERS.with(|answers| answers.borrow().iter().find(|(seen, _)| *seen == key).map(|(_, answer)| *answer))
     }
+    fn owns_server(_cx: &Cx<'_, Self>, _sid: plx_plex::plex::ServerId) -> bool {
+        OWNS_SERVER.with(std::cell::Cell::get)
+    }
 }
 plx_base::tls! {
     /// What the fixture's collections probe has learned, by section key.
     static COLLECTION_ANSWERS: std::cell::RefCell<Vec<(u32, Result<u32, crate::registry::Forbidden>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Whether the fixture's account owns the server ([`owns_server`]); off unless a test says so.
+    static OWNS_SERVER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// The fixture's account owns its server until the returned guard drops, even on a failed assert.
+fn owns_server() -> impl Drop {
+    struct Owned;
+    impl Drop for Owned {
+        fn drop(&mut self) { OWNS_SERVER.with(|owned| owned.set(false)); }
+    }
+    OWNS_SERVER.with(|owned| owned.set(true));
+    Owned
 }
 /// The fixture's probe for section `key` returns: `Ok(0)` / `Err` hide the control, `Ok(n)` counts.
 fn land_collections(key: u32, answer: Result<u32, crate::registry::Forbidden>) {

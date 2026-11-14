@@ -33,7 +33,8 @@
 //! ready and no read is out is dropped, since the read that follows asks after it; one that arrives
 //! while the first read is out is kept, since that read's matching may already have asked) and is made through the store's own
 //! worker; the tile flips when the answer lands, through the same §1.5 derivation as any
-//! re-match. Home, Library and Search are not touched.
+//! re-match. The same change makes the open library re-read its loaded pages in place when it is
+//! on that server (`BrowseCmd::LibraryChanged`); Home and Search are not touched.
 //!
 //! **Owed work is spent only when [`Stores::reread_allowed`]** (not under the player, not while a
 //! recording or replay is armed). Until then it is queued, not dropped, and coalesced.
@@ -99,6 +100,8 @@ pub struct Spent {
     pub refetched: Vec<ServerId>,
     /// Servers whose section shelves were invalidated (`BrowseCmd::HubsInvalidateServer`).
     pub invalidated: Vec<ServerId>,
+    /// Servers whose title changes were handed to the open library (`BrowseCmd::LibraryChanged`).
+    pub library_changed: Vec<ServerId>,
 }
 
 /// Read-backs and refetches a notification owes, not yet spent.
@@ -108,6 +111,8 @@ struct Owed {
     reads: Vec<(Key, bool)>,
     refetch: Vec<ServerId>,
     invalidate: Vec<ServerId>,
+    /// Servers that created or deleted a title: the open library re-reads if it is on one.
+    library_changed: Vec<ServerId>,
 }
 
 fn push_unique(servers: &mut Vec<ServerId>, sid: ServerId) {
@@ -119,6 +124,7 @@ fn push_unique(servers: &mut Vec<ServerId>, sid: ServerId) {
 impl Owed {
     fn is_empty(&self) -> bool {
         self.reads.is_empty() && self.refetch.is_empty() && self.invalidate.is_empty()
+            && self.library_changed.is_empty()
     }
     fn read(&mut self, key: Key, owing: bool) {
         match self.reads.iter_mut().find(|(k, _)| plx_plex::plex::same_item((k.0, &k.1), (key.0, &key.1))) {
@@ -228,10 +234,12 @@ impl NotifyMap {
     }
 }
 
-fn watch_kind(kind: LibraryKind) -> WatchKind {
+/// The Watchlist kind an entry is matched as; an episode is never on a Watchlist.
+fn watch_kind(kind: LibraryKind) -> Option<WatchKind> {
     match kind {
-        LibraryKind::Movie => WatchKind::Movie,
-        LibraryKind::Show => WatchKind::Show,
+        LibraryKind::Movie => Some(WatchKind::Movie),
+        LibraryKind::Show => Some(WatchKind::Show),
+        LibraryKind::Episode => None,
     }
 }
 
@@ -374,6 +382,7 @@ impl Stores {
     /// an item names a title in somebody's library.
     fn owe_library(&mut self, library: &NotifyLibrary) {
         let sid = library.sid;
+        push_unique(&mut self.notify_map.owed.library_changed, sid);
         let ready = self.watchlist.is_ready();
         // Before the first load the read to come matches the library as it is then, which already
         // holds this change: owing a re-match for it would only ask the whole list again right after
@@ -385,7 +394,7 @@ impl Stores {
             .then(|| self.watchlist.held_by_rk(sid));
         let (mut created, mut deleted) = (0, 0);
         for e in &library.entries {
-            let kind = watch_kind(e.kind);
+            let Some(kind) = watch_kind(e.kind) else { continue };
             match e.state {
                 LibraryState::Created if !follow => created += 1,
                 LibraryState::Deleted if !follow => deleted += 1,
@@ -477,6 +486,10 @@ impl Stores {
         for sid in owed.invalidate {
             let _ = self.browse.borrow_mut().run(browse::BrowseCmd::HubsInvalidateServer { sid });
             spent.invalidated.push(sid);
+        }
+        for sid in owed.library_changed {
+            let _ = self.browse.borrow_mut().run(browse::BrowseCmd::LibraryChanged { sid });
+            spent.library_changed.push(sid);
         }
         spent
     }

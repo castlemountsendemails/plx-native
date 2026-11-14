@@ -605,6 +605,10 @@ struct SecState {
     /// [`BrowseState::apply_view_local`]): what it lists is out of date though every row on screen
     /// is right. Cleared by any re-query.
     membership_stale: bool,
+    /// Pages whose rows the server may have changed since they landed (it reported a title
+    /// created or deleted): fetched again like missing pages, landing over the rows they replace,
+    /// so the grid never empties for it ([`BrowseState::library_changed`]).
+    stale_pages: Vec<usize>,
 }
 
 /// What the Collections page borrows the section's single query from: the grid's sort, genre and
@@ -734,6 +738,10 @@ impl SecItems {
             }
         }
     }
+    /// The pages holding rows.
+    fn loaded_pages(&self) -> impl Iterator<Item = usize> + '_ {
+        self.pages.iter().enumerate().filter(|(_, page)| page.is_some()).map(|(p, _)| p)
+    }
     /// Does page `p` (items `p*PAGE ..`) have a slot not yet filled?
     fn page_missing(&self, p: usize) -> bool {
         match self.pages.get(p) {
@@ -833,6 +841,7 @@ impl Default for SecState {
             items: SecItems::default(),
             cursor: None,
             membership_stale: false,
+            stale_pages: Vec::new(),
         }
     }
 }
@@ -852,6 +861,11 @@ impl SecState {
         self.items.clear();
         self.cursor = None;
         self.membership_stale = false;
+        self.stale_pages.clear();
+    }
+    /// Must page `p` be fetched: it has an empty slot, or the server changed since it landed.
+    fn page_owed(&self, p: usize) -> bool {
+        self.items.page_missing(p) || self.stale_pages.contains(&p)
     }
     fn query_filters(&self, section_kind: SecKind) -> Vec<(String, String)> {
         let mut filters = Vec::new();
@@ -1098,7 +1112,7 @@ impl BrowseState {
         let (lo, hi) = self.want;
         let first = lo / PAGE;
         let last = hi.saturating_sub(1) / PAGE;
-        (first..=last).any(|page| state.items.page_missing(page))
+        (first..=last).any(|page| state.page_owed(page))
     }
 
     fn sources(&self) -> &[BrowseSource] {
@@ -1447,6 +1461,22 @@ impl BrowseState {
             state.cursor = cursor;
         }
         self.requery_gen = Some(self.gen);
+        true
+    }
+    /// Server `sid` reported a title created or deleted: re-read the open library's loaded pages
+    /// if it is on that server, without clearing them. The rows stay on screen until their page
+    /// lands again, so focus and scroll do not move; a page still out is dropped, since it may have
+    /// been read before the change. True when the open library owes a re-read.
+    // ponytail: every loaded page is re-read, including far ones outside the window, which wait
+    // until they scroll into it. A scan that keeps reporting restarts the page in flight each
+    // time; the next quiet moment lets it land. Upgrade path: space the re-reads per section.
+    fn library_changed(&mut self, sid: ServerId) -> bool {
+        let current = self.cur();
+        if self.section_sid(current) != Some(sid) { return false; }
+        let Some(state) = self.states.get_mut(current) else { return false };
+        if state.total < 0 { return false; }
+        state.stale_pages = state.items.loaded_pages().collect();
+        self.refetch_gen();
         true
     }
     /// Is a membership re-query's first page still owed, so that the store must be pumped even
@@ -2714,6 +2744,7 @@ impl BrowseState {
                 self.hubs_invalidate_server(sid, adapter);
                 true
             }
+            BrowseCmd::LibraryChanged { sid } => self.library_changed(sid),
             BrowseCmd::ApplyView { at, edit } => match edit {
                 crate::viewstate::ViewEdit::Watched(on) => {
                     let listing = self.apply_view_local(&at, edit);
@@ -2862,7 +2893,7 @@ impl BrowseState {
             let mut page = (lo / PAGE) * PAGE;
             let mut found = None;
             while page < hi {
-                if state.items.page_missing(page / PAGE) {
+                if state.page_owed(page / PAGE) {
                     found = Some(page);
                     break;
                 }
@@ -3044,6 +3075,7 @@ impl BrowseState {
                                 let mut items = result.items;
                                 ledger.patch(stamp, items.iter_mut());
                                 state.items.land(result.start, items, &keep);
+                                state.stale_pages.retain(|&p| p != result.start / PAGE);
                                 changed = true;
                             }
                         }

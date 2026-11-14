@@ -292,7 +292,7 @@ pub struct NotifyOut {
     pub resynced: Vec<(ServerId, u32)>,
 }
 
-/// A server's finished movie and show creates and deletes (never empty).
+/// A server's finished movie, show and episode creates and deletes (never empty).
 #[derive(Debug, PartialEq)]
 pub struct NotifyLibrary {
     pub sid: ServerId,
