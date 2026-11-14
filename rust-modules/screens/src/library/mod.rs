@@ -935,7 +935,7 @@ impl LibraryScreen {
             SORTFILTER => { self.open_menu(crate::registry::LibraryMenuKind::SortFilter, elem, cx, fx); return Handled::Yes; }
             SCAN => {
                 if let Some(target) = self.address(cx).filter(|_| self.scan_shown) {
-                    if self.scan.press(target) { fx.push(Fx::App(AppFx::Library(LibraryReq::Scan(target)))); }
+                    if self.scan.press(target, cx.tick.ms) { fx.push(Fx::App(AppFx::Library(LibraryReq::Scan(target)))); }
                 }
                 return Handled::Yes;
             }
@@ -1062,7 +1062,7 @@ impl LibraryScreen {
                 return Handled::Yes;
             }
             LibraryCmd::ScanAnswered { target, accepted } => {
-                self.scan.answered(target, accepted);
+                self.scan.answered(target, accepted, cx.tick.ms);
                 self.refresh_header(cx);
                 fx.invalidate(Provenance::Landing(fx.from()));
                 return Handled::Yes;
@@ -1322,7 +1322,7 @@ impl LibraryScreen {
                     fx.invalidate(Provenance::Landing(fx.from()));
                 }
                 self.plaintext_alert.update(tick.dt());
-                self.scan.advance(tick.dt());
+                self.scan.advance(tick.ms);
                 if self.grid_reset_pending {
                     if let Some(elem) = self.pair.detail.elem_for(cx, &mut self.keys, 0, self.layout.cols()) {
                         fx.remember(self.pair.groups_config().detail, elem);

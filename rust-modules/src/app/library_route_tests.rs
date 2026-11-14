@@ -517,7 +517,7 @@ fn a_filter_shows_n_of_m_beside_the_control_and_clears_when_reset() {
             // yet, so the row says nothing (the grid is mid-fade, the count would be a guess).
             press(Key::Back, "", "library", "header:sort*"),
             // The server answered: 37 of the library's 120.
-            after(films_answered::<37>, press(Key::Right, "", "library", "header:sort [37 of 120 films]")),
+            after(films_answered::<37>, press(Key::Right, "", "library", "header:scan [37 of 120 films]")),
             // Reset it, from the same control.
             press(Key::Ok, "library:Menu { kind: SortFilter", "library", "menu:unwatched"),
             press(Key::Ok, "", "library", "menu:unwatched"),
@@ -541,7 +541,7 @@ fn a_filter_shows_n_of_m_beside_the_control_and_clears_when_reset() {
                     press(Key::Ok, "", "library", "menu:genre:all"),
                     press(Key::Down, "", "library", "menu:genre:g1"),
                     press(Key::Ok, "", "library", "header:sort*"),
-                    after(films_answered::<37>, press(Key::Right, "", "library", "header:sort [37 of 120 films]")),
+                    after(films_answered::<37>, press(Key::Right, "", "library", "header:scan [37 of 120 films]")),
                 ]);
                 steps
             },

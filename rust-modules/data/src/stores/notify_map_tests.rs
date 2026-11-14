@@ -691,7 +691,8 @@ fn a_library_change_leaves_home_and_the_reads_alone() {
     let _g = plx_base::testlock::serial();
     let (mut stores, _script, sid) = watchlist_of_three();
     let spent = map(&mut stores, &library(sid, vec![created("20"), deleted("11")]), &[]);
-    assert_eq!(spent, Default::default(), "no Home refetch, no shelf invalidation");
+    assert!(spent.refetched.is_empty() && spent.invalidated.is_empty(), "no Home refetch, no shelf invalidation: {spent:?}");
+    assert_eq!(spent.library_changed, [sid], "only the open library is told");
     assert!(pending(&stores).is_empty());
 }
 
