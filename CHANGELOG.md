@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.41] - 2026-11-15
+
+### Added
+- Nav rail: holding Up for half a second jumps focus to Home from any stop below it, with More open or closed. A tap of Up still steps one stop, and a held Up no longer walks the list. It does nothing on Home or Profile, and a held Down walks the rail as before. Not yet tried on any device. Shared code: the LG app gets the same.
+
 ## [0.2.40] - 2026-11-14
 
 ### Changed
