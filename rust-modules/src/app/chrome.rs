@@ -121,6 +121,14 @@ fn first_letter(word: &str) -> CString {
 fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open: bool, order: &[usize]) -> Vec<RailItem> {
     let fixed = |key, icon, word: &str, role| RailItem { key, mark: RailMark::Icon(icon), label: caps(word), caps: true, role, dim: false };
     let mut items = vec![
+        RailItem {
+            key: widgets::TAB_KEY_CHIP,
+            mark: RailMark::Avatar(CString::new(initial).unwrap_or_default()),
+            label: CString::new(name).unwrap_or_default(),
+            caps: false,
+            role: RailRole::Top,
+            dim: false,
+        },
         fixed(widgets::TAB_KEY_HOME, Icon::Home, plx_platform::i18n::msg::browse_chrome_home(), RailRole::Top),
         fixed(widgets::TAB_KEY_SEARCH, Icon::Search, plx_platform::i18n::msg::browse_chrome_search(), RailRole::Top),
         fixed(widgets::TAB_KEY_WATCHLIST, Icon::Bookmark, plx_platform::i18n::msg::watchlist_page_title(), RailRole::Top),
@@ -168,14 +176,6 @@ fn rail_items(directory: DirectoryView<'_>, name: &str, initial: &str, more_open
             }));
         }
     }
-    items.push(RailItem {
-        key: widgets::TAB_KEY_CHIP,
-        mark: RailMark::Avatar(CString::new(initial).unwrap_or_default()),
-        label: CString::new(name).unwrap_or_default(),
-        caps: false,
-        role: RailRole::Foot,
-        dim: false,
-    });
     items
 }
 
@@ -446,7 +446,7 @@ mod tests {
         });
         snapshot.refresh(directory.view());
         assert_eq!(snapshot.name, "Synthetic owner");
-        assert_eq!(snapshot.items().last().map(|item| item.label.to_str().unwrap()), Some("Synthetic owner"));
+        assert_eq!(snapshot.items().first().map(|item| item.label.to_str().unwrap()), Some("Synthetic owner"));
     }
 
     fn keys(directory: &DirectorySnapshot, more_open: bool) -> Vec<u32> {
@@ -454,12 +454,23 @@ mod tests {
     }
 
     #[test]
-    fn rail_order_is_home_search_watchlist_favorites_more_then_profile() {
+    fn rail_order_is_profile_home_search_watchlist_favorites_then_more() {
         let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Anime", false),
             (SecKind::Show, "Series", true)]);
-        assert_eq!(keys(&directory, false), vec![widgets::TAB_KEY_HOME, widgets::TAB_KEY_SEARCH,
+        assert_eq!(keys(&directory, false), vec![widgets::TAB_KEY_CHIP, widgets::TAB_KEY_HOME, widgets::TAB_KEY_SEARCH,
             widgets::TAB_KEY_WATCHLIST, widgets::tab_key_library(0), widgets::tab_key_library(2),
-            widgets::TAB_KEY_MORE, widgets::TAB_KEY_CHIP]);
+            widgets::TAB_KEY_MORE]);
+        let items = rail_items(directory.view(), "Sam", "S", false, directory.view().favorite_order());
+        assert!(items[..4].iter().all(|item| item.role == RailRole::Top), "Profile joins the fixed top block");
+        assert!(items[4..].iter().all(|item| item.role != RailRole::Top), "and nothing below Watchlist is fixed");
+    }
+
+    #[test]
+    fn home_sits_below_profile() {
+        let directory = directory(&[(SecKind::Movie, "Films", true)]);
+        let keys = keys(&directory, false);
+        assert_eq!(pill_index(Pill::Home, &keys), Some(1));
+        assert_eq!(pill_in(1, &keys), Pill::Home);
     }
 
     #[test]
@@ -469,7 +480,7 @@ mod tests {
             row: SrcRow { section: i, title: title.to_owned(), pinned: true, ..Default::default() } };
         let mut directory = DirectorySnapshot::fixture(7, 0, vec![section(0, "A"), section(1, "B")]);
         directory.set_favorite_order_for_test(vec![1, 0]);
-        assert_eq!(keys(&directory, false)[3..5], [widgets::tab_key_library(1), widgets::tab_key_library(0)]);
+        assert_eq!(keys(&directory, false)[4..6], [widgets::tab_key_library(1), widgets::tab_key_library(0)]);
     }
 
     #[test]
@@ -477,7 +488,7 @@ mod tests {
         let directory = directory(&[(SecKind::Movie, "Films", true), (SecKind::Show, "Anime", false)]);
         let keys = keys(&directory, true);
         let more = keys.iter().position(|&k| k == widgets::TAB_KEY_MORE).unwrap();
-        assert_eq!(keys[more + 1..keys.len() - 1], [widgets::tab_key_more_row(0), widgets::tab_key_star(0),
+        assert_eq!(keys[more + 1..], [widgets::tab_key_more_row(0), widgets::tab_key_star(0),
             widgets::tab_key_more_row(1), widgets::tab_key_star(1)], "rows of favorites and the rest alike");
         let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
         assert!(items.iter().any(|item| item.role == RailRole::Header), "a server header leads its rows");
@@ -500,7 +511,7 @@ mod tests {
             let server = plx_data::browse::SrcGroup { name: "Den".into(), state, ..Default::default() };
             let directory = DirectorySnapshot::fixture_with_sources(7, 0, vec![(sid, server)], vec![section("Films")]);
             let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
-            assert!(items[3].dim, "a favorite on a {state:?} source draws dimmed");
+            assert!(items[4].dim, "a favorite on a {state:?} source draws dimmed");
             let header = items.iter().find(|item| item.role == RailRole::Header).expect("a server header");
             assert!(header.dim, "a {state:?} server's More header draws dimmed");
             assert!(header.label.to_str().unwrap().contains(&suffix.to_uppercase()), "{:?} should name '{suffix}'", header.label);
@@ -512,7 +523,7 @@ mod tests {
             let server = plx_data::browse::SrcGroup { name: "Den".into(), state, ..Default::default() };
             let directory = DirectorySnapshot::fixture_with_sources(7, 0, vec![(sid, server)], vec![section("Films")]);
             let items = rail_items(directory.view(), "", "", true, directory.view().favorite_order());
-            assert!(!items[3].dim, "a {state:?} source's favorite must not dim");
+            assert!(!items[4].dim, "a {state:?} source's favorite must not dim");
             let header = items.iter().find(|item| item.role == RailRole::Header).unwrap();
             assert!(!header.dim);
             assert_eq!(header.label.to_str().unwrap(), "DEN");
@@ -529,15 +540,15 @@ mod tests {
             UnseenFavorite { slot: 3, name: "Anime".into(), dim: true },
         ]);
         let items = rail_items(directory.view(), "", "", false, directory.view().favorite_order());
-        let band: Vec<_> = items[3..7].iter().map(|item| (item.key, item.label.to_str().unwrap(), item.dim)).collect();
+        let band: Vec<_> = items[4..8].iter().map(|item| (item.key, item.label.to_str().unwrap(), item.dim)).collect();
         assert_eq!(band, [
             (widgets::tab_key_library(0), "A", false),
             (widgets::tab_key_unseen(1), "KIDS", false),
             (widgets::tab_key_library(1), "B", false),
             (widgets::tab_key_unseen(3), "ANIME", true),
         ]);
-        assert!(matches!(&items[4].mark, RailMark::Badge(letter) if letter.to_str().unwrap() == "K"));
-        assert_eq!(items[7].key, widgets::TAB_KEY_MORE);
+        assert!(matches!(&items[5].mark, RailMark::Badge(letter) if letter.to_str().unwrap() == "K"));
+        assert_eq!(items[8].key, widgets::TAB_KEY_MORE);
         assert!(HomeTab::of_rail_key(widgets::tab_key_unseen(1)).is_none(), "OK on it goes nowhere");
         assert_eq!(widgets::library_of_tab_key(widgets::tab_key_unseen(1)), None, "so it cannot be held");
 
@@ -546,7 +557,7 @@ mod tests {
         chrome.enter_rail_move(directory.view());
         chrome.step_rail_move(-1); // B above A
         let order = chrome.drop_rail_move().expect("was moving");
-        let keys: Vec<_> = rail_items(directory.view(), "", "", false, &order)[3..7].iter().map(|item| item.key).collect();
+        let keys: Vec<_> = rail_items(directory.view(), "", "", false, &order)[4..8].iter().map(|item| item.key).collect();
         assert_eq!(keys, [widgets::tab_key_library(1), widgets::tab_key_unseen(1),
             widgets::tab_key_library(0), widgets::tab_key_unseen(3)], "B stepped past the placeholder");
     }
@@ -575,8 +586,8 @@ mod tests {
         let directory = directory(&[(SecKind::Movie, "Movies", true), (SecKind::Movie, "Movies", true)]);
         let items = rail_items(directory.view(), "Sam", "S", false, directory.view().favorite_order());
         assert_eq!(items.len(), 7);
-        assert!(items[3].label.to_str().unwrap().starts_with("MOVIES"));
-        assert!(matches!(items[6].mark, RailMark::Avatar(_)), "the profile is the last item");
+        assert!(items[4].label.to_str().unwrap().starts_with("MOVIES"));
+        assert!(matches!(items[0].mark, RailMark::Avatar(_)), "the profile is the first item");
     }
 
     /// §3.5: a hold that crosses `press::LONG_MS` while OK is still down enters move mode live,

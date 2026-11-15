@@ -1,12 +1,11 @@
-//! The nav rail: the column of destinations down the left edge of every main screen (Home,
-//! Search, Watchlist, the favorite libraries, More and its list of every library, then Profile at
-//! the foot). Collapsed, it shows marks only, inside the left margin; while focus is in it, it
+//! The nav rail: the column of destinations down the left edge of every main screen (Profile,
+//! Home, Search, Watchlist, then the favorite libraries, More and its list of every library). Collapsed, it shows marks only, inside the left margin; while focus is in it, it
 //! widens to show labels and the page slides right by the difference (`Rig::content_dx`) rather
 //! than being covered. The application owns one [`RailRender`], publishes the items and draws it
 //! in the chrome pass.
 //!
-//! The top items stay fixed and the profile sits at the foot; everything between (the favorites,
-//! More and More's list) is a band that scrolls to keep the focused item, or else the active one,
+//! The top items stay fixed; everything below them (the favorites, More and More's list) is a
+//! band that scrolls to keep the focused item, or else the active one,
 //! in view, fading out where its items are cut off.
 
 use std::ffi::CString;
@@ -55,7 +54,7 @@ pub enum RailMark {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RailRole {
-    /// Fixed at the top: Home, Search, Watchlist.
+    /// Fixed at the top: Profile, Home, Search, Watchlist.
     Top,
     /// In the scrolling band: a favorite, or More.
     Band,
@@ -63,8 +62,6 @@ pub enum RailRole {
     Header,
     /// A library in More's list, with its ★ target `star`, lit when it is a favorite.
     Row { star: u32, starred: bool },
-    /// The profile, fixed at the foot.
-    Foot,
 }
 
 pub struct RailItem {
@@ -93,7 +90,7 @@ fn panel_width(e: f32) -> f32 {
 }
 
 fn in_band(item: &RailItem) -> bool {
-    !matches!(item.role, RailRole::Top | RailRole::Foot)
+    item.role != RailRole::Top
 }
 
 fn pitch(item: &RailItem) -> f32 {
@@ -111,7 +108,7 @@ fn top_count(items: &[RailItem]) -> usize {
 /// The scrolling band's visible extent, in screen y.
 fn band(items: &[RailItem]) -> Rect {
     let y = MARGIN_Y + top_count(items) as f32 * PITCH + BAND_GAP;
-    let bottom = SCR_H - MARGIN_Y - ITEM_H - BAND_GAP;
+    let bottom = SCR_H - MARGIN_Y;
     Rect::new(0.0, y, EXPANDED_W, (bottom - y).max(0.0))
 }
 
@@ -129,7 +126,6 @@ fn max_scroll(items: &[RailItem]) -> f32 {
 fn item_y(items: &[RailItem], i: usize, scroll: f32) -> f32 {
     match items[i].role {
         RailRole::Top => MARGIN_Y + i as f32 * PITCH,
-        RailRole::Foot => SCR_H - MARGIN_Y - ITEM_H,
         _ => band(items).y + band_offset(items, i) - scroll,
     }
 }
@@ -375,10 +371,11 @@ mod tests {
         RailItem { key, mark, label: CString::default(), caps: true, role, dim: false }
     }
 
-    /// Home, Search, Watchlist, `libraries` favorites, More, then `rows` More rows under one
-    /// server header, then Profile.
+    /// Profile, Home, Search, Watchlist, `libraries` favorites, More, then `rows` More rows under
+    /// one server header.
     fn rail_with_more(libraries: usize, rows: usize) -> Vec<RailItem> {
-        let mut items = vec![item(0, RailMark::Icon(Icon::Home), RailRole::Top),
+        let mut items = vec![item(99, RailMark::Avatar(CString::default()), RailRole::Top),
+            item(0, RailMark::Icon(Icon::Home), RailRole::Top),
             item(1, RailMark::Icon(Icon::Search), RailRole::Top),
             item(2, RailMark::Icon(Icon::Bookmark), RailRole::Top)];
         items.extend((0..libraries).map(|i| item(10 + i as u32, RailMark::Badge(CString::default()), RailRole::Band)));
@@ -388,7 +385,6 @@ mod tests {
             items.extend((0..rows).map(|i| item(200 + i as u32, RailMark::Badge(CString::default()),
                 RailRole::Row { star: 400 + i as u32, starred: i % 2 == 0 })));
         }
-        items.push(item(99, RailMark::Avatar(CString::default()), RailRole::Foot));
         items
     }
 
@@ -412,7 +408,7 @@ mod tests {
         let render = RailRender::new();
         for i in 1..items.len() {
             let gap = item_y(&items, i, render.scroll.pos) - item_y(&items, i - 1, render.scroll.pos);
-            assert!(i == items.len() - 1 || gap >= PITCH - 0.01, "item {i} overlaps the one above (gap {gap})");
+            assert!(gap >= PITCH - 0.01, "item {i} overlaps the one above (gap {gap})");
         }
     }
 
@@ -432,8 +428,19 @@ mod tests {
         let mut render = RailRender::new();
         settle(&mut render, &items, Some(59));
         assert!(render.scroll.pos > 0.0, "the band scrolled");
-        assert_eq!(render.item_rect(&items, 0).y, MARGIN_Y, "Home stays at the top");
-        assert_eq!(render.item_rect(&items, items.len() - 1).y, SCR_H - MARGIN_Y - ITEM_H, "Profile stays at the foot");
+        assert_eq!(render.item_rect(&items, 0).y, MARGIN_Y, "Profile stays at the top");
+        assert_eq!(render.item_rect(&items, 1).y, MARGIN_Y + PITCH, "Home stays under it");
+    }
+
+    #[test]
+    fn the_band_runs_to_the_bottom_margin_with_nothing_fixed_below_it() {
+        let items = rail_with_more(50, 40);
+        let b = band(&items);
+        assert_eq!(b.y + b.h, SCR_H - MARGIN_Y);
+        assert!(items.iter().skip_while(|item| item.role == RailRole::Top).all(in_band));
+        let mut render = RailRender::new();
+        settle(&mut render, &items, Some(239));
+        assert!(inside_band(&render, &items, 239), "the last row scrolls into view");
     }
 
     #[test]
@@ -450,7 +457,7 @@ mod tests {
         let mut render = RailRender::new();
         settle(&mut render, &items, Some(259));
         assert!(inside_band(&render, &items, 259));
-        assert!(render.item_rect(&items, 3).y < band(&items).y, "More scrolled off the band's top");
+        assert!(render.item_rect(&items, 4).y < band(&items).y, "More scrolled off the band's top");
     }
 
     #[test]

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.40] - 2026-11-14
+
+### Changed
+- Nav rail: Profile (your avatar, which opens the account menu) is now the first item, above Home, instead of at the bottom. Up from Home reaches it; Up from Profile stays put. The account menu opens at the top beside it and hangs down. Favorites and More's list now scroll all the way to the bottom of the screen. Not yet tried on any device. Shared code: the LG app gets the same.
+
 ## [0.2.39] - 2026-11-14
 
 ### Added
