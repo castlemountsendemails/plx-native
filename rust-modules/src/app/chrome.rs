@@ -196,6 +196,8 @@ pub(crate) struct ChromeSnapshot {
     opened_for: Option<usize>,
     /// The rail's hold-to-reorder gesture (§3.5): see [`RailHold`].
     hold: RailHold,
+    /// When Up went down on a rail stop below Home; a hold of `press::LONG_MS` jumps to Home.
+    up_down_at: Option<u32>,
 }
 
 impl ChromeSnapshot {
@@ -317,6 +319,23 @@ impl ChromeSnapshot {
             RailHold::Moving(state) => Some(widgets::tab_key_library(state.section)),
             _ => None,
         }
+    }
+
+    /// Up went down with focus on rail key `focused`. Home and Profile have nowhere to jump to.
+    pub(crate) fn arm_up_jump(&mut self, focused: u32, now: u32) {
+        let at_top = matches!(focused, widgets::TAB_KEY_HOME | widgets::TAB_KEY_CHIP);
+        self.up_down_at = (!at_top && !self.rail_moving()).then_some(now);
+    }
+
+    pub(crate) fn disarm_up_jump(&mut self) {
+        self.up_down_at = None;
+    }
+
+    /// True once, when the armed Up has been held for `press::LONG_MS`.
+    pub(crate) fn take_up_jump(&mut self, now: u32) -> bool {
+        let due = self.up_down_at.is_some_and(|at| now.wrapping_sub(at) >= plx_ui::press::LONG_MS);
+        if due { self.up_down_at = None; }
+        due
     }
 
     /// The rail index of `pill`'s item, as published now.
@@ -617,6 +636,34 @@ mod tests {
         chrome.step_rail_move(1);
         chrome.step_rail_move(1); // already last: clamped, a no-op
         assert_eq!(chrome.drop_rail_move().unwrap(), vec![1, 2, 0], "clamped at the last favorite");
+    }
+
+    #[test]
+    fn a_held_up_is_due_once_after_long_ms_and_never_on_home_or_profile() {
+        let mut chrome = ChromeSnapshot::default();
+        chrome.arm_up_jump(widgets::tab_key_library(2), 1_000);
+        assert!(!chrome.take_up_jump(1_000 + plx_ui::press::LONG_MS - 1), "a tap is not a hold");
+        assert!(chrome.take_up_jump(1_000 + plx_ui::press::LONG_MS));
+        assert!(!chrome.take_up_jump(1_000 + 2 * plx_ui::press::LONG_MS), "fires once per press");
+
+        for key in [widgets::TAB_KEY_HOME, widgets::TAB_KEY_CHIP] {
+            chrome.arm_up_jump(key, 1_000);
+            assert!(!chrome.take_up_jump(10_000), "no jump from the top two stops");
+        }
+
+        chrome.arm_up_jump(widgets::TAB_KEY_MORE, 1_000);
+        chrome.disarm_up_jump(); // key released
+        assert!(!chrome.take_up_jump(10_000));
+    }
+
+    #[test]
+    fn a_held_up_does_not_arm_while_a_favorite_is_moving() {
+        let directory = directory(&[(SecKind::Movie, "A", true), (SecKind::Movie, "B", true)]);
+        let mut chrome = ChromeSnapshot::default();
+        chrome.arm_rail_hold(1, 0);
+        chrome.enter_rail_move(directory.view());
+        chrome.arm_up_jump(widgets::tab_key_library(1), 0);
+        assert!(!chrome.take_up_jump(10_000));
     }
 
     /// Back cancels the hold and restores the order from before it: the working copy is simply

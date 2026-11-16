@@ -2193,6 +2193,7 @@ pub(crate) fn frame_with_tap(
     }
     let inputs = rail_back(d, rig, inputs);
     let inputs = rail_reorder(d, rig, tick, inputs);
+    let inputs = rail_up_jump(d, rig, tick, inputs);
     frame_ingest(d, rig, tick, inputs, Bridge::take_live_results, tap)
 }
 
@@ -3438,6 +3439,34 @@ fn rail_reorder(d: &mut Dispatcher<AppHost>, rig: &mut Bridge, tick: Tick, mut i
         }
         true
     });
+    inputs
+}
+
+/// Holding Up on the rail for `press::LONG_MS` moves focus to Home. A tap still steps one stop, and
+/// Up repeats are swallowed so a hold never walks the list. Runs after `rail_reorder`, so a favorite
+/// being moved keeps its own Up handling.
+fn rail_up_jump(d: &mut Dispatcher<AppHost>, rig: &mut Bridge, tick: Tick, mut inputs: Vec<InputEvent<u32>>) -> Vec<InputEvent<u32>> {
+    let focused = if d.top_arg().is_some_and(wears_tab_bar) && !rig.chrome.rail_moving() {
+        rig.chrome.focused_key(Bridge::home_focus(d))
+    } else {
+        None
+    };
+    let Some(focused) = focused else {
+        rig.chrome.disarm_up_jump();
+        return inputs;
+    };
+    inputs.retain(|event| {
+        let InputKind::Key { key: Key::Up, edge, .. } = event.kind else { return true };
+        match edge {
+            Edge::Down => rig.chrome.arm_up_jump(focused, tick.ms),
+            Edge::Up => rig.chrome.disarm_up_jump(),
+            Edge::Repeat => return false,
+        }
+        true
+    });
+    if rig.chrome.take_up_jump(tick.ms) && focused != plx_ui::widgets::TAB_KEY_HOME {
+        reseat_top(d, plx_ui::widgets::TAB_KEY_HOME);
+    }
     inputs
 }
 
